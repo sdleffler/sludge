@@ -197,8 +197,7 @@ impl Hierarchy {
                 self.entities.insert(self.sorted[i].id(), i);
             }
             for entity in &self.scratch_set {
-                // TODO
-                // self.changed.single_write(HierarchyEvent::Removed(*entity));
+                self.changed.single_write(HierarchyEvent::Removed(*entity));
                 self.roots.remove(entity);
             }
         }
@@ -323,7 +322,8 @@ impl Hierarchy {
                         .unwrap_or(false);
                 if notify {
                     self.scratch_set.insert(entity);
-                    //self.changed.single_write(HierarchyEvent::Modified(entity));
+                    self.changed
+                        .single_write(HierarchyEvent::ModifiedOrCreated(entity));
                 }
             }
         }
@@ -410,8 +410,7 @@ impl<'a> Iterator for SubHierarchyIterator<'a> {
                     .contains(self.hierarchy.sorted[self.current_index].id())
                 {
                     found_next = true;
-                    let current_index = self.current_index; // compiler fails to realise a usize is Copy, so we break it out
-                    self.process_entity(self.hierarchy.sorted[current_index]);
+                    self.process_entity(self.hierarchy.sorted[self.current_index]);
                 }
             }
             Some(entity)
