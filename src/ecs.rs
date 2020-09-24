@@ -7,22 +7,23 @@ use {
 };
 
 pub mod hierarchy;
+pub mod transform_graph;
 
 pub use hecs::Entity;
 
 #[derive(Debug, Clone, Copy)]
-pub enum Event {
-    Created(Entity),
+pub enum ComponentEvent {
+    Inserted(Entity),
     Modified(Entity),
-    Destroyed(Entity),
+    Removed(Entity),
 }
 
 pub trait EventSender: Send + Sync + 'static {
-    fn send_event(&self, event: Event) -> bool;
+    fn send_event(&self, event: ComponentEvent) -> bool;
 }
 
-impl EventSender for Sender<Event> {
-    fn send_event(&self, event: Event) -> bool {
+impl EventSender for Sender<ComponentEvent> {
+    fn send_event(&self, event: ComponentEvent) -> bool {
         self.try_send(event).is_ok()
     }
 }
@@ -105,17 +106,34 @@ impl World {
 
     pub fn spawn(&mut self, components: impl DynamicBundle) -> Entity {
         components.init_flag_sets(&mut self.flags);
-        let e = self.ecs.spawn(components.into());
+        let entity = self.ecs.spawn(components.into());
 
-        for typeid in self.ecs.entity(e).expect("just created").component_types() {
+        for typeid in self
+            .ecs
+            .entity(entity)
+            .expect("just created")
+            .component_types()
+        {
             if let Some(channel) = self.channels.get(&typeid) {
                 for subscriber in channel {
-                    subscriber.send_event(Event::Created(e));
+                    subscriber.send_event(ComponentEvent::Inserted(entity));
                 }
             }
         }
 
-        e
+        entity
+    }
+
+    pub fn despawn(&mut self, entity: Entity) -> Result<(), hecs::NoSuchEntity> {
+        for typeid in self.ecs.entity(entity)?.component_types() {
+            if let Some(channel) = self.channels.get(&typeid) {
+                for subscriber in channel {
+                    subscriber.send_event(ComponentEvent::Removed(entity));
+                }
+            }
+        }
+
+        self.ecs.despawn(entity)
     }
 
     pub fn contains(&self, entity: Entity) -> bool {
@@ -153,6 +171,20 @@ impl World {
         self.ecs.get_mut_with_context(entity, &self.flags)
     }
 
+    pub fn get_raw<C: Component>(
+        &self,
+        entity: Entity,
+    ) -> Result<hecs::Ref<C>, hecs::ComponentError> {
+        self.ecs.get_with_context(entity, ())
+    }
+
+    pub fn get_mut_raw<C: Component>(
+        &self,
+        entity: Entity,
+    ) -> Result<hecs::RefMut<C>, hecs::ComponentError> {
+        self.ecs.get_mut_with_context(entity, ())
+    }
+
     pub fn subscribe<T: Component>(&mut self, sender: Box<dyn EventSender>) {
         self.channels
             .entry(TypeId::of::<T>())
@@ -167,7 +199,7 @@ impl World {
                     for id in set.iter() {
                         if let Some(e) = unsafe { self.ecs.resolve_unknown_gen(id) } {
                             for subscriber in channels {
-                                subscriber.send_event(Event::Modified(e));
+                                subscriber.send_event(ComponentEvent::Modified(e));
                             }
                         }
                     }

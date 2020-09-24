@@ -7,7 +7,7 @@ use {
     std::any::TypeId,
 };
 
-use crate::ecs::{Entity, Event, Flags, World};
+use crate::ecs::{ComponentEvent, Entity, Flags, World};
 
 #[derive(Debug, Clone, Copy)]
 pub enum HierarchyEvent {
@@ -17,7 +17,13 @@ pub enum HierarchyEvent {
 
 #[derive(Debug, Clone, Copy)]
 pub struct Parent {
-    parent_entity: Entity,
+    pub parent_entity: Entity,
+}
+
+impl Parent {
+    pub fn new(parent_entity: Entity) -> Self {
+        Self { parent_entity }
+    }
 }
 
 impl<'a> SmartComponent<&'a Flags> for Parent {
@@ -34,13 +40,13 @@ pub struct Hierarchy {
     current_parent: HashMap<Entity, Entity>,
     children: HashMap<Entity, Vec<Entity>>,
 
-    created: BitSet,
+    inserted: BitSet,
     modified: BitSet,
-    destroyed: BitSet,
+    removed: BitSet,
 
     scratch_set: HashSet<Entity>,
 
-    events: Receiver<Event>,
+    events: Receiver<ComponentEvent>,
     changed: EventChannel<HierarchyEvent>,
 }
 
@@ -56,9 +62,9 @@ impl Hierarchy {
             current_parent: HashMap::new(),
             children: HashMap::new(),
 
-            created: BitSet::new(),
+            inserted: BitSet::new(),
             modified: BitSet::new(),
-            destroyed: BitSet::new(),
+            removed: BitSet::new(),
 
             scratch_set: HashSet::new(),
 
@@ -123,27 +129,27 @@ impl Hierarchy {
     }
 
     pub fn update(&mut self, world: &mut World) {
-        self.created.clear();
+        self.inserted.clear();
         self.modified.clear();
-        self.destroyed.clear();
+        self.removed.clear();
 
         for event in self.events.try_iter() {
             match event {
-                Event::Created(entity) => {
-                    self.created.add(entity.id());
+                ComponentEvent::Inserted(entity) => {
+                    self.inserted.add(entity.id());
                 }
-                Event::Modified(entity) => {
+                ComponentEvent::Modified(entity) => {
                     self.modified.add(entity.id());
                 }
-                Event::Destroyed(entity) => {
-                    self.destroyed.add(entity.id());
+                ComponentEvent::Removed(entity) => {
+                    self.removed.add(entity.id());
                 }
             }
         }
 
         self.scratch_set.clear();
 
-        for id in (&self.destroyed).iter() {
+        for id in (&self.removed).iter() {
             if let Some(index) = self.entities.get(&id) {
                 self.scratch_set.insert(self.sorted[*index]);
             }
@@ -203,12 +209,12 @@ impl Hierarchy {
         }
 
         // insert new components in hierarchy
-        let created = &self.created;
+        let inserted = &self.inserted;
         self.scratch_set.clear();
         for (entity, parent) in world
             .query::<&Parent>()
             .iter()
-            .filter(|(e, _)| created.contains(e.id()))
+            .filter(|(e, _)| inserted.contains(e.id()))
         {
             let parent_entity = parent.parent_entity;
 
