@@ -36,14 +36,14 @@ pub trait DynamicBundle: Into<<Self as DynamicBundle>::Hecs> {
 
 pub struct BuiltEntity<'a> {
     built: hecs::BuiltEntity<'a>,
-    flagged_types: Drain<'a, TypeId>,
+    types: Drain<'a, TypeId>,
 }
 
 impl<'a> DynamicBundle for BuiltEntity<'a> {
     type Hecs = hecs::BuiltEntity<'a>;
 
     fn init_flag_sets(&self, flags: &mut HashMap<TypeId, AtomicBitSet>) {
-        for typeid in self.flagged_types.as_slice() {
+        for typeid in self.types.as_slice() {
             flags.entry(*typeid).or_default();
         }
     }
@@ -57,31 +57,27 @@ impl<'a> From<BuiltEntity<'a>> for hecs::BuiltEntity<'a> {
 
 pub struct EntityBuilder {
     builder: hecs::EntityBuilder,
-    flagged_types: Vec<TypeId>,
+    types: Vec<TypeId>,
 }
 
 impl EntityBuilder {
     pub fn new() -> Self {
         Self {
             builder: hecs::EntityBuilder::new(),
-            flagged_types: Vec::new(),
+            types: Vec::new(),
         }
     }
 
     pub fn add<T: Component>(&mut self, component: T) -> &mut Self {
         self.builder.add(component);
-
-        // if T::Kind::IS_FLAGGED {
-        //     self.flagged_types.push(TypeId::of::<T>());
-        // }
-
+        self.types.push(TypeId::of::<T>());
         self
     }
 
     pub fn build(&mut self) -> BuiltEntity {
         BuiltEntity {
             built: self.builder.build(),
-            flagged_types: self.flagged_types.drain(..),
+            types: self.types.drain(..),
         }
     }
 

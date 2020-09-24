@@ -21,7 +21,7 @@ pub struct Parent {
 }
 
 impl<'a> SmartComponent<&'a Flags> for Parent {
-    fn on_borrow_mut(&mut self, entity: hecs::Entity, context: &&'a Flags) {
+    fn on_borrow_mut(&mut self, entity: hecs::Entity, context: &'a Flags) {
         context[&TypeId::of::<Self>()].add_atomic(entity.id());
     }
 }
