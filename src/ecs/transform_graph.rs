@@ -1,10 +1,13 @@
 use {
-    crossbeam_channel::Receiver, hashbrown::HashSet, nalgebra as na, shrev::ReaderId,
-    std::any::TypeId,
+    crossbeam_channel::Receiver,
+    hashbrown::HashSet,
+    nalgebra as na,
+    shrev::ReaderId,
+    std::{any::TypeId, marker::PhantomData},
 };
 
 use crate::ecs::{
-    hierarchy::{Hierarchy, HierarchyEvent},
+    hierarchy::{Hierarchy, HierarchyEvent, ParentComponent},
     ComponentEvent, Entity, Flags, SmartComponent, World,
 };
 
@@ -31,16 +34,18 @@ impl<'a> SmartComponent<&'a Flags> for Transform {
     }
 }
 
-pub struct TransformGraph {
+pub struct TransformGraph<P: ParentComponent> {
     hierarchy_events: ReaderId<HierarchyEvent>,
     transform_events: Receiver<ComponentEvent>,
 
     modified: HashSet<Entity>,
     removed: HashSet<Entity>,
+
+    _marker: PhantomData<*const P>,
 }
 
-impl TransformGraph {
-    pub fn new(world: &mut World, hierarchy: &mut Hierarchy) -> Self {
+impl<P: ParentComponent> TransformGraph<P> {
+    pub fn new(world: &mut World, hierarchy: &mut Hierarchy<P>) -> Self {
         let (sender, receiver) = crossbeam_channel::unbounded();
         world.subscribe::<Transform>(Box::new(sender));
         let reader = hierarchy.track();
@@ -51,10 +56,12 @@ impl TransformGraph {
 
             modified: HashSet::new(),
             removed: HashSet::new(),
+
+            _marker: PhantomData,
         }
     }
 
-    pub fn update(&mut self, world: &mut World, hierarchy: &Hierarchy) {
+    pub fn update(&mut self, world: &mut World, hierarchy: &Hierarchy<P>) {
         self.modified.clear();
         self.removed.clear();
 
@@ -118,7 +125,7 @@ mod tests {
     #[test]
     fn parent_update() {
         let mut world = World::new();
-        let mut hierarchy = Hierarchy::new(&mut world);
+        let mut hierarchy = Hierarchy::<Parent>::new(&mut world);
         let mut transforms = TransformGraph::new(&mut world, &mut hierarchy);
 
         let e1 = {

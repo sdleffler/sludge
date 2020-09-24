@@ -4,7 +4,7 @@ use {
     hecs::SmartComponent,
     hibitset::{BitSet, BitSetLike},
     shrev::{EventChannel, ReaderId},
-    std::any::TypeId,
+    std::{any::TypeId, marker::PhantomData},
 };
 
 use crate::ecs::{ComponentEvent, Entity, Flags, World};
@@ -32,7 +32,17 @@ impl<'a> SmartComponent<&'a Flags> for Parent {
     }
 }
 
-pub struct Hierarchy {
+pub trait ParentComponent: for<'a> SmartComponent<&'a Flags> {
+    fn parent_entity(&self) -> Entity;
+}
+
+impl ParentComponent for Parent {
+    fn parent_entity(&self) -> Entity {
+        self.parent_entity
+    }
+}
+
+pub struct Hierarchy<P: ParentComponent> {
     sorted: Vec<Entity>,
     entities: HashMap<u32, usize>,
 
@@ -48,9 +58,11 @@ pub struct Hierarchy {
 
     events: Receiver<ComponentEvent>,
     changed: EventChannel<HierarchyEvent>,
+
+    _marker: PhantomData<*const P>,
 }
 
-impl Hierarchy {
+impl<P: ParentComponent> Hierarchy<P> {
     pub fn new(world: &mut World) -> Self {
         let (sender, receiver) = crossbeam_channel::unbounded();
         world.subscribe::<Parent>(Box::new(sender));
@@ -70,6 +82,8 @@ impl Hierarchy {
 
             events: receiver,
             changed: EventChannel::new(),
+
+            _marker: PhantomData,
         }
     }
 
@@ -111,7 +125,7 @@ impl Hierarchy {
     ///
     /// This does not include the parent entity you pass in. Parents are guaranteed to be
     /// prior to their children.
-    pub fn all_children_iter(&self, entity: Entity) -> SubHierarchyIterator<'_> {
+    pub fn all_children_iter(&self, entity: Entity) -> SubHierarchyIterator<'_, P> {
         SubHierarchyIterator::new(self, entity)
     }
 
@@ -212,11 +226,11 @@ impl Hierarchy {
         let inserted = &self.inserted;
         self.scratch_set.clear();
         for (entity, parent) in world
-            .query::<&Parent>()
+            .query::<&P>()
             .iter()
             .filter(|(e, _)| inserted.contains(e.id()))
         {
-            let parent_entity = parent.parent_entity;
+            let parent_entity = parent.parent_entity();
 
             // if we insert a parent component on an entity that have children, we need to make
             // sure the parent is inserted before the children in the sorted list
@@ -259,11 +273,11 @@ impl Hierarchy {
 
         let modified = &self.modified;
         for (entity, parent) in world
-            .query::<&Parent>()
+            .query::<&P>()
             .iter()
             .filter(|(e, _)| modified.contains(e.id()))
         {
-            let parent_entity = parent.parent_entity;
+            let parent_entity = parent.parent_entity();
             // if theres an old parent
             if let Some(old_parent) = self.current_parent.get(&entity).cloned() {
                 // if the parent entity was not changed, ignore event
@@ -347,15 +361,15 @@ impl Hierarchy {
     }
 }
 
-pub struct SubHierarchyIterator<'a> {
+pub struct SubHierarchyIterator<'a, P: ParentComponent> {
     current_index: usize,
     end_index: usize,
-    hierarchy: &'a Hierarchy,
+    hierarchy: &'a Hierarchy<P>,
     entities: BitSet,
 }
 
-impl<'a> SubHierarchyIterator<'a> {
-    fn new(hierarchy: &'a Hierarchy, root: Entity) -> Self {
+impl<'a, P: ParentComponent> SubHierarchyIterator<'a, P> {
+    fn new(hierarchy: &'a Hierarchy<P>, root: Entity) -> Self {
         let max = hierarchy.sorted.len();
         let root_index = hierarchy
             .children
@@ -395,7 +409,7 @@ impl<'a> SubHierarchyIterator<'a> {
     }
 }
 
-impl<'a> Iterator for SubHierarchyIterator<'a> {
+impl<'a, P: ParentComponent> Iterator for SubHierarchyIterator<'a, P> {
     type Item = Entity;
 
     fn next(&mut self) -> Option<<Self as Iterator>::Item> {
