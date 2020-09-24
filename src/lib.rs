@@ -12,6 +12,7 @@ mod utils;
 
 pub mod ecs;
 pub mod module;
+pub mod resources;
 
 #[derive(Derivative)]
 #[derivative(Debug)]

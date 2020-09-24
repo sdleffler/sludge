@@ -1,7 +1,7 @@
 use {
     crossbeam_channel::Sender,
     hashbrown::HashMap,
-    hecs::{self, *},
+    hecs::*,
     hibitset::{AtomicBitSet, BitSetLike},
     std::any::TypeId,
 };
