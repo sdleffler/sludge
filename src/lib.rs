@@ -8,7 +8,6 @@ use {
     std::{collections::BinaryHeap, ops},
 };
 
-#[macro_use]
 mod utils;
 
 pub mod ecs;

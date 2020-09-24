@@ -3,7 +3,7 @@ use {
     hashbrown::HashMap,
     hecs::{self, *},
     hibitset::{AtomicBitSet, BitSetLike},
-    std::{any::TypeId, vec::Drain},
+    std::any::TypeId,
 };
 
 pub mod hierarchy;
@@ -28,65 +28,6 @@ impl EventSender for Sender<ComponentEvent> {
     }
 }
 
-pub trait DynamicBundle: Into<<Self as DynamicBundle>::Hecs> {
-    type Hecs: hecs::DynamicBundle;
-
-    #[doc(hidden)]
-    fn init_flag_sets(&self, flags: &mut HashMap<TypeId, AtomicBitSet>);
-}
-
-pub struct BuiltEntity<'a> {
-    built: hecs::BuiltEntity<'a>,
-    types: Drain<'a, TypeId>,
-}
-
-impl<'a> DynamicBundle for BuiltEntity<'a> {
-    type Hecs = hecs::BuiltEntity<'a>;
-
-    fn init_flag_sets(&self, flags: &mut HashMap<TypeId, AtomicBitSet>) {
-        for typeid in self.types.as_slice() {
-            flags.entry(*typeid).or_default();
-        }
-    }
-}
-
-impl<'a> From<BuiltEntity<'a>> for hecs::BuiltEntity<'a> {
-    fn from(built: BuiltEntity<'a>) -> Self {
-        built.built
-    }
-}
-
-pub struct EntityBuilder {
-    builder: hecs::EntityBuilder,
-    types: Vec<TypeId>,
-}
-
-impl EntityBuilder {
-    pub fn new() -> Self {
-        Self {
-            builder: hecs::EntityBuilder::new(),
-            types: Vec::new(),
-        }
-    }
-
-    pub fn add<T: Component>(&mut self, component: T) -> &mut Self {
-        self.builder.add(component);
-        self.types.push(TypeId::of::<T>());
-        self
-    }
-
-    pub fn build(&mut self) -> BuiltEntity {
-        BuiltEntity {
-            built: self.builder.build(),
-            types: self.types.drain(..),
-        }
-    }
-
-    pub fn clear(&mut self) {
-        self.builder.clear()
-    }
-}
-
 pub struct World {
     ecs: hecs::World,
     flags: HashMap<TypeId, AtomicBitSet>,
@@ -105,8 +46,7 @@ impl World {
     }
 
     pub fn spawn(&mut self, components: impl DynamicBundle) -> Entity {
-        components.init_flag_sets(&mut self.flags);
-        let entity = self.ecs.spawn(components.into());
+        let entity = self.ecs.spawn(components);
 
         for typeid in self
             .ecs
@@ -114,6 +54,8 @@ impl World {
             .expect("just created")
             .component_types()
         {
+            self.flags.entry(typeid).or_default();
+
             if let Some(channel) = self.channels.get(&typeid) {
                 for subscriber in channel {
                     subscriber.send_event(ComponentEvent::Inserted(entity));
@@ -185,6 +127,67 @@ impl World {
         self.ecs.get_mut_with_context(entity, ())
     }
 
+    pub fn insert(
+        &mut self,
+        entity: Entity,
+        bundle: impl DynamicBundle,
+    ) -> Result<(), NoSuchEntity> {
+        // FIXME: find a way to do this w/o the undocumented/unstable DynamicBundle::with_ids
+        bundle.with_ids(|typeids| {
+            for typeid in typeids.iter().copied() {
+                self.flags.entry(typeid).or_default();
+
+                if let Some(channel) = self.channels.get(&typeid) {
+                    for subscriber in channel {
+                        subscriber.send_event(ComponentEvent::Inserted(entity));
+                    }
+                }
+            }
+        });
+
+        self.ecs.insert(entity, bundle)
+    }
+
+    pub fn insert_one<C: Component>(
+        &mut self,
+        entity: Entity,
+        component: C,
+    ) -> Result<(), NoSuchEntity> {
+        let typeid = TypeId::of::<C>();
+        self.flags.entry(typeid).or_default();
+        if let Some(channel) = self.channels.get(&typeid) {
+            for subscriber in channel {
+                subscriber.send_event(ComponentEvent::Inserted(entity));
+            }
+        }
+
+        self.ecs.insert_one(entity, component)
+    }
+
+    pub fn remove<T: Bundle>(&mut self, entity: Entity) -> Result<T, ComponentError> {
+        T::with_static_ids(|typeids| {
+            for typeid in typeids.iter().copied() {
+                if let Some(channel) = self.channels.get(&typeid) {
+                    for subscriber in channel {
+                        subscriber.send_event(ComponentEvent::Removed(entity));
+                    }
+                }
+            }
+        });
+
+        self.ecs.remove(entity)
+    }
+
+    pub fn remove_one<T: Component>(&mut self, entity: Entity) -> Result<T, ComponentError> {
+        if let Some(channel) = self.channels.get(&TypeId::of::<T>()) {
+            for subscriber in channel {
+                subscriber.send_event(ComponentEvent::Removed(entity));
+            }
+        }
+
+        self.ecs.remove_one(entity)
+    }
+
     pub fn subscribe<T: Component>(&mut self, sender: Box<dyn EventSender>) {
         self.channels
             .entry(TypeId::of::<T>())
@@ -210,19 +213,3 @@ impl World {
         }
     }
 }
-
-macro_rules! tuple_impl {
-    ($($name: ident),*) => {
-        impl<$($name: Component),*> DynamicBundle for ($($name,)*) {
-            type Hecs = Self;
-
-            #[allow(unused_variables)]
-            fn init_flag_sets(&self, flags: &mut HashMap<TypeId, AtomicBitSet>) {
-                $(flags.entry(TypeId::of::<$name>()).or_default();)*
-            }
-        }
-    };
-}
-
-//smaller_tuples_too!(tuple_impl, B, A);
-smaller_tuples_too!(tuple_impl, O, N, M, L, K, J, I, H, G, F, E, D, C, B, A);
