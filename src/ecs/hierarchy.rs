@@ -226,7 +226,7 @@ impl<P: ParentComponent> Hierarchy<P> {
         let inserted = &self.inserted;
         self.scratch_set.clear();
         for (entity, parent) in world
-            .query::<&P>()
+            .query_raw::<&P>()
             .iter()
             .filter(|(e, _)| inserted.contains(e.id()))
         {
@@ -273,7 +273,7 @@ impl<P: ParentComponent> Hierarchy<P> {
 
         let modified = &self.modified;
         for (entity, parent) in world
-            .query::<&P>()
+            .query_raw::<&P>()
             .iter()
             .filter(|(e, _)| modified.contains(e.id()))
         {

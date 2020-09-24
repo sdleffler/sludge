@@ -5,7 +5,7 @@ use {
     crossbeam_channel::{Receiver, Sender},
     derivative::Derivative,
     rlua::prelude::*,
-    std::{collections::BinaryHeap, ops},
+    std::collections::BinaryHeap,
 };
 
 mod utils;
@@ -14,23 +14,20 @@ pub mod ecs;
 pub mod module;
 pub mod resources;
 
+pub trait Module {
+    fn load<'lua>(&self, lua: LuaContext<'lua>) -> Result<(&str, LuaTable<'lua>)>;
+}
+
 #[derive(Derivative)]
 #[derivative(Debug)]
-pub struct SludgeState {
+pub struct Sludge {
     #[derivative(Debug = "ignore")]
     lua: Lua,
 }
 
-impl SludgeState {
+impl Sludge {
     pub fn new() -> Self {
         Self { lua: Lua::new() }
-    }
-
-    pub fn context<F, R>(&self, f: F) -> Result<R>
-    where
-        F: FnOnce(Sludge) -> Result<R>,
-    {
-        self.lua.context(|ctx| f(Sludge::new(ctx)?))
     }
 }
 
@@ -98,47 +95,5 @@ impl<'lua> Scheduler<'lua> {
         self.spawn_sender
             .try_send(thread)
             .map_err(|_| anyhow!("spawn buffer full"))
-    }
-}
-
-pub trait Module {
-    fn load<'lua>(&self, lua: LuaContext<'lua>) -> Result<(&str, LuaTable<'lua>)>;
-}
-
-#[derive(Derivative)]
-#[derivative(Debug)]
-pub struct Sludge<'lua> {
-    #[derivative(Debug = "ignore")]
-    lua: LuaContext<'lua>,
-    modules: LuaTable<'lua>,
-}
-
-impl<'lua> ops::Deref for Sludge<'lua> {
-    type Target = LuaContext<'lua>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.lua
-    }
-}
-
-impl<'lua> ops::DerefMut for Sludge<'lua> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.lua
-    }
-}
-
-impl<'lua> Sludge<'lua> {
-    fn new(lua: LuaContext<'lua>) -> Result<Self> {
-        let modules = lua.create_table()?;
-        lua.globals().set("sludge", modules.clone())?;
-
-        Ok(Self { lua, modules })
-    }
-
-    pub fn load_module<M: Module>(&mut self, module: &M) -> Result<()> {
-        let (k, v) = module.load(self.lua)?;
-        self.modules.set(k, v)?;
-
-        Ok(())
     }
 }

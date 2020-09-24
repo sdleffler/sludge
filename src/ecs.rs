@@ -1,7 +1,6 @@
 use {
     crossbeam_channel::Sender,
     hashbrown::HashMap,
-    hecs::*,
     hibitset::{AtomicBitSet, BitSetLike},
     std::any::TypeId,
 };
@@ -9,7 +8,10 @@ use {
 pub mod hierarchy;
 pub mod transform_graph;
 
-pub use hecs::Entity;
+pub use hecs::{
+    Bundle, Component, ComponentError, DynamicBundle, Entity, NoSuchEntity, Query, QueryBorrow,
+    QueryOne, Ref, RefMut, SmartComponent,
+};
 
 #[derive(Debug, Clone, Copy)]
 pub enum ComponentEvent {
@@ -66,7 +68,7 @@ impl World {
         entity
     }
 
-    pub fn despawn(&mut self, entity: Entity) -> Result<(), hecs::NoSuchEntity> {
+    pub fn despawn(&mut self, entity: Entity) -> Result<(), NoSuchEntity> {
         for typeid in self.ecs.entity(entity)?.component_types() {
             if let Some(channel) = self.channels.get(&typeid) {
                 for subscriber in channel {
@@ -82,9 +84,9 @@ impl World {
         self.ecs.contains(entity)
     }
 
-    pub fn query<'w, Q>(&'w self) -> hecs::QueryBorrow<'w, Q, &'w Flags>
+    pub fn query<'w, Q>(&'w self) -> QueryBorrow<'w, Q, &'w Flags>
     where
-        Q: hecs::Query<'w, &'w Flags>,
+        Q: Query<'w, &'w Flags>,
     {
         self.ecs.query_with_context(&self.flags)
     }
@@ -92,9 +94,9 @@ impl World {
     pub fn query_one<'w, Q>(
         &'w self,
         entity: Entity,
-    ) -> Result<hecs::QueryOne<'w, Q, &'w Flags>, hecs::NoSuchEntity>
+    ) -> Result<QueryOne<'w, Q, &'w Flags>, NoSuchEntity>
     where
-        Q: hecs::Query<'w, &'w Flags>,
+        Q: Query<'w, &'w Flags>,
     {
         self.ecs.query_one_with_context(entity, &self.flags)
     }
@@ -102,28 +104,33 @@ impl World {
     pub fn get<'w, C: SmartComponent<&'w Flags>>(
         &'w self,
         entity: Entity,
-    ) -> Result<hecs::Ref<'w, C, &'w Flags>, hecs::ComponentError> {
+    ) -> Result<Ref<'w, C, &'w Flags>, ComponentError> {
         self.ecs.get_with_context(entity, &self.flags)
     }
 
     pub fn get_mut<'w, C: SmartComponent<&'w Flags>>(
         &'w self,
         entity: Entity,
-    ) -> Result<hecs::RefMut<'w, C, &'w Flags>, hecs::ComponentError> {
+    ) -> Result<RefMut<'w, C, &'w Flags>, ComponentError> {
         self.ecs.get_mut_with_context(entity, &self.flags)
     }
 
-    pub fn get_raw<C: Component>(
-        &self,
+    pub fn query_raw<'w, Q: Query<'w>>(&'w self) -> QueryBorrow<'w, Q, ()> {
+        self.ecs.query_with_context(())
+    }
+
+    pub fn query_one_raw<'w, Q: Query<'w>>(
+        &'w self,
         entity: Entity,
-    ) -> Result<hecs::Ref<C>, hecs::ComponentError> {
+    ) -> Result<QueryOne<'w, Q, ()>, NoSuchEntity> {
+        self.ecs.query_one_with_context(entity, ())
+    }
+
+    pub fn get_raw<C: Component>(&self, entity: Entity) -> Result<Ref<C>, ComponentError> {
         self.ecs.get_with_context(entity, ())
     }
 
-    pub fn get_mut_raw<C: Component>(
-        &self,
-        entity: Entity,
-    ) -> Result<hecs::RefMut<C>, hecs::ComponentError> {
+    pub fn get_mut_raw<C: Component>(&self, entity: Entity) -> Result<RefMut<C>, ComponentError> {
         self.ecs.get_mut_with_context(entity, ())
     }
 
