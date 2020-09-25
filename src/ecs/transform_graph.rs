@@ -11,7 +11,7 @@ use crate::ecs::{
     ComponentEvent, Entity, Flags, SmartComponent, World,
 };
 
-pub type TransformObject = na::Similarity2<f32>;
+pub type TransformObject = na::Transform2<f32>;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Transform {
@@ -25,6 +25,18 @@ impl Transform {
             local: transform,
             global: transform,
         }
+    }
+
+    pub fn local(&self) -> &TransformObject {
+        &self.local
+    }
+
+    pub fn local_mut(&mut self) -> &mut TransformObject {
+        &mut self.local
+    }
+
+    pub fn global(&self) -> &TransformObject {
+        &self.global
     }
 }
 
@@ -129,9 +141,9 @@ mod tests {
         let mut transforms = TransformGraph::new(&mut world, &mut hierarchy);
 
         let e1 = {
-            let mut tx = na::Similarity2::identity();
-            tx.append_translation_mut(&na::Translation2::new(5., 7.));
-            tx.append_rotation_mut(&na::UnitComplex::from_angle(::std::f32::consts::PI));
+            let mut tx = na::Transform2::identity();
+            tx *= &na::Translation2::new(5., 7.);
+            tx *= &na::Rotation2::new(::std::f32::consts::PI);
             world.spawn((Transform::new(tx),))
         };
 
@@ -139,8 +151,8 @@ mod tests {
         transforms.update(&mut world, &hierarchy);
 
         let e2 = {
-            let mut tx = na::Similarity2::identity();
-            tx.append_translation_mut(&na::Translation2::new(5., 3.));
+            let mut tx = na::Transform2::identity();
+            tx *= &na::Translation2::new(5., 3.);
             world.spawn((Transform::new(tx), Parent::new(e1)))
         };
 

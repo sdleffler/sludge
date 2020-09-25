@@ -4,8 +4,10 @@ use {
     anyhow::{anyhow, Result},
     crossbeam_channel::{Receiver, Sender},
     derivative::Derivative,
+    lazy_static::lazy_static,
     rlua::prelude::*,
     std::collections::BinaryHeap,
+    thread_local::CachedThreadLocal,
 };
 
 mod utils;
@@ -14,8 +16,11 @@ pub mod ecs;
 pub mod module;
 pub mod resources;
 
-pub trait Module {
-    fn load<'lua>(&self, lua: LuaContext<'lua>) -> Result<(&str, LuaTable<'lua>)>;
+use crate::resources::SharedResources;
+
+lazy_static! {
+    pub(crate) static ref LOCAL_RESOURCES: CachedThreadLocal<SharedResources> =
+        CachedThreadLocal::new();
 }
 
 #[derive(Derivative)]
@@ -23,11 +28,17 @@ pub trait Module {
 pub struct Sludge {
     #[derivative(Debug = "ignore")]
     lua: Lua,
+
+    #[derivative(Debug = "ignore")]
+    shared_resources: SharedResources,
 }
 
 impl Sludge {
     pub fn new() -> Self {
-        Self { lua: Lua::new() }
+        Self {
+            lua: Lua::new(),
+            shared_resources: SharedResources::new(),
+        }
     }
 }
 

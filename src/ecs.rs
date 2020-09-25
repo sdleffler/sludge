@@ -9,8 +9,8 @@ pub mod hierarchy;
 pub mod transform_graph;
 
 pub use hecs::{
-    Bundle, Component, ComponentError, DynamicBundle, Entity, NoSuchEntity, Query, QueryBorrow,
-    QueryOne, Ref, RefMut, SmartComponent,
+    Bundle, Component, ComponentError, DynamicBundle, Entity, EntityRef, NoSuchEntity, Query,
+    QueryBorrow, QueryOne, Ref, RefMut, SmartComponent,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -119,6 +119,10 @@ impl World {
         self.ecs.query_with_context(())
     }
 
+    pub fn entity(&self, entity: Entity) -> Result<EntityRef<&Flags>, NoSuchEntity> {
+        self.ecs.entity_with_context(entity, &self.flags)
+    }
+
     pub fn query_one_raw<'w, Q: Query<'w>>(
         &'w self,
         entity: Entity,
@@ -132,6 +136,10 @@ impl World {
 
     pub fn get_mut_raw<C: Component>(&self, entity: Entity) -> Result<RefMut<C>, ComponentError> {
         self.ecs.get_mut_with_context(entity, ())
+    }
+
+    pub fn entity_raw(&self, entity: Entity) -> Result<EntityRef<'_>, NoSuchEntity> {
+        self.ecs.entity_with_context(entity, ())
     }
 
     pub fn insert(

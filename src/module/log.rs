@@ -4,7 +4,7 @@ use {
     rlua::prelude::*,
 };
 
-use crate::Module;
+// use crate::Module;
 
 pub fn log_message(
     _lua: LuaContext,
@@ -110,23 +110,36 @@ pub fn error<'lua>(
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct LogModule;
+pub fn load<'lua>(lua: LuaContext<'lua>) -> Result<(&str, LuaTable<'lua>)> {
+    let table = lua.create_table_from(vec![
+        ("log", lua.create_function(log)?),
+        ("error", lua.create_function(error)?),
+        ("warn", lua.create_function(warn)?),
+        ("info", lua.create_function(info)?),
+        ("debug", lua.create_function(debug)?),
+        ("trace", lua.create_function(trace)?),
+    ])?;
 
-impl Module for LogModule {
-    fn load<'lua>(&self, lua: LuaContext<'lua>) -> Result<(&str, LuaTable<'lua>)> {
-        let table = lua.create_table_from(vec![
-            ("log", lua.create_function(log)?),
-            ("error", lua.create_function(error)?),
-            ("warn", lua.create_function(warn)?),
-            ("info", lua.create_function(info)?),
-            ("debug", lua.create_function(debug)?),
-            ("trace", lua.create_function(trace)?),
-        ])?;
-
-        Ok(("log", table))
-    }
+    Ok(("log", table))
 }
+
+// #[derive(Debug, Clone, Copy)]
+// pub struct LogModule;
+
+// impl Module for LogModule {
+//     fn load<'lua>(&self, lua: LuaContext<'lua>) -> Result<(&str, LuaTable<'lua>)> {
+//         let table = lua.create_table_from(vec![
+//             ("log", lua.create_function(log)?),
+//             ("error", lua.create_function(error)?),
+//             ("warn", lua.create_function(warn)?),
+//             ("info", lua.create_function(info)?),
+//             ("debug", lua.create_function(debug)?),
+//             ("trace", lua.create_function(trace)?),
+//         ])?;
+
+//         Ok(("log", table))
+//     }
+// }
 
 /// Basic logging setup to log to the console with `fern`.
 pub fn setup_logging() {

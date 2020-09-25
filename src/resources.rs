@@ -42,11 +42,21 @@ impl<'a, T> ops::DerefMut for FetchMut<'a, T> {
     }
 }
 
+// Implementation ripped from the `Box::downcast` method for `Box<dyn Any + 'static + Send>`
+fn downcast_send_sync<T: Any>(
+    this: Box<dyn Any + Send + Sync>,
+) -> Result<Box<T>, Box<dyn Any + Send + Sync>> {
+    <Box<dyn Any>>::downcast(this).map_err(|s| unsafe {
+        // reapply the Send + Sync markers
+        Box::from_raw(Box::into_raw(s) as *mut (dyn Any + Send + Sync))
+    })
+}
+
 #[derive(Derivative)]
 #[derivative(Debug)]
 pub struct Resources {
     #[derivative(Debug = "ignore")]
-    map: HashMap<TypeId, AtomicRefCell<Box<dyn Any + Send>>>,
+    map: HashMap<TypeId, AtomicRefCell<Box<dyn Any + Send + Sync>>>,
 }
 
 impl Resources {
@@ -56,18 +66,18 @@ impl Resources {
         }
     }
 
-    pub fn insert<T: Any + Send>(&mut self, resource: T) -> Option<T> {
+    pub fn insert<T: Any + Send + Sync>(&mut self, resource: T) -> Option<T> {
         let typeid = TypeId::of::<T>();
-        let wrapped = AtomicRefCell::new(Box::new(resource) as Box<dyn Any + Send>);
+        let wrapped = AtomicRefCell::new(Box::new(resource) as Box<dyn Any + Send + Sync>);
         let maybe_old = self.map.insert(typeid, wrapped);
 
-        maybe_old.map(|t| *t.into_inner().downcast().unwrap())
+        maybe_old.map(|t| *downcast_send_sync(t.into_inner()).unwrap())
     }
 
-    pub fn remove<T: Any + Send>(&mut self) -> Option<T> {
+    pub fn remove<T: Any + Send + Sync>(&mut self) -> Option<T> {
         self.map
             .remove(&TypeId::of::<T>())
-            .map(|t| *t.into_inner().downcast().unwrap())
+            .map(|t| *downcast_send_sync(t.into_inner()).unwrap())
     }
 
     pub fn fetch<T: Any + Send>(&self) -> Fetch<T> {
