@@ -1,6 +1,6 @@
 use crate::{
     ecs::{Component, Entity, World},
-    LOCAL_RESOURCES,
+    SludgeLuaContextExt,
 };
 use {
     anyhow::Result,
@@ -182,7 +182,7 @@ impl LuaUserData for EntityWrapper {
                     Some(t) => t,
                     None => {
                         let entity = this.borrow::<EntityWrapper>().unwrap().0;
-                        let resources = &*LOCAL_RESOURCES.get().unwrap();
+                        let resources = lua.resources();
                         let types = resources
                             .fetch::<World>()
                             .entity(entity)
@@ -190,10 +190,8 @@ impl LuaUserData for EntityWrapper {
                             .component_types()
                             .collect::<Vec<_>>();
 
-                        match resources
-                            .fetch::<ArchetypeRegistry>()
-                            .lookup_method_table(&types)
-                        {
+                        let registry = resources.fetch::<ArchetypeRegistry>();
+                        match registry.lookup_method_table(&types) {
                             Some(key) => {
                                 let t = lua.registry_value::<LuaTable>(key)?;
                                 this.set_user_value(t.clone())?;

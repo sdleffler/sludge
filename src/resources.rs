@@ -2,6 +2,7 @@ use {
     atomic_refcell::{AtomicRef, AtomicRefCell, AtomicRefMut},
     derivative::Derivative,
     hashbrown::HashMap,
+    rlua::prelude::*,
     std::{
         any::{Any, TypeId},
         ops,
@@ -155,6 +156,8 @@ impl<'a, T> ops::DerefMut for SharedFetchMut<'a, T> {
 pub struct SharedResources {
     shared: Pin<Arc<AtomicRefCell<Resources>>>,
 }
+
+impl LuaUserData for SharedResources {}
 
 impl From<Resources> for SharedResources {
     fn from(resources: Resources) -> Self {

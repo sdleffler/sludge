@@ -1,7 +1,7 @@
 use crate::{
     ecs::{hierarchy::Parent as ParentComponent, World},
     module::ecs::{ComponentWrapper, EntityWrapper, RegisterableComponent},
-    LOCAL_RESOURCES,
+    SludgeLuaContextExt,
 };
 use {anyhow::*, rlua::prelude::*};
 
@@ -19,11 +19,9 @@ impl RegisterableComponent for ParentComponent {
 
         table.set(
             "get_parent",
-            lua.create_function(|_ctx, this: EntityWrapper| {
+            lua.create_function(|ctx, this: EntityWrapper| {
                 Ok(EntityWrapper(
-                    LOCAL_RESOURCES
-                        .get()
-                        .unwrap()
+                    ctx.resources()
                         .fetch::<World>()
                         .get::<ParentComponent>(this.0)
                         .unwrap()
@@ -34,10 +32,8 @@ impl RegisterableComponent for ParentComponent {
 
         table.set(
             "set_parent",
-            lua.create_function(|_ctx, (this, new_parent): (EntityWrapper, EntityWrapper)| {
-                LOCAL_RESOURCES
-                    .get()
-                    .unwrap()
+            lua.create_function(|ctx, (this, new_parent): (EntityWrapper, EntityWrapper)| {
+                ctx.resources()
                     .fetch::<World>()
                     .get_mut::<ParentComponent>(this.0)
                     .unwrap()

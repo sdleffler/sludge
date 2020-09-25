@@ -4,7 +4,7 @@ use crate::{
         ecs::{ComponentWrapper, EntityWrapper, RegisterableComponent},
         math::Transform,
     },
-    LOCAL_RESOURCES,
+    SludgeLuaContextExt,
 };
 use {anyhow::*, rlua::prelude::*};
 
@@ -22,10 +22,9 @@ impl RegisterableComponent for TransformComponent {
 
         table.set(
             "get_local_transform",
-            lua.create_function(|_ctx, (this, dst): (EntityWrapper, LuaAnyUserData)| {
-                dst.borrow_mut::<Transform>()?.0 = *LOCAL_RESOURCES
-                    .get()
-                    .unwrap()
+            lua.create_function(|ctx, (this, dst): (EntityWrapper, LuaAnyUserData)| {
+                dst.borrow_mut::<Transform>()?.0 = *ctx
+                    .resources()
                     .fetch::<World>()
                     .get::<TransformComponent>(this.0)
                     .unwrap()
@@ -36,10 +35,8 @@ impl RegisterableComponent for TransformComponent {
 
         table.set(
             "set_local_transform",
-            lua.create_function(|_ctx, (this, src): (EntityWrapper, Transform)| {
-                *LOCAL_RESOURCES
-                    .get()
-                    .unwrap()
+            lua.create_function(|ctx, (this, src): (EntityWrapper, Transform)| {
+                *ctx.resources()
                     .fetch::<World>()
                     .get_mut::<TransformComponent>(this.0)
                     .unwrap()
@@ -50,10 +47,9 @@ impl RegisterableComponent for TransformComponent {
 
         table.set(
             "get_global_transform",
-            lua.create_function(|_ctx, (this, dst): (EntityWrapper, LuaAnyUserData)| {
-                dst.borrow_mut::<Transform>()?.0 = *LOCAL_RESOURCES
-                    .get()
-                    .unwrap()
+            lua.create_function(|ctx, (this, dst): (EntityWrapper, LuaAnyUserData)| {
+                dst.borrow_mut::<Transform>()?.0 = *ctx
+                    .resources()
                     .fetch::<World>()
                     .get::<TransformComponent>(this.0)
                     .unwrap()

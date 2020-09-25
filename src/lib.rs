@@ -1,13 +1,11 @@
 #![feature(min_const_generics)]
 
 use {
-    anyhow::{anyhow, Result},
+    anyhow::*,
     crossbeam_channel::{Receiver, Sender},
     derivative::Derivative,
-    lazy_static::lazy_static,
     rlua::prelude::*,
     std::collections::BinaryHeap,
-    thread_local::CachedThreadLocal,
 };
 
 mod utils;
@@ -16,11 +14,19 @@ pub mod ecs;
 pub mod module;
 pub mod resources;
 
-use crate::resources::SharedResources;
+use crate::resources::{Resources, SharedResources};
 
-lazy_static! {
-    pub(crate) static ref LOCAL_RESOURCES: CachedThreadLocal<SharedResources> =
-        CachedThreadLocal::new();
+const RESOURCES_REGISTRY_KEY: &'static str = "sludge.resources";
+
+pub trait SludgeLuaContextExt {
+    fn resources(self) -> SharedResources;
+}
+
+impl<'lua> SludgeLuaContextExt for LuaContext<'lua> {
+    fn resources(self) -> SharedResources {
+        self.named_registry_value::<_, SharedResources>(RESOURCES_REGISTRY_KEY)
+            .unwrap()
+    }
 }
 
 #[derive(Derivative)]
@@ -34,11 +40,19 @@ pub struct Sludge {
 }
 
 impl Sludge {
-    pub fn new() -> Self {
-        Self {
-            lua: Lua::new(),
-            shared_resources: SharedResources::new(),
-        }
+    pub fn new(resources: Resources) -> Result<Self> {
+        let lua = Lua::new();
+        let shared_resources = SharedResources::from(resources);
+
+        lua.context(|lua_ctx| -> Result<()> {
+            lua_ctx.set_named_registry_value(RESOURCES_REGISTRY_KEY, shared_resources.clone())?;
+            Ok(())
+        })?;
+
+        Ok(Self {
+            lua,
+            shared_resources,
+        })
     }
 }
 
