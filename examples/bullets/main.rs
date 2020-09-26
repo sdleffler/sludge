@@ -6,8 +6,7 @@ use {
     },
     sludge::{
         ecs::{
-            hierarchy::{Hierarchy, Parent},
-            transform::Transform,
+            components::{Parent, Transform},
             World,
         },
         module::ecs::ArchetypeRegistry,
@@ -82,12 +81,10 @@ impl EventHandler for MainState {
         self.space.lua().context(|lua| {
             while timer::check_update_time(ctx, 60) {
                 self.space
-                    .resources()
                     .fetch_mut::<Scheduler>()
                     .with_context(lua)
                     .update(1.0)
                     .unwrap();
-                self.space.resources().fetch_mut::<Hierarchy<Parent>>();
             }
         });
 

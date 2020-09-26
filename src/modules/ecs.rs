@@ -10,8 +10,6 @@ use {
     std::any::{Any, TypeId},
 };
 
-pub mod components;
-
 pub trait RegisterableComponent: Component {
     fn constructor(_lua: LuaContext) -> Result<Option<(&'static str, LuaFunction)>> {
         Ok(None)

@@ -1,55 +1,10 @@
-use {
-    anyhow::*,
-    crossbeam_channel::Receiver,
-    hashbrown::HashSet,
-    nalgebra as na,
-    rlua::prelude::*,
-    shrev::ReaderId,
-    std::{any::TypeId, marker::PhantomData},
+use {crossbeam_channel::Receiver, hashbrown::HashSet, shrev::ReaderId, std::marker::PhantomData};
+
+use crate::ecs::{
+    components::{Parent, Transform},
+    hierarchy::{Hierarchy, HierarchyEvent, ParentComponent},
+    ComponentEvent, Entity, World,
 };
-
-use crate::{
-    ecs::{
-        hierarchy::{Hierarchy, HierarchyEvent, Parent, ParentComponent},
-        ComponentEvent, Entity, Flags, SmartComponent, World,
-    },
-    resources::{Resources, SharedResources},
-};
-
-pub type TransformObject = na::Transform2<f32>;
-
-#[derive(Debug, Clone, Copy)]
-pub struct Transform {
-    local: TransformObject,
-    global: TransformObject,
-}
-
-impl Transform {
-    pub fn new(transform: TransformObject) -> Self {
-        Self {
-            local: transform,
-            global: transform,
-        }
-    }
-
-    pub fn local(&self) -> &TransformObject {
-        &self.local
-    }
-
-    pub fn local_mut(&mut self) -> &mut TransformObject {
-        &mut self.local
-    }
-
-    pub fn global(&self) -> &TransformObject {
-        &self.global
-    }
-}
-
-impl<'a> SmartComponent<&'a Flags> for Transform {
-    fn on_borrow_mut(&mut self, entity: Entity, flags: &'a Flags) {
-        flags[&TypeId::of::<Self>()].add_atomic(entity.id());
-    }
-}
 
 pub struct TransformGraph<P: ParentComponent = Parent> {
     hierarchy_events: ReaderId<HierarchyEvent>,
@@ -133,47 +88,11 @@ impl<P: ParentComponent> TransformGraph<P> {
     }
 }
 
-pub struct TransformSystem<P: ParentComponent>(PhantomData<P>);
-
-pub type DefaultTransformSystem = TransformSystem<Parent>;
-
-impl<P: ParentComponent> TransformSystem<P> {
-    pub fn new() -> Self {
-        Self(PhantomData)
-    }
-}
-
-impl<P: ParentComponent> crate::System for TransformSystem<P> {
-    fn init(&self, _lua: LuaContext, resources: &mut Resources) -> Result<()> {
-        if !resources.has_value::<TransformGraph<P>>() {
-            let transform_graph = {
-                let world = &mut *resources
-                    .try_fetch_mut::<World>()
-                    .ok_or_else(|| anyhow!("no World resource yet"))?;
-                let hierarchy = &mut *resources
-                    .try_fetch_mut::<Hierarchy<P>>()
-                    .ok_or_else(|| anyhow!("no Hierarchy resource yet"))?;
-                TransformGraph::<P>::new(world, hierarchy)
-            };
-            resources.insert(transform_graph);
-        }
-        Ok(())
-    }
-
-    fn update(&self, _lua: LuaContext, resources: &SharedResources) -> Result<()> {
-        let world = &mut *resources.fetch_mut::<World>();
-        let hierarchy = &mut *resources.fetch_mut::<Hierarchy<P>>();
-        hierarchy.update(world);
-
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::hierarchy::Parent;
-    use approx::assert_relative_eq;
+    use crate::ecs::components::Parent;
+    use {approx::assert_relative_eq, nalgebra as na};
 
     #[test]
     fn parent_update() {

@@ -5,7 +5,10 @@ use {
     std::any::TypeId,
 };
 
+pub mod components;
 pub mod hierarchy;
+pub mod resources;
+pub mod systems;
 pub mod transform;
 
 pub use hecs::{

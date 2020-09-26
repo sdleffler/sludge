@@ -19,7 +19,7 @@ mod utils;
 pub mod dependency_graph;
 pub mod ecs;
 pub mod input;
-pub mod module;
+pub mod modules;
 pub mod resources;
 pub mod scene;
 pub mod tiled;
@@ -455,7 +455,7 @@ fn load_core<'lua>(lua: LuaContext<'lua>, table: &LuaTable<'lua>) -> Result<()> 
         ])?,
     )?;
 
-    table.set("log", crate::module::log::load(lua)?)?;
+    table.set("log", crate::modules::log::load(lua)?)?;
 
     ["print", "dofile", "load", "loadstring", "loadfile"]
         .iter()

@@ -1,50 +1,22 @@
 use {
-    anyhow::*,
     crossbeam_channel::Receiver,
     hashbrown::{HashMap, HashSet},
     hecs::SmartComponent,
     hibitset::{BitSet, BitSetLike},
-    rlua::prelude::*,
     shrev::{EventChannel, ReaderId},
-    std::{any::TypeId, marker::PhantomData},
+    std::marker::PhantomData,
 };
 
-use crate::{
-    ecs::{ComponentEvent, Entity, Flags, World},
-    resources::{Resources, SharedResources},
-};
-
-#[derive(Debug, Clone, Copy)]
-pub enum HierarchyEvent {
-    ModifiedOrCreated(Entity),
-    Removed(Entity),
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct Parent {
-    pub parent_entity: Entity,
-}
-
-impl Parent {
-    pub fn new(parent_entity: Entity) -> Self {
-        Self { parent_entity }
-    }
-}
-
-impl<'a> SmartComponent<&'a Flags> for Parent {
-    fn on_borrow_mut(&mut self, entity: hecs::Entity, context: &'a Flags) {
-        context[&TypeId::of::<Self>()].add_atomic(entity.id());
-    }
-}
+use crate::ecs::{ComponentEvent, Entity, Flags, World};
 
 pub trait ParentComponent: for<'a> SmartComponent<&'a Flags> {
     fn parent_entity(&self) -> Entity;
 }
 
-impl ParentComponent for Parent {
-    fn parent_entity(&self) -> Entity {
-        self.parent_entity
-    }
+#[derive(Debug, Clone, Copy)]
+pub enum HierarchyEvent {
+    ModifiedOrCreated(Entity),
+    Removed(Entity),
 }
 
 pub struct Hierarchy<P: ParentComponent> {
@@ -70,7 +42,7 @@ pub struct Hierarchy<P: ParentComponent> {
 impl<P: ParentComponent> Hierarchy<P> {
     pub fn new(world: &mut World) -> Self {
         let (sender, receiver) = crossbeam_channel::unbounded();
-        world.subscribe::<Parent>(Box::new(sender));
+        world.subscribe::<P>(Box::new(sender));
         Self {
             sorted: Vec::new(),
             entities: HashMap::new(),
@@ -440,39 +412,5 @@ impl<'a, P: ParentComponent> Iterator for SubHierarchyIterator<'a, P> {
             }
             Some(entity)
         }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default)]
-pub struct HierarchySystem<P: ParentComponent>(PhantomData<P>);
-
-pub type DefaultHierarchySystem = HierarchySystem<Parent>;
-
-impl<P: ParentComponent> HierarchySystem<P> {
-    pub fn new() -> Self {
-        Self(PhantomData)
-    }
-}
-
-impl<P: ParentComponent> crate::System for HierarchySystem<P> {
-    fn init(&self, _lua: LuaContext, resources: &mut Resources) -> Result<()> {
-        if !resources.has_value::<Hierarchy<P>>() {
-            let hierarchy = {
-                let world = resources
-                    .get_mut::<World>()
-                    .ok_or_else(|| anyhow!("no World resource yet"))?;
-                Hierarchy::<P>::new(world)
-            };
-            resources.insert(hierarchy);
-        }
-        Ok(())
-    }
-
-    fn update(&self, _lua: LuaContext, resources: &SharedResources) -> Result<()> {
-        let world = &mut *resources.fetch_mut::<World>();
-        let hierarchy = &mut *resources.fetch_mut::<Hierarchy<P>>();
-        hierarchy.update(world);
-
-        Ok(())
     }
 }
