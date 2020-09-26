@@ -378,6 +378,12 @@ fn load_core<'lua>(lua: LuaContext<'lua>, table: &LuaTable<'lua>) -> Result<()> 
     )?;
     lua.globals().set("coroutine", LuaValue::Nil)?;
 
+    table.set("log", crate::module::log::load(lua)?)?;
+
+    ["print", "dofile", "load", "loadstring", "loadfile"]
+        .iter()
+        .try_for_each(|&s| lua.globals().set(s, LuaValue::Nil))?;
+
     Ok(())
 }
 
