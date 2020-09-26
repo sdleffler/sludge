@@ -53,7 +53,7 @@ fn downcast_send_sync<T: Any>(
     })
 }
 
-#[derive(Derivative)]
+#[derive(Default, Derivative)]
 #[derivative(Debug)]
 pub struct Resources {
     #[derivative(Debug = "ignore")]
@@ -62,9 +62,7 @@ pub struct Resources {
 
 impl Resources {
     pub fn new() -> Self {
-        Self {
-            map: HashMap::new(),
-        }
+        Self::default()
     }
 
     pub fn insert<T: Any + Send + Sync>(&mut self, resource: T) -> Option<T> {
@@ -73,6 +71,10 @@ impl Resources {
         let maybe_old = self.map.insert(typeid, wrapped);
 
         maybe_old.map(|t| *downcast_send_sync(t.into_inner()).unwrap())
+    }
+
+    pub fn has_value<T: Any + Send + Sync>(&self) -> bool {
+        self.map.contains_key(&TypeId::of::<T>())
     }
 
     pub fn remove<T: Any + Send + Sync>(&mut self) -> Option<T> {

@@ -4,12 +4,15 @@ version = "0.1.0"
 authors = ["Sean Leffler <sean@errno.com>"]
 edition = "2018"
 
+[features]
+default = ["ggez"]
+
 [dependencies]
 rlua = { path = "../rlua" }
 nalgebra = "0.22.0"
 ncollide2d = "0.24.0"
 hecs = { path = "../hecs" }
-generational-arena = "0.2.8"
+generational-arena = { path = "../generational-arena" }
 derivative = "2.1.1"
 anyhow = "1.0.32"
 crossbeam-channel = "0.4.4"
@@ -20,6 +23,8 @@ hibitset = "0.6.3"
 hashbrown = "0.9.0"
 shrev = "1.1.1"
 atomic_refcell = "0.1.6"
+string_cache = "0.8.0"
+ggez = { version = "0.5.1", optional = true }
 
 [dev-dependencies]
 approx = "0.3.2"
