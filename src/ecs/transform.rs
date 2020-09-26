@@ -1,14 +1,19 @@
 use {
+    anyhow::*,
     crossbeam_channel::Receiver,
     hashbrown::HashSet,
     nalgebra as na,
+    rlua::prelude::*,
     shrev::ReaderId,
     std::{any::TypeId, marker::PhantomData},
 };
 
-use crate::ecs::{
-    hierarchy::{Hierarchy, HierarchyEvent, ParentComponent},
-    ComponentEvent, Entity, Flags, SmartComponent, World,
+use crate::{
+    ecs::{
+        hierarchy::{Hierarchy, HierarchyEvent, Parent, ParentComponent},
+        ComponentEvent, Entity, Flags, SmartComponent, World,
+    },
+    resources::{Resources, SharedResources},
 };
 
 pub type TransformObject = na::Transform2<f32>;
@@ -46,14 +51,14 @@ impl<'a> SmartComponent<&'a Flags> for Transform {
     }
 }
 
-pub struct TransformGraph<P: ParentComponent> {
+pub struct TransformGraph<P: ParentComponent = Parent> {
     hierarchy_events: ReaderId<HierarchyEvent>,
     transform_events: Receiver<ComponentEvent>,
 
     modified: HashSet<Entity>,
     removed: HashSet<Entity>,
 
-    _marker: PhantomData<*const P>,
+    _marker: PhantomData<P>,
 }
 
 impl<P: ParentComponent> TransformGraph<P> {
@@ -125,6 +130,42 @@ impl<P: ParentComponent> TransformGraph<P> {
                 transform.global = parent_global * transform.local;
             }
         }
+    }
+}
+
+pub struct TransformSystem<P: ParentComponent>(PhantomData<P>);
+
+pub type DefaultTransformSystem = TransformSystem<Parent>;
+
+impl<P: ParentComponent> TransformSystem<P> {
+    pub fn new() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<P: ParentComponent> crate::System for TransformSystem<P> {
+    fn init(&self, _lua: LuaContext, resources: &mut Resources) -> Result<()> {
+        if !resources.has_value::<TransformGraph<P>>() {
+            let transform_graph = {
+                let world = &mut *resources
+                    .try_fetch_mut::<World>()
+                    .ok_or_else(|| anyhow!("no World resource yet"))?;
+                let hierarchy = &mut *resources
+                    .try_fetch_mut::<Hierarchy<P>>()
+                    .ok_or_else(|| anyhow!("no Hierarchy resource yet"))?;
+                TransformGraph::<P>::new(world, hierarchy)
+            };
+            resources.insert(transform_graph);
+        }
+        Ok(())
+    }
+
+    fn update(&self, _lua: LuaContext, resources: &SharedResources) -> Result<()> {
+        let world = &mut *resources.fetch_mut::<World>();
+        let hierarchy = &mut *resources.fetch_mut::<Hierarchy<P>>();
+        hierarchy.update(world);
+
+        Ok(())
     }
 }
 

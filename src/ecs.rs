@@ -6,7 +6,7 @@ use {
 };
 
 pub mod hierarchy;
-pub mod transform_graph;
+pub mod transform;
 
 pub use hecs::{
     Bundle, Component, ComponentError, DynamicBundle, Entity, EntityRef, NoSuchEntity, Query,

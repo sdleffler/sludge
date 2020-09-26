@@ -8,7 +8,7 @@ use {
     hashbrown::HashMap,
     nalgebra as na,
     rlua::prelude::*,
-    std::collections::BinaryHeap,
+    std::{any::Any, collections::BinaryHeap},
     string_cache::DefaultAtom,
 };
 
@@ -16,10 +16,13 @@ pub type Atom = DefaultAtom;
 
 mod utils;
 
+pub mod dependency_graph;
 pub mod ecs;
 pub mod input;
 pub mod module;
 pub mod resources;
+pub mod scene;
+pub mod tiled;
 
 pub use anyhow;
 pub use nalgebra;
@@ -30,10 +33,13 @@ pub mod prelude {
     pub use nalgebra as na;
     pub use rlua::prelude::*;
 
-    pub use crate::{Scheduler, Sludge};
+    pub use crate::{Scheduler, Space};
 }
 
-use crate::resources::{Resources, SharedResources};
+use crate::{
+    dependency_graph::DependencyGraph,
+    resources::{Resources, SharedFetch, SharedFetchMut, SharedResources},
+};
 
 const RESOURCES_REGISTRY_KEY: &'static str = "sludge.resources";
 
@@ -48,17 +54,25 @@ impl<'lua> SludgeLuaContextExt for LuaContext<'lua> {
     }
 }
 
+pub trait System: 'static {
+    fn init(&self, lua: LuaContext, resources: &mut Resources) -> Result<()>;
+    fn update(&self, lua: LuaContext, resources: &SharedResources) -> Result<()>;
+}
+
 #[derive(Derivative)]
 #[derivative(Debug)]
-pub struct Sludge {
+pub struct Space {
     #[derivative(Debug = "ignore")]
     lua: Lua,
 
     #[derivative(Debug = "ignore")]
-    shared_resources: SharedResources,
+    resources: SharedResources,
+
+    #[derivative(Debug = "ignore")]
+    dependency_graph: DependencyGraph<Box<dyn System>>,
 }
 
-impl Sludge {
+impl Space {
     pub fn new() -> Result<Self> {
         let lua = Lua::new();
         let mut resources = Resources::new();
@@ -79,17 +93,58 @@ impl Sludge {
             Ok(())
         })?;
 
-        // We don't care if setting up logging fails; it just means there's already a logger.
-        let _ = setup_logging();
-
         Ok(Self {
             lua,
-            shared_resources,
+            resources: shared_resources,
+            dependency_graph: DependencyGraph::new(),
         })
     }
 
+    pub fn register<S: System>(&mut self, system: S, name: &str, deps: &[&str]) -> Result<()> {
+        ensure!(
+            self.dependency_graph
+                .insert(Box::new(system), name, deps.iter().copied())?
+                .is_none(),
+            "system already exists!"
+        );
+
+        Ok(())
+    }
+
+    pub fn update(&mut self) -> Result<()> {
+        if self.dependency_graph.update() {
+            for (name, sys) in self.dependency_graph.sorted() {
+                self.lua
+                    .context(|lua| sys.init(lua, &mut *self.resources.borrow_mut()))?;
+                log::info!("initialized system `{}`", name);
+            }
+        }
+
+        for (_, sys) in self.dependency_graph.sorted() {
+            self.lua.context(|lua| sys.update(lua, &self.resources))?;
+        }
+
+        Ok(())
+    }
+
+    pub fn fetch<T: Any + Send + Sync>(&self) -> SharedFetch<T> {
+        self.resources.fetch()
+    }
+
+    pub fn fetch_mut<T: Any + Send + Sync>(&self) -> SharedFetchMut<T> {
+        self.resources.fetch_mut()
+    }
+
+    pub fn try_fetch<T: Any + Send + Sync>(&self) -> Option<SharedFetch<T>> {
+        self.resources.try_fetch()
+    }
+
+    pub fn try_fetch_mut<T: Any + Send + Sync>(&self) -> Option<SharedFetchMut<T>> {
+        self.resources.try_fetch_mut()
+    }
+
     pub fn resources(&self) -> &SharedResources {
-        &self.shared_resources
+        &self.resources
     }
 
     /// You shouldn't need this.
@@ -343,40 +398,62 @@ impl<'s, 'lua> SchedulerWithContext<'s, 'lua> {
 }
 
 fn load_core<'lua>(lua: LuaContext<'lua>, table: &LuaTable<'lua>) -> Result<()> {
-    table.set::<_, LuaFunction<'lua>>(
-        "go",
-        lua.create_function(|ctx, thunk: LuaFunction| {
-            let co = ctx.create_thread(thunk)?;
-            ctx.resources()
-                .fetch::<SchedulerQueueChannel>()
-                .spawn
-                .try_send(ctx.create_registry_value(co)?)
-                .unwrap();
-            Ok(())
-        })?,
-    )?;
-
-    table.set::<_, LuaFunction<'lua>>(
-        "event",
-        lua.create_function(|ctx, string: LuaString| {
-            ctx.resources()
-                .fetch::<SchedulerQueueChannel>()
-                .event
-                .try_send(Event(Atom::from(string.to_str()?)))
-                .unwrap();
-            Ok(())
-        })?,
-    )?;
-
-    // Steal coroutine.yield and then get rid of it from the global table so that
-    // all coroutine manipulation goes through Sludge.
-    table.set::<_, LuaFunction<'lua>>(
-        "wait_for",
-        lua.globals()
-            .get::<_, LuaTable>("coroutine")?
-            .get::<_, LuaFunction>("yield")?,
-    )?;
+    // Steal coroutine then get rid of it from the global table so that
+    // all coroutine manipulation goes through Space.
+    let coroutine = lua.globals().get::<_, LuaTable>("coroutine")?;
     lua.globals().set("coroutine", LuaValue::Nil)?;
+
+    let spawn = lua.create_function(|ctx, task: LuaValue| {
+        let thread = match task {
+            LuaValue::Function(f) => ctx.create_thread(f)?,
+            LuaValue::Thread(th) => th,
+            _ => {
+                return Err(LuaError::FromLuaConversionError {
+                    to: "thread or function",
+                    from: "lua value",
+                    message: None,
+                })
+            }
+        };
+
+        let key = ctx.create_registry_value(thread.clone())?;
+        ctx.resources()
+            .fetch::<SchedulerQueueChannel>()
+            .spawn
+            .try_send(key)
+            .unwrap();
+        Ok(thread)
+    })?;
+
+    let broadcast = lua.create_function(|ctx, string: LuaString| {
+        ctx.resources()
+            .fetch::<SchedulerQueueChannel>()
+            .event
+            .try_send(Event(Atom::from(string.to_str()?)))
+            .unwrap();
+        Ok(())
+    })?;
+
+    let yield_ = coroutine.get::<_, LuaFunction>("yield")?;
+    let create = coroutine.get::<_, LuaFunction>("create")?;
+    let wrap = coroutine.get::<_, LuaFunction>("wrap")?;
+    let running = coroutine.get::<_, LuaFunction>("running")?;
+    let status = coroutine.get::<_, LuaFunction>("status")?;
+    let resume = coroutine.get::<_, LuaFunction>("resume")?;
+
+    table.set(
+        "thread",
+        lua.create_table_from(vec![
+            ("spawn", spawn),
+            ("broadcast", broadcast),
+            ("yield", yield_),
+            ("create", create),
+            ("wrap", wrap),
+            ("running", running),
+            ("status", status),
+            ("resume", resume),
+        ])?,
+    )?;
 
     table.set("log", crate::module::log::load(lua)?)?;
 
@@ -387,33 +464,33 @@ fn load_core<'lua>(lua: LuaContext<'lua>, table: &LuaTable<'lua>) -> Result<()> 
     Ok(())
 }
 
-/// Basic logging setup to log to the console with `fern`.
-fn setup_logging() -> Result<()> {
-    use fern::colors::{Color, ColoredLevelConfig};
-    let colors = ColoredLevelConfig::default()
-        .info(Color::Green)
-        .debug(Color::BrightMagenta)
-        .trace(Color::BrightBlue);
-    // This sets up a `fern` logger and initializes `log`.
-    fern::Dispatch::new()
-        // Formats logs
-        .format(move |out, message, record| {
-            out.finish(format_args!(
-                "[{}][{:<5}][{}] {}",
-                chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
-                colors.color(record.level()),
-                record.target(),
-                message
-            ))
-        })
-        .level(log::LevelFilter::Warn)
-        // Filter out unnecessary stuff
-        .level_for("sludge", log::LevelFilter::Warn)
-        // Hooks up console output.
-        // env var for outputting to a file?
-        // Haven't needed it yet!
-        .chain(std::io::stdout())
-        .apply()?;
+// /// Basic logging setup to log to the console with `fern`.
+// fn setup_logging() -> Result<()> {
+//     use fern::colors::{Color, ColoredLevelConfig};
+//     let colors = ColoredLevelConfig::default()
+//         .info(Color::Green)
+//         .debug(Color::BrightMagenta)
+//         .trace(Color::BrightBlue);
+//     // This sets up a `fern` logger and initializes `log`.
+//     fern::Dispatch::new()
+//         // Formats logs
+//         .format(move |out, message, record| {
+//             out.finish(format_args!(
+//                 "[{}][{:<5}][{}] {}",
+//                 chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+//                 colors.color(record.level()),
+//                 record.target(),
+//                 message
+//             ))
+//         })
+//         .level(log::LevelFilter::Warn)
+//         // Filter out unnecessary stuff
+//         .level_for("sludge", log::LevelFilter::Warn)
+//         // Hooks up console output.
+//         // env var for outputting to a file?
+//         // Haven't needed it yet!
+//         .chain(std::io::stderr())
+//         .apply()?;
 
-    Ok(())
-}
+//     Ok(())
+// }

@@ -1,5 +1,5 @@
 use crate::{
-    ecs::{transform_graph::Transform as TransformComponent, World},
+    ecs::{transform::Transform as TransformComponent, World},
     module::{
         ecs::{ComponentWrapper, EntityWrapper, RegisterableComponent},
         math::Transform,

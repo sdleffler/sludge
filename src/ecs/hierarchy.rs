@@ -1,13 +1,18 @@
 use {
+    anyhow::*,
     crossbeam_channel::Receiver,
     hashbrown::{HashMap, HashSet},
     hecs::SmartComponent,
     hibitset::{BitSet, BitSetLike},
+    rlua::prelude::*,
     shrev::{EventChannel, ReaderId},
     std::{any::TypeId, marker::PhantomData},
 };
 
-use crate::ecs::{ComponentEvent, Entity, Flags, World};
+use crate::{
+    ecs::{ComponentEvent, Entity, Flags, World},
+    resources::{Resources, SharedResources},
+};
 
 #[derive(Debug, Clone, Copy)]
 pub enum HierarchyEvent {
@@ -59,7 +64,7 @@ pub struct Hierarchy<P: ParentComponent> {
     events: Receiver<ComponentEvent>,
     changed: EventChannel<HierarchyEvent>,
 
-    _marker: PhantomData<*const P>,
+    _marker: PhantomData<P>,
 }
 
 impl<P: ParentComponent> Hierarchy<P> {
@@ -435,5 +440,39 @@ impl<'a, P: ParentComponent> Iterator for SubHierarchyIterator<'a, P> {
             }
             Some(entity)
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct HierarchySystem<P: ParentComponent>(PhantomData<P>);
+
+pub type DefaultHierarchySystem = HierarchySystem<Parent>;
+
+impl<P: ParentComponent> HierarchySystem<P> {
+    pub fn new() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<P: ParentComponent> crate::System for HierarchySystem<P> {
+    fn init(&self, _lua: LuaContext, resources: &mut Resources) -> Result<()> {
+        if !resources.has_value::<Hierarchy<P>>() {
+            let hierarchy = {
+                let world = resources
+                    .get_mut::<World>()
+                    .ok_or_else(|| anyhow!("no World resource yet"))?;
+                Hierarchy::<P>::new(world)
+            };
+            resources.insert(hierarchy);
+        }
+        Ok(())
+    }
+
+    fn update(&self, _lua: LuaContext, resources: &SharedResources) -> Result<()> {
+        let world = &mut *resources.fetch_mut::<World>();
+        let hierarchy = &mut *resources.fetch_mut::<Hierarchy<P>>();
+        hierarchy.update(world);
+
+        Ok(())
     }
 }
