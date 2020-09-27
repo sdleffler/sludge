@@ -38,15 +38,23 @@ impl<T> DependencyGraph<T> {
         Ok(maybe_old.map(|old| self.graph.remove_node(old).unwrap().1))
     }
 
-    pub fn update(&mut self) -> bool {
+    pub fn update(&mut self) -> Result<bool> {
         if !self.changed {
-            return false;
+            return Ok(false);
         }
 
-        self.sorted = petgraph::algo::toposort(&self.graph, None).expect("graph should be acyclic");
+        self.sorted = petgraph::algo::toposort(&self.graph, None).map_err(|cycle| {
+            let node = &self.graph[cycle.node_id()].0;
+            anyhow!(
+                "A cycle was found which includes the node `{}`, \
+                but the dependency graph must be acyclic to allow \
+                a proper ordering of dependencies!",
+                node
+            )
+        })?;
         self.changed = false;
 
-        true
+        Ok(true)
     }
 
     pub fn sorted(&self) -> impl Iterator<Item = (&str, &T)> {

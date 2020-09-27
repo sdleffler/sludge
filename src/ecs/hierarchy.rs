@@ -1,5 +1,4 @@
 use {
-    crossbeam_channel::Receiver,
     hashbrown::{HashMap, HashSet},
     hecs::SmartComponent,
     hibitset::{BitSet, BitSetLike},
@@ -7,7 +6,10 @@ use {
     std::marker::PhantomData,
 };
 
-use crate::ecs::{ComponentEvent, Entity, Flags, World};
+use crate::{
+    ecs::{ComponentEvent, Entity, Flags, World},
+    resources::SharedResources,
+};
 
 pub trait ParentComponent: for<'a> SmartComponent<&'a Flags> {
     fn parent_entity(&self) -> Entity;
@@ -33,7 +35,7 @@ pub struct Hierarchy<P: ParentComponent> {
 
     scratch_set: HashSet<Entity>,
 
-    events: Receiver<ComponentEvent>,
+    events: ReaderId<ComponentEvent>,
     changed: EventChannel<HierarchyEvent>,
 
     _marker: PhantomData<P>,
@@ -41,8 +43,7 @@ pub struct Hierarchy<P: ParentComponent> {
 
 impl<P: ParentComponent> Hierarchy<P> {
     pub fn new(world: &mut World) -> Self {
-        let (sender, receiver) = crossbeam_channel::unbounded();
-        world.subscribe::<P>(Box::new(sender));
+        let events = world.track::<P>();
         Self {
             sorted: Vec::new(),
             entities: HashMap::new(),
@@ -57,7 +58,7 @@ impl<P: ParentComponent> Hierarchy<P> {
 
             scratch_set: HashSet::new(),
 
-            events: receiver,
+            events,
             changed: EventChannel::new(),
 
             _marker: PhantomData,
@@ -119,12 +120,14 @@ impl<P: ParentComponent> Hierarchy<P> {
         &self.changed
     }
 
-    pub fn update(&mut self, world: &mut World) {
+    pub fn update(&mut self, resources: &SharedResources) {
         self.inserted.clear();
         self.modified.clear();
         self.removed.clear();
 
-        for event in self.events.try_iter() {
+        let world = &mut *resources.fetch_mut::<World>();
+
+        for event in world.poll::<P>(&mut self.events) {
             match event {
                 ComponentEvent::Inserted(entity) => {
                     self.inserted.add(entity.id());

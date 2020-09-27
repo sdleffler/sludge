@@ -39,8 +39,16 @@ use {hashbrown::HashMap, std::hash::Hash};
 // Easy way?  Hash map of event -> axis/button bindings.
 
 #[derive(Debug, Hash, Eq, PartialEq, Copy, Clone)]
+pub enum MouseButton {
+    Left,
+    Right,
+    Middle,
+}
+
+#[derive(Debug, Hash, Eq, PartialEq, Copy, Clone)]
 enum InputType<Keys> {
-    KeyEvent(Keys), // MouseButtonEvent,
+    KeyEvent(Keys),
+    MouseButtonEvent(MouseButton),
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -128,6 +136,14 @@ where
     pub fn bind_key_to_button(mut self, keycode: Keys, button: Buttons) -> Self {
         self.bindings.insert(
             InputType::KeyEvent(keycode),
+            InputEffect::Button(button.clone()),
+        );
+        self
+    }
+
+    pub fn bind_mouse_to_button(mut self, mouse_button: MouseButton, button: Buttons) -> Self {
+        self.bindings.insert(
+            InputType::MouseButtonEvent(mouse_button),
             InputEffect::Button(button.clone()),
         );
         self

@@ -100,6 +100,28 @@ impl Transform {
     pub fn global(&self) -> &TransformObject {
         &self.global
     }
+
+    #[rustfmt::skip]
+    pub fn local_to_mat4(&self) -> na::Matrix4<f32> {
+        let mat3 = self.local.to_homogeneous();
+        na::Matrix4::new(
+            mat3[(0, 0)], mat3[(0, 1)],           0., mat3[(0, 2)],
+            mat3[(1, 0)], mat3[(1, 1)],           0., mat3[(1, 2)],
+                      0.,           0.,           1.,           0.,
+            mat3[(2, 0)], mat3[(2, 1)],           0., mat3[(2, 2)],
+        )
+    }
+
+    #[rustfmt::skip]
+    pub fn global_to_mat4(&self) -> na::Matrix4<f32> {
+        let mat3 = self.global.to_homogeneous();
+        na::Matrix4::new(
+            mat3[(0, 0)], mat3[(0, 1)],           0., mat3[(0, 2)],
+            mat3[(1, 0)], mat3[(1, 1)],           0., mat3[(1, 2)],
+                      0.,           0.,           1.,           0.,
+            mat3[(2, 0)], mat3[(2, 1)],           0., mat3[(2, 2)],
+        )
+    }
 }
 
 impl<'a> SmartComponent<&'a Flags> for Transform {

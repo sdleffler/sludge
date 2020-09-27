@@ -11,6 +11,24 @@ use crate::{
 };
 
 #[derive(Debug, Clone, Copy, Default)]
+pub struct WorldEventSystem;
+
+impl crate::System for WorldEventSystem {
+    fn init(&self, _lua: LuaContext, resources: &mut Resources) -> Result<()> {
+        if !resources.has_value::<World>() {
+            resources.insert(World::new());
+        }
+        Ok(())
+    }
+
+    fn update(&self, _lua: LuaContext, resources: &SharedResources) -> Result<()> {
+        resources.fetch_mut::<World>().flush_events();
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
 pub struct HierarchySystem<P: ParentComponent>(PhantomData<P>);
 
 pub type DefaultHierarchySystem = HierarchySystem<Parent>;
@@ -36,9 +54,8 @@ impl<P: ParentComponent> crate::System for HierarchySystem<P> {
     }
 
     fn update(&self, _lua: LuaContext, resources: &SharedResources) -> Result<()> {
-        let world = &mut *resources.fetch_mut::<World>();
         let hierarchy = &mut *resources.fetch_mut::<Hierarchy<P>>();
-        hierarchy.update(world);
+        hierarchy.update(resources);
 
         Ok(())
     }
@@ -72,9 +89,8 @@ impl<P: ParentComponent> crate::System for TransformSystem<P> {
     }
 
     fn update(&self, _lua: LuaContext, resources: &SharedResources) -> Result<()> {
-        let world = &mut *resources.fetch_mut::<World>();
-        let hierarchy = &mut *resources.fetch_mut::<Hierarchy<P>>();
-        hierarchy.update(world);
+        let transforms = &mut *resources.fetch_mut::<TransformGraph<P>>();
+        transforms.update(resources);
 
         Ok(())
     }

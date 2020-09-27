@@ -1,7 +1,7 @@
 use {
-    crossbeam_channel::Sender,
     hashbrown::HashMap,
     hibitset::{AtomicBitSet, BitSetLike},
+    shrev::{EventChannel, EventIterator, ReaderId},
     std::any::TypeId,
 };
 
@@ -23,20 +23,10 @@ pub enum ComponentEvent {
     Removed(Entity),
 }
 
-pub trait EventSender: Send + Sync + 'static {
-    fn send_event(&self, event: ComponentEvent) -> bool;
-}
-
-impl EventSender for Sender<ComponentEvent> {
-    fn send_event(&self, event: ComponentEvent) -> bool {
-        self.try_send(event).is_ok()
-    }
-}
-
 pub struct World {
     ecs: hecs::World,
     flags: HashMap<TypeId, AtomicBitSet>,
-    channels: HashMap<TypeId, Vec<Box<dyn EventSender>>>,
+    channels: HashMap<TypeId, EventChannel<ComponentEvent>>,
 }
 
 pub type Flags = HashMap<TypeId, AtomicBitSet>;
@@ -61,10 +51,8 @@ impl World {
         {
             self.flags.entry(typeid).or_default();
 
-            if let Some(channel) = self.channels.get(&typeid) {
-                for subscriber in channel {
-                    subscriber.send_event(ComponentEvent::Inserted(entity));
-                }
+            if let Some(channel) = self.channels.get_mut(&typeid) {
+                channel.single_write(ComponentEvent::Inserted(entity));
             }
         }
 
@@ -73,10 +61,8 @@ impl World {
 
     pub fn despawn(&mut self, entity: Entity) -> Result<(), NoSuchEntity> {
         for typeid in self.ecs.entity(entity)?.component_types() {
-            if let Some(channel) = self.channels.get(&typeid) {
-                for subscriber in channel {
-                    subscriber.send_event(ComponentEvent::Removed(entity));
-                }
+            if let Some(channel) = self.channels.get_mut(&typeid) {
+                channel.single_write(ComponentEvent::Removed(entity));
             }
         }
 
@@ -155,10 +141,8 @@ impl World {
             for typeid in typeids.iter().copied() {
                 self.flags.entry(typeid).or_default();
 
-                if let Some(channel) = self.channels.get(&typeid) {
-                    for subscriber in channel {
-                        subscriber.send_event(ComponentEvent::Inserted(entity));
-                    }
+                if let Some(channel) = self.channels.get_mut(&typeid) {
+                    channel.single_write(ComponentEvent::Inserted(entity));
                 }
             }
         });
@@ -173,10 +157,8 @@ impl World {
     ) -> Result<(), NoSuchEntity> {
         let typeid = TypeId::of::<C>();
         self.flags.entry(typeid).or_default();
-        if let Some(channel) = self.channels.get(&typeid) {
-            for subscriber in channel {
-                subscriber.send_event(ComponentEvent::Inserted(entity));
-            }
+        if let Some(channel) = self.channels.get_mut(&typeid) {
+            channel.single_write(ComponentEvent::Inserted(entity));
         }
 
         self.ecs.insert_one(entity, component)
@@ -185,10 +167,8 @@ impl World {
     pub fn remove<T: Bundle>(&mut self, entity: Entity) -> Result<T, ComponentError> {
         T::with_static_ids(|typeids| {
             for typeid in typeids.iter().copied() {
-                if let Some(channel) = self.channels.get(&typeid) {
-                    for subscriber in channel {
-                        subscriber.send_event(ComponentEvent::Removed(entity));
-                    }
+                if let Some(channel) = self.channels.get_mut(&typeid) {
+                    channel.single_write(ComponentEvent::Removed(entity));
                 }
             }
         });
@@ -197,32 +177,40 @@ impl World {
     }
 
     pub fn remove_one<T: Component>(&mut self, entity: Entity) -> Result<T, ComponentError> {
-        if let Some(channel) = self.channels.get(&TypeId::of::<T>()) {
-            for subscriber in channel {
-                subscriber.send_event(ComponentEvent::Removed(entity));
-            }
+        if let Some(channel) = self.channels.get_mut(&TypeId::of::<T>()) {
+            channel.single_write(ComponentEvent::Removed(entity));
         }
 
         self.ecs.remove_one(entity)
     }
 
-    pub fn subscribe<T: Component>(&mut self, sender: Box<dyn EventSender>) {
+    pub fn poll<T: Component>(
+        &self,
+        reader_id: &mut ReaderId<ComponentEvent>,
+    ) -> EventIterator<ComponentEvent> {
+        self.channels
+            .get(&TypeId::of::<T>())
+            .unwrap()
+            .read(reader_id)
+    }
+
+    pub fn track<T: Component>(&mut self) -> ReaderId<ComponentEvent> {
         self.channels
             .entry(TypeId::of::<T>())
             .or_default()
-            .push(sender);
+            .register_reader()
     }
 
     pub fn flush_events(&mut self) {
         for (typeid, set) in self.flags.iter_mut() {
             if !set.is_empty() {
-                if let Some(channels) = self.channels.get(&typeid) {
-                    for id in set.iter() {
-                        if let Some(e) = unsafe { self.ecs.resolve_unknown_gen(id) } {
-                            for subscriber in channels {
-                                subscriber.send_event(ComponentEvent::Modified(e));
-                            }
-                        }
+                if let Some(channel) = self.channels.get_mut(&typeid) {
+                    let ecs = &self.ecs;
+                    for entity in set
+                        .iter()
+                        .filter_map(|id| unsafe { ecs.resolve_unknown_gen(id) })
+                    {
+                        channel.single_write(ComponentEvent::Modified(entity));
                     }
                 }
 

@@ -93,11 +93,25 @@ impl Space {
             Ok(())
         })?;
 
-        Ok(Self {
+        let mut this = Self {
             lua,
             resources: shared_resources,
             dependency_graph: DependencyGraph::new(),
-        })
+        };
+
+        this.register(crate::ecs::systems::WorldEventSystem, "world", &[])?;
+        this.register(
+            crate::ecs::systems::DefaultHierarchySystem::new(),
+            "hierarchy",
+            &["world"],
+        )?;
+        this.register(
+            crate::ecs::systems::DefaultTransformSystem::new(),
+            "transform",
+            &["world", "hierarchy"],
+        )?;
+
+        Ok(this)
     }
 
     pub fn register<S: System>(&mut self, system: S, name: &str, deps: &[&str]) -> Result<()> {
@@ -111,14 +125,20 @@ impl Space {
         Ok(())
     }
 
-    pub fn update(&mut self) -> Result<()> {
-        if self.dependency_graph.update() {
+    pub fn refresh(&mut self) -> Result<()> {
+        if self.dependency_graph.update()? {
             for (name, sys) in self.dependency_graph.sorted() {
                 self.lua
                     .context(|lua| sys.init(lua, &mut *self.resources.borrow_mut()))?;
                 log::info!("initialized system `{}`", name);
             }
         }
+
+        Ok(())
+    }
+
+    pub fn update(&mut self) -> Result<()> {
+        self.refresh()?;
 
         for (_, sys) in self.dependency_graph.sorted() {
             self.lua.context(|lua| sys.update(lua, &self.resources))?;

@@ -1,14 +1,17 @@
-use {crossbeam_channel::Receiver, hashbrown::HashSet, shrev::ReaderId, std::marker::PhantomData};
+use {hashbrown::HashSet, shrev::ReaderId, std::marker::PhantomData};
 
-use crate::ecs::{
-    components::{Parent, Transform},
-    hierarchy::{Hierarchy, HierarchyEvent, ParentComponent},
-    ComponentEvent, Entity, World,
+use crate::{
+    ecs::{
+        components::{Parent, Transform},
+        hierarchy::{Hierarchy, HierarchyEvent, ParentComponent},
+        ComponentEvent, Entity, World,
+    },
+    resources::SharedResources,
 };
 
 pub struct TransformGraph<P: ParentComponent = Parent> {
     hierarchy_events: ReaderId<HierarchyEvent>,
-    transform_events: Receiver<ComponentEvent>,
+    transform_events: ReaderId<ComponentEvent>,
 
     modified: HashSet<Entity>,
     removed: HashSet<Entity>,
@@ -18,13 +21,12 @@ pub struct TransformGraph<P: ParentComponent = Parent> {
 
 impl<P: ParentComponent> TransformGraph<P> {
     pub fn new(world: &mut World, hierarchy: &mut Hierarchy<P>) -> Self {
-        let (sender, receiver) = crossbeam_channel::unbounded();
-        world.subscribe::<Transform>(Box::new(sender));
-        let reader = hierarchy.track();
+        let transform_events = world.track::<Transform>();
+        let hierarchy_events = hierarchy.track();
 
         Self {
-            hierarchy_events: reader,
-            transform_events: receiver,
+            hierarchy_events,
+            transform_events,
 
             modified: HashSet::new(),
             removed: HashSet::new(),
@@ -33,9 +35,12 @@ impl<P: ParentComponent> TransformGraph<P> {
         }
     }
 
-    pub fn update(&mut self, world: &mut World, hierarchy: &Hierarchy<P>) {
+    pub fn update(&mut self, resources: &SharedResources) {
         self.modified.clear();
         self.removed.clear();
+
+        let world = &*resources.fetch::<World>();
+        let hierarchy = &*resources.fetch::<Hierarchy<P>>();
 
         for event in hierarchy.changed().read(&mut self.hierarchy_events) {
             match event {
@@ -48,7 +53,7 @@ impl<P: ParentComponent> TransformGraph<P> {
             }
         }
 
-        for event in self.transform_events.try_iter() {
+        for &event in world.poll::<Transform>(&mut self.transform_events) {
             match event {
                 ComponentEvent::Inserted(entity) => {
                     self.modified.insert(entity);
@@ -70,7 +75,7 @@ impl<P: ParentComponent> TransformGraph<P> {
         }
 
         for entity in hierarchy.all().iter().copied() {
-            if self.modified.contains(&entity) {
+            if self.modified.remove(&entity) {
                 self.modified.extend(hierarchy.children(entity));
 
                 let parent_global = world
@@ -85,6 +90,12 @@ impl<P: ParentComponent> TransformGraph<P> {
                 transform.global = parent_global * transform.local;
             }
         }
+
+        for entity in self.modified.iter().copied() {
+            if let Ok(mut transform) = world.get_mut_raw::<Transform>(entity) {
+                transform.global = transform.local;
+            }
+        }
     }
 }
 
@@ -96,42 +107,56 @@ mod tests {
 
     #[test]
     fn parent_update() {
+        let resources = crate::resources::SharedResources::new();
+
         let mut world = World::new();
         let mut hierarchy = Hierarchy::<Parent>::new(&mut world);
-        let mut transforms = TransformGraph::new(&mut world, &mut hierarchy);
+        let transforms = TransformGraph::new(&mut world, &mut hierarchy);
+
+        resources.borrow_mut().insert(world);
+        resources.borrow_mut().insert(hierarchy);
+        resources.borrow_mut().insert(transforms);
 
         let e1 = {
             let mut tx = na::Transform2::identity();
             tx *= &na::Translation2::new(5., 7.);
             tx *= &na::Rotation2::new(::std::f32::consts::PI);
-            world.spawn((Transform::new(tx),))
+            resources.fetch_mut::<World>().spawn((Transform::new(tx),))
         };
 
-        hierarchy.update(&mut world);
-        transforms.update(&mut world, &hierarchy);
+        resources
+            .fetch_mut::<Hierarchy<Parent>>()
+            .update(&resources);
+        resources.fetch_mut::<TransformGraph>().update(&resources);
 
         let e2 = {
             let mut tx = na::Transform2::identity();
             tx *= &na::Translation2::new(5., 3.);
-            world.spawn((Transform::new(tx), Parent::new(e1)))
+            resources
+                .fetch_mut::<World>()
+                .spawn((Transform::new(tx), Parent::new(e1)))
         };
 
-        hierarchy.update(&mut world);
-        transforms.update(&mut world, &hierarchy);
+        resources
+            .fetch_mut::<Hierarchy<Parent>>()
+            .update(&resources);
+        resources.fetch_mut::<TransformGraph>().update(&resources);
 
-        let tx2 = *world.get::<Transform>(e2).unwrap();
+        let tx2 = *resources.fetch::<World>().get::<Transform>(e2).unwrap();
 
         assert_relative_eq!(
             tx2.global.transform_point(&na::Point2::origin()),
             na::Point2::new(-10., -10.)
         );
 
-        world.despawn(e1).unwrap();
+        resources.fetch_mut::<World>().despawn(e1).unwrap();
 
-        hierarchy.update(&mut world);
-        transforms.update(&mut world, &hierarchy);
+        resources
+            .fetch_mut::<Hierarchy<Parent>>()
+            .update(&resources);
+        resources.fetch_mut::<TransformGraph>().update(&resources);
 
-        let tx2 = *world.get::<Transform>(e2).unwrap();
+        let tx2 = *resources.fetch::<World>().get::<Transform>(e2).unwrap();
 
         assert_relative_eq!(
             tx2.global.transform_point(&na::Point2::origin()),
