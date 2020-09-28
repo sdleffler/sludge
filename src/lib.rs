@@ -27,6 +27,7 @@ pub mod tiled;
 pub use anyhow;
 pub use nalgebra;
 pub use rlua;
+pub use warmy;
 
 pub mod prelude {
     pub use anyhow::*;
@@ -110,6 +111,8 @@ impl Space {
             "transform",
             &["world", "hierarchy"],
         )?;
+
+        this.refresh()?;
 
         Ok(this)
     }

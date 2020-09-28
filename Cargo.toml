@@ -9,7 +9,7 @@ default = ["ggez"]
 
 [dependencies]
 rlua = { path = "../rlua" }
-nalgebra = { version = "0.22.0", features = ["mint"] }
+nalgebra = { version = "0.22.0", features = ["mint", "serde-serialize"] }
 ncollide2d = "0.24.0"
 hecs = { path = "../hecs" }
 generational-arena = { path = "../generational-arena" }
@@ -20,13 +20,17 @@ fern = { version = "0.6.0", features = ["colored"] }
 log = "0.4.11"
 chrono = "0.4.15"
 hibitset = "0.6.3"
-hashbrown = "0.9.0"
+hashbrown = { version = "0.9.0", features = ["serde"] }
 shrev = { path = "../shrev-rs" }
 atomic_refcell = "0.1.6"
 string_cache = "0.8.0"
 ggez = { version = "0.5.1", optional = true }
-tiled = "0.9.3"
+tiled = { path = "../rs-tiled" }
 petgraph = "0.5.1"
+sludge-macros = { path = "macros", version = "0.1.0", optional = true }
+serde = "1.0.116"
+serde_json = "1.0.57"
+warmy = { path = "../warmy", features = ["arc"] }
 
 [dev-dependencies]
 approx = "0.3.2"
