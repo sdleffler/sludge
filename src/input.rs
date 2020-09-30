@@ -16,6 +16,7 @@
 
 // TODO: Handle mice, game pads, joysticks
 
+use crate::math::*;
 use {hashbrown::HashMap, std::hash::Hash};
 
 // Okay, but how does it actually work?
@@ -59,6 +60,27 @@ where
 {
     Axis(Axes, bool),
     Button(Buttons),
+    Cursor(Point2<f32>),
+}
+
+#[derive(Debug, Copy, Clone)]
+struct CursorState {
+    // Where the cursor currently is.
+    position: Point2<f32>,
+    // Where the cursor was last frame.
+    last_position: Point2<f32>,
+    // The difference between the current position and the position last update.
+    delta: Vector2<f32>,
+}
+
+impl Default for CursorState {
+    fn default() -> Self {
+        Self {
+            position: Point2::origin(),
+            last_position: Point2::origin(),
+            delta: Vector2::zeros(),
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -165,6 +187,8 @@ where
     axes: HashMap<Axes, AxisState>,
     // Input states for buttons
     buttons: HashMap<Buttons, ButtonState>,
+    // Input state for the mouse cursor
+    mouse: CursorState,
 }
 
 impl<Axes, Buttons> InputState<Axes, Buttons>
@@ -176,6 +200,7 @@ where
         InputState {
             axes: HashMap::new(),
             buttons: HashMap::new(),
+            mouse: CursorState::default(),
         }
     }
 
@@ -213,9 +238,13 @@ where
                 axis_status.position += dx;
             }
         }
+
         for (_button, button_status) in self.buttons.iter_mut() {
             button_status.pressed_last_frame = button_status.pressed;
         }
+
+        self.mouse.delta = self.mouse.position - self.mouse.last_position;
+        self.mouse.last_position = self.mouse.position;
     }
 
     /// This method should get called by your key_down_event handler.
@@ -237,6 +266,11 @@ where
         self.update_effect(InputEffect::Axis(axis, positive), false);
     }
 
+    /// This method should be called by your mouse_motion_event handler.
+    pub fn update_mouse_position(&mut self, position: Point2<f32>) {
+        self.update_effect(InputEffect::Cursor(position), false);
+    }
+
     /// Takes an InputEffect and actually applies it.
     pub fn update_effect(&mut self, effect: InputEffect<Axes, Buttons>, started: bool) {
         match effect {
@@ -256,6 +290,9 @@ where
                 let f = || ButtonState::default();
                 let button_status = self.buttons.entry(button).or_insert_with(f);
                 button_status.pressed = started;
+            }
+            InputEffect::Cursor(position) => {
+                self.mouse.position = position;
             }
         }
     }
@@ -301,24 +338,12 @@ where
         !b.pressed && b.pressed_last_frame
     }
 
-    pub fn mouse_position() {
-        unimplemented!()
+    pub fn mouse_position(&self) -> Point2<f32> {
+        self.mouse.position
     }
 
-    pub fn mouse_scroll_delta() {
-        unimplemented!()
-    }
-
-    pub fn get_mouse_button() {
-        unimplemented!()
-    }
-
-    pub fn get_mouse_button_down() {
-        unimplemented!()
-    }
-
-    pub fn get_mouse_button_up() {
-        unimplemented!()
+    pub fn mouse_delta(&self) -> Vector2<f32> {
+        self.mouse.delta
     }
 
     pub fn reset_input_state(&mut self) {
@@ -331,6 +356,10 @@ where
             button_status.pressed = false;
             button_status.pressed_last_frame = false;
         }
+
+        self.mouse.position = Point2::origin();
+        self.mouse.last_position = Point2::origin();
+        self.mouse.delta = Vector2::zeros();
     }
 }
 

@@ -1,6 +1,7 @@
 use {
     hashbrown::HashMap,
     hibitset::{AtomicBitSet, BitSetLike},
+    rlua::prelude::*,
     shrev::{EventChannel, EventIterator, ReaderId},
     std::any::TypeId,
 };
@@ -15,6 +16,34 @@ pub use hecs::{
     Bundle, Component, ComponentError, DynamicBundle, Entity, EntityRef, NoSuchEntity, Query,
     QueryBorrow, QueryOne, Ref, RefMut, SmartComponent,
 };
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct WrappedEntity(u64);
+
+impl From<Entity> for WrappedEntity {
+    fn from(entity: Entity) -> WrappedEntity {
+        Self(entity.to_bits())
+    }
+}
+
+impl From<WrappedEntity> for Entity {
+    fn from(wrapped: WrappedEntity) -> Entity {
+        Entity::from_bits(wrapped.0)
+    }
+}
+
+impl<'lua> ToLua<'lua> for WrappedEntity {
+    fn to_lua(self, _lua: LuaContext<'lua>) -> LuaResult<LuaValue<'lua>> {
+        Ok(LuaValue::LightUserData(LuaLightUserData(self.0 as *mut _)))
+    }
+}
+
+impl<'lua> FromLua<'lua> for WrappedEntity {
+    fn from_lua(lua_value: LuaValue<'lua>, lua: LuaContext<'lua>) -> LuaResult<Self> {
+        let lud = LuaLightUserData::from_lua(lua_value, lua)?;
+        Ok(Self(lud.0 as u64))
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub enum ComponentEvent {

@@ -19,22 +19,25 @@ mod utils;
 pub mod dependency_graph;
 pub mod ecs;
 pub mod input;
+pub mod math;
 pub mod modules;
 pub mod resources;
 pub mod scene;
 pub mod tiled;
 
 pub use anyhow;
+pub use aseprite;
 pub use nalgebra;
 pub use rlua;
 pub use warmy;
 
 pub mod prelude {
     pub use anyhow::*;
-    pub use nalgebra as na;
     pub use rlua::prelude::*;
+    pub use serde::{Deserialize, Serialize};
+    pub use serde_json;
 
-    pub use crate::{Scheduler, Space};
+    pub use crate::{math::*, Scheduler, Space};
 }
 
 use crate::{

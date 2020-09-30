@@ -6,11 +6,7 @@ use {
     },
     rand::distributions::uniform::Uniform,
     sludge::{
-        ecs::{
-            components::{Parent, Transform},
-            Flags, SmartComponent, World,
-        },
-        modules::ecs::ArchetypeRegistry,
+        ecs::{components::Transform, Flags, SmartComponent, World},
         prelude::*,
     },
 };
@@ -50,17 +46,6 @@ struct MainState {
 impl MainState {
     pub fn new(ctx: &mut ggez::Context) -> Result<MainState> {
         let mut space = Space::new()?;
-
-        space.lua().context(|lua| -> Result<()> {
-            space.resources().borrow_mut().insert({
-                let mut registry = ArchetypeRegistry::new(lua)?;
-                registry.register::<Transform>(lua)?;
-                registry.register::<Parent>(lua)?;
-                registry
-            });
-
-            Ok(())
-        })?;
 
         space.refresh()?;
 

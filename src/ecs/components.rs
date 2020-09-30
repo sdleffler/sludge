@@ -1,13 +1,6 @@
-use {anyhow::*, hecs::SmartComponent, nalgebra as na, rlua::prelude::*, std::any::TypeId};
+use {hecs::SmartComponent, nalgebra as na, std::any::TypeId};
 
-use crate::{
-    ecs::{hierarchy::ParentComponent, Entity, Flags, World},
-    modules::{
-        ecs::{ComponentWrapper, EntityWrapper, RegisterableComponent},
-        math,
-    },
-    SludgeLuaContextExt,
-};
+use crate::ecs::{hierarchy::ParentComponent, Entity, Flags};
 
 #[derive(Debug, Clone, Copy)]
 pub struct Parent {
@@ -29,47 +22,6 @@ impl<'a> SmartComponent<&'a Flags> for Parent {
 impl ParentComponent for Parent {
     fn parent_entity(&self) -> Entity {
         self.parent_entity
-    }
-}
-
-impl RegisterableComponent for Parent {
-    fn constructor(lua: LuaContext) -> Result<Option<(&'static str, LuaFunction)>> {
-        let f = lua.create_function(|_ctx, parent_entity: EntityWrapper| {
-            Ok(ComponentWrapper::new(Parent::new(parent_entity.0)))
-        })?;
-
-        Ok(Some(("Parent", f)))
-    }
-
-    fn method_table(lua: LuaContext) -> Result<LuaTable> {
-        let table = lua.create_table()?;
-
-        table.set(
-            "get_parent",
-            lua.create_function(|ctx, this: EntityWrapper| {
-                Ok(EntityWrapper(
-                    ctx.resources()
-                        .fetch::<World>()
-                        .get::<Parent>(this.0)
-                        .unwrap()
-                        .parent_entity,
-                ))
-            })?,
-        )?;
-
-        table.set(
-            "set_parent",
-            lua.create_function(|ctx, (this, new_parent): (EntityWrapper, EntityWrapper)| {
-                ctx.resources()
-                    .fetch::<World>()
-                    .get_mut::<Parent>(this.0)
-                    .unwrap()
-                    .parent_entity = new_parent.0;
-                Ok(())
-            })?,
-        )?;
-
-        Ok(table)
     }
 }
 
@@ -127,59 +79,5 @@ impl Transform {
 impl<'a> SmartComponent<&'a Flags> for Transform {
     fn on_borrow_mut(&mut self, entity: Entity, flags: &'a Flags) {
         flags[&TypeId::of::<Self>()].add_atomic(entity.id());
-    }
-}
-
-impl RegisterableComponent for Transform {
-    fn constructor(lua: LuaContext) -> Result<Option<(&'static str, LuaFunction)>> {
-        let f = lua.create_function(|_ctx, transform: math::Transform| {
-            Ok(ComponentWrapper::new(Transform::new(transform.0)))
-        })?;
-
-        Ok(Some(("Transform", f)))
-    }
-
-    fn method_table(lua: LuaContext) -> Result<LuaTable> {
-        let table = lua.create_table()?;
-
-        table.set(
-            "get_local_transform",
-            lua.create_function(|ctx, (this, dst): (EntityWrapper, LuaAnyUserData)| {
-                dst.borrow_mut::<math::Transform>()?.0 = *ctx
-                    .resources()
-                    .fetch::<World>()
-                    .get::<Transform>(this.0)
-                    .unwrap()
-                    .local();
-                Ok(dst)
-            })?,
-        )?;
-
-        table.set(
-            "set_local_transform",
-            lua.create_function(|ctx, (this, src): (EntityWrapper, math::Transform)| {
-                *ctx.resources()
-                    .fetch::<World>()
-                    .get_mut::<Transform>(this.0)
-                    .unwrap()
-                    .local_mut() = src.0;
-                Ok(())
-            })?,
-        )?;
-
-        table.set(
-            "get_global_transform",
-            lua.create_function(|ctx, (this, dst): (EntityWrapper, LuaAnyUserData)| {
-                dst.borrow_mut::<math::Transform>()?.0 = *ctx
-                    .resources()
-                    .fetch::<World>()
-                    .get::<Transform>(this.0)
-                    .unwrap()
-                    .global();
-                Ok(dst)
-            })?,
-        )?;
-
-        Ok(table)
     }
 }
