@@ -4,8 +4,8 @@ use crate::{
     components::Parent,
     ecs::World,
     hierarchy::{Hierarchy, ParentComponent},
-    resources::{Resources, SharedResources},
     transform::TransformGraph,
+    Resources, SharedResources,
 };
 
 #[derive(Debug, Clone, Copy, Default)]

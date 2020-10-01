@@ -8,7 +8,7 @@ use {
 
 use crate::{
     ecs::{ComponentEvent, Entity, Flags, World},
-    resources::SharedResources,
+    SharedResources,
 };
 
 #[derive(Debug, Clone, Copy)]

@@ -36,6 +36,10 @@ inventory = "0.1.9"
 rlua_serde = { path = "../rlua_serde" }
 zip = "0.5.8"
 directories = "3.0.1"
+xml-rs = "0.8"
+base64 = "0.13.0"
+libflate = "0.1.18"
+zstd = "0.5"
 
 [dev-dependencies]
 approx = "0.3.2"

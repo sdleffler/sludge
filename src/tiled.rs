@@ -3,13 +3,16 @@ use {
     hashbrown::HashMap,
     nalgebra as na,
     serde::{Deserialize, Serialize},
-    std::{
-        fs::File,
-        path::{Path, PathBuf},
-    },
-    tiled::LayerData,
-    warmy::{Load, Loaded, SimpleKey, Storage},
+    std::path::{Path, PathBuf},
 };
+
+use crate::{
+    filesystem::Filesystem,
+    resources::{Inspect, Key, Load, Loaded, Storage},
+    tiled::xml_parser::LayerData,
+};
+
+mod xml_parser;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Frame {
@@ -56,7 +59,7 @@ pub struct TileSheetRegion {
 }
 
 impl TileSheet {
-    fn from_tiled(tiled: &tiled::Tileset) -> Result<Self> {
+    fn from_tiled(tiled: &xml_parser::Tileset) -> Result<Self> {
         ensure!(
             tiled.images.len() == 1,
             "tileset must have exactly one image"
@@ -195,36 +198,33 @@ impl Map {
     }
 }
 
-impl<C> Load<C, SimpleKey> for TileSheet {
+impl<C> Load<C, Key> for TileSheet
+where
+    TileSheet: for<'a> Inspect<'a, C, &'a mut Filesystem>,
+{
     type Error = Error;
 
-    fn load(
-        key: SimpleKey,
-        _storage: &mut Storage<C, SimpleKey>,
-        _: &mut C,
-    ) -> Result<Loaded<Self, SimpleKey>> {
+    fn load(key: Key, _storage: &mut Storage<C, Key>, ctx: &mut C) -> Result<Loaded<Self, Key>> {
         match key {
-            SimpleKey::Path(path) => {
-                let fh = File::open(&path)?;
-                let tiled = tiled::parse_tileset(fh, 1)?;
+            Key::Path(path) => {
+                let fh = Self::inspect(ctx).open(&path)?;
+                let tiled = xml_parser::parse_tileset(fh, 1)?;
                 Ok(TileSheet::from_tiled(&tiled)?.into())
-            }
-            SimpleKey::Logical(_) => bail!("cannot load from logical"),
+            } //_ => bail!("can only load from logical"),
         }
     }
 }
 
-impl<C> Load<C, SimpleKey> for Map {
+impl<C> Load<C, Key> for Map
+where
+    Map: for<'a> Inspect<'a, C, &'a mut Filesystem>,
+{
     type Error = Error;
 
-    fn load(
-        key: SimpleKey,
-        _storage: &mut Storage<C, SimpleKey>,
-        _ctx: &mut C,
-    ) -> Result<Loaded<Self, SimpleKey>> {
+    fn load(key: Key, _storage: &mut Storage<C, Key>, ctx: &mut C) -> Result<Loaded<Self, Key>> {
         match key {
-            SimpleKey::Path(path) => {
-                let tiled = tiled::parse_file(&path)?;
+            Key::Path(path) => {
+                let tiled = xml_parser::parse_file(Self::inspect(ctx), &path)?;
 
                 let mut deps = vec![];
                 let tile_sheets = tiled
@@ -232,7 +232,7 @@ impl<C> Load<C, SimpleKey> for Map {
                     .iter()
                     .map(|ts| {
                         if let Some(src) = ts.source.as_ref() {
-                            deps.push(SimpleKey::from_path(Path::new(src)));
+                            deps.push(Key::from_path(Path::new(src)));
                         }
                         Ok(TileSheet::from_tiled(ts)?)
                     })
@@ -301,8 +301,7 @@ impl<C> Load<C, SimpleKey> for Map {
                 };
 
                 Ok(Loaded::with_deps(map, deps))
-            }
-            SimpleKey::Logical(_) => bail!("cannot load from logical"),
+            } //_ => bail!("can only load from path"),
         }
     }
 }

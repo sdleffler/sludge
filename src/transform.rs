@@ -10,7 +10,7 @@ use crate::{
     ecs::{ComponentEvent, Entity, Flags, SmartComponent, World},
     hierarchy::{Hierarchy, HierarchyEvent, ParentComponent},
     math::Transform3,
-    resources::SharedResources,
+    SharedResources,
 };
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -144,7 +144,7 @@ mod tests {
 
     #[test]
     fn parent_update() {
-        let resources = crate::resources::SharedResources::new();
+        let resources = crate::SharedResources::new();
 
         let mut world = World::new();
         let mut hierarchy = Hierarchy::<Parent>::new(&mut world);

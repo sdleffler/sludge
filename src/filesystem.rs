@@ -73,6 +73,7 @@ pub struct Filesystem {
 
 /// Represents a file, either in the filesystem, or in the resources zip file,
 /// or whatever.
+#[non_exhaustive]
 pub enum File {
     /// A wrapper for a VFile trait object.
     VfsFile(Box<dyn vfs::VFile>),
