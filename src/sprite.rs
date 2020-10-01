@@ -1,6 +1,7 @@
 use {
     anyhow::*,
     aseprite::SpritesheetData,
+    generational_arena::{Arena, Index},
     hashbrown::HashMap,
     serde::{Deserialize, Serialize},
     std::ops,
@@ -141,19 +142,38 @@ impl SpriteSheet {
         })
     }
 
-    pub fn update_animation(
+    pub fn update_animation(&self, dt: f32, tag: &mut SpriteTag, frame: &mut SpriteFrame) {
+        if let Some((new_tag, maybe_new_frame)) = self.update_animation_inner(dt, tag, frame) {
+            *tag = new_tag;
+
+            if let Some(new_frame) = maybe_new_frame {
+                *frame = new_frame;
+            }
+        }
+    }
+
+    fn update_animation_inner(
         &self,
         dt: f32,
-        tag: &mut SpriteTag,
-        SpriteFrame(frame): &mut SpriteFrame,
-    ) {
+        tag: &SpriteTag,
+        SpriteFrame(frame): &SpriteFrame,
+    ) -> Option<(SpriteTag, Option<SpriteFrame>)> {
         if !tag.is_paused {
-            tag.remaining -= dt * 1_000.;
+            let mut new_tag = SpriteTag {
+                remaining: tag.remaining - dt * 1_000.,
+                ..*tag
+            };
 
-            if tag.remaining < 0. {
-                *frame = self[tag.tag_id].next_frame(*frame);
-                tag.remaining += self[*frame].duration as f32;
+            if new_tag.remaining < 0. {
+                let new_frame = self[new_tag.tag_id].next_frame(*frame);
+                new_tag.remaining += self[new_frame].duration as f32;
+
+                Some((new_tag, Some(SpriteFrame(new_frame))))
+            } else {
+                Some((new_tag, None))
             }
+        } else {
+            None
         }
     }
 
@@ -195,6 +215,86 @@ pub struct SpriteTag {
     pub is_paused: bool,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct SpriteSheetId(Index);
+
 impl<'a> SmartComponent<&'a Flags> for SpriteName {}
 impl<'a> SmartComponent<&'a Flags> for SpriteFrame {}
 impl<'a> SmartComponent<&'a Flags> for SpriteTag {}
+impl<'a> SmartComponent<&'a Flags> for SpriteSheetId {}
+
+#[derive(Debug)]
+pub struct SpriteSheetEntry<T: Send + Sync + 'static> {
+    pub sheet: SpriteSheet,
+    pub userdata: T,
+}
+
+#[derive(Debug)]
+pub struct SpriteSheetManager<T: Send + Sync + 'static> {
+    sheets: Arena<SpriteSheetEntry<T>>,
+    ids: HashMap<String, Index>,
+}
+
+impl<T: Send + Sync + 'static> SpriteSheetManager<T> {
+    pub fn new() -> Self {
+        Self {
+            sheets: Arena::new(),
+            ids: HashMap::new(),
+        }
+    }
+
+    pub fn insert(
+        &mut self,
+        maybe_name: Option<&str>,
+        sheet: SpriteSheet,
+        userdata: T,
+    ) -> Result<SpriteSheetId> {
+        let idx = self.sheets.insert(SpriteSheetEntry { sheet, userdata });
+        if let Some(name) = maybe_name {
+            ensure!(
+                self.ids.insert(name.to_owned(), idx).is_none(),
+                "spritesheet `{}` already exists!",
+                name
+            );
+        }
+        Ok(SpriteSheetId(idx))
+    }
+
+    pub fn get(&self, SpriteSheetId(id): SpriteSheetId) -> Option<&SpriteSheetEntry<T>> {
+        self.sheets.get(id)
+    }
+
+    pub fn get_mut(
+        &mut self,
+        SpriteSheetId(id): SpriteSheetId,
+    ) -> Option<&mut SpriteSheetEntry<T>> {
+        self.sheets.get_mut(id)
+    }
+
+    pub fn get_id(&mut self, s: &str) -> Option<SpriteSheetId> {
+        self.ids.get(s).copied().map(SpriteSheetId)
+    }
+
+    pub fn update_animations(&self, world: &World, dt: f32) -> Result<()> {
+        for (_e, (mut frame, mut tag, sheet_id)) in world
+            .query::<(&mut SpriteFrame, &mut SpriteTag, &SpriteSheetId)>()
+            .iter()
+        {
+            let entry = match self.get(*sheet_id) {
+                Some(entry) => entry,
+                None => bail!("spritesheet not found for index {:?}", *sheet_id),
+            };
+
+            if let Some((new_tag, maybe_new_frame)) =
+                entry.sheet.update_animation_inner(dt, &*tag, &*frame)
+            {
+                *tag = new_tag;
+                if let Some(new_frame) = maybe_new_frame {
+                    *frame = new_frame;
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
