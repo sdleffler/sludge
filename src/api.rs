@@ -235,9 +235,16 @@ pub struct Templates;
 
 impl LuaUserData for Templates {
     fn add_methods<'lua, M: LuaUserDataMethods<'lua, Self>>(methods: &mut M) {
-        methods.add_meta_method(LuaMetaMethod::Index, |lua, _, name: LuaString<'lua>| {
+        methods.add_meta_method(LuaMetaMethod::Index, |lua, _, lua_name: LuaString<'lua>| {
+            let name = lua_name.to_str()?;
             Ok(WrappedTemplate(
-                lua.resources().fetch::<Registry>().templates[name.to_str()?].clone(),
+                lua.resources()
+                    .fetch::<Registry>()
+                    .templates
+                    .get(name)
+                    .ok_or_else(|| anyhow!("no such template `{}`", name))
+                    .to_lua_err()?
+                    .clone(),
             ))
         });
     }

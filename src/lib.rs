@@ -31,7 +31,6 @@ pub mod tiled;
 pub mod transform;
 
 pub use anyhow;
-pub use aseprite;
 pub use nalgebra;
 pub use rlua;
 pub use serde;
