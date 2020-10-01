@@ -102,9 +102,7 @@ impl Space {
 
         lua.context(|lua_ctx| -> Result<_> {
             lua_ctx.set_named_registry_value(RESOURCES_REGISTRY_KEY, shared_resources.clone())?;
-            lua_ctx
-                .globals()
-                .set("sludge", crate::api::load(lua_ctx)?)?;
+            crate::api::load(lua_ctx)?;
 
             Ok(())
         })?;
@@ -115,16 +113,16 @@ impl Space {
             dependency_graph: DependencyGraph::new(),
         };
 
-        this.register(crate::systems::WorldEventSystem, "world", &[])?;
+        this.register(crate::systems::WorldEventSystem, "WorldEvent", &[])?;
         this.register(
             crate::systems::DefaultHierarchySystem::new(),
-            "hierarchy",
-            &["world"],
+            "Hierarchy",
+            &["WorldEvent"],
         )?;
         this.register(
             crate::systems::DefaultTransformSystem::new(),
-            "transform",
-            &["world", "hierarchy"],
+            "Transform",
+            &["WorldEvent", "Hierarchy"],
         )?;
 
         this.refresh()?;

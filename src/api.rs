@@ -202,17 +202,17 @@ impl LuaUserData for WrappedTemplate {
 pub type ModuleLoader = Box<dyn for<'lua> Fn(LuaContext<'lua>) -> Result<LuaValue<'lua>> + 'static>;
 
 pub struct Module {
-    name: &'static str,
+    path: &'static [&'static str],
     load: ModuleLoader,
 }
 
 impl Module {
-    pub fn new<F>(name: &'static str, load: F) -> Self
+    pub fn new<F>(path: &'static [&'static str], load: F) -> Self
     where
         F: for<'lua> Fn(LuaContext<'lua>) -> Result<LuaValue<'lua>> + 'static,
     {
         Self {
-            name,
+            path,
             load: Box::new(load),
         }
     }
@@ -229,6 +229,12 @@ pub fn sludge_template<'lua>(lua: LuaContext<'lua>, name: String) -> LuaResult<L
         .to_lua_err()?;
 
     Ok(table)
+}
+
+inventory::submit! {
+    Module::new(&["sludge", "Template"], |lua| {
+        Ok(LuaValue::Function(lua.create_function(sludge_template)?))
+    })
 }
 
 pub struct Templates;
@@ -250,6 +256,12 @@ impl LuaUserData for Templates {
     }
 }
 
+inventory::submit! {
+    Module::new(&["sludge", "templates"], |lua| {
+        Ok(LuaValue::UserData(lua.create_userdata(Templates)?))
+    })
+}
+
 pub fn sludge_to_accessor<'lua>(
     lua: LuaContext<'lua>,
     (entity, accessors): (LightEntity, LuaVariadic<String>),
@@ -268,29 +280,42 @@ pub fn sludge_to_accessor<'lua>(
     Ok(LuaMultiValue::from_vec(out))
 }
 
-pub fn load<'lua>(lua: LuaContext<'lua>) -> Result<LuaValue<'lua>> {
-    let table = lua.create_table_from(vec![
-        (
-            "Template",
-            LuaValue::Function(lua.create_function(sludge_template)?),
-        ),
-        (
-            "templates",
-            LuaValue::UserData(lua.create_userdata(Templates)?),
-        ),
-        (
-            "to_accessor",
-            LuaValue::Function(lua.create_function(sludge_to_accessor)?),
-        ),
-    ])?;
+inventory::submit! {
+    Module::new(&["sludge", "to_accessor"], |lua| {
+        Ok(LuaValue::Function(lua.create_function(sludge_to_accessor)?))
+    })
+}
 
+pub fn load<'lua>(lua: LuaContext<'lua>) -> Result<()> {
     ["print", "dofile", "load", "loadstring", "loadfile"]
         .iter()
         .try_for_each(|&s| lua.globals().set(s, LuaValue::Nil))?;
 
     for module in inventory::iter::<Module> {
-        table.set(module.name, (module.load)(lua)?)?;
+        let mut t = lua.globals();
+        let (&head, rest) = module
+            .path
+            .split_last()
+            .ok_or_else(|| anyhow!("empty module path!"))?;
+
+        for &ident in rest.iter() {
+            t = match t.get::<_, Option<LuaTable<'lua>>>(ident)? {
+                Some(subtable) => subtable,
+                None => {
+                    let subtable = lua.create_table()?;
+                    t.set(ident, subtable.clone())?;
+                    subtable
+                }
+            };
+        }
+
+        ensure!(
+            !t.contains_key(head)?,
+            "name collision while loading modules: two modules have the same path `{}`",
+            module.path.join(".")
+        );
+        t.set(head, (module.load)(lua)?)?;
     }
 
-    Ok(LuaValue::Table(table))
+    Ok(())
 }

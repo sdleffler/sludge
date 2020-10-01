@@ -137,5 +137,5 @@ pub fn load<'lua>(lua: LuaContext<'lua>) -> Result<LuaValue<'lua>> {
 }
 
 inventory::submit! {
-    crate::api::Module::new("math", load)
+    crate::api::Module::new(&["sludge", "math"], load)
 }
