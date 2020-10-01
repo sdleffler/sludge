@@ -20,6 +20,7 @@ pub mod api;
 pub mod components;
 pub mod dependency_graph;
 pub mod ecs;
+pub mod filesystem;
 pub mod hierarchy;
 pub mod input;
 pub mod math;
@@ -29,6 +30,7 @@ pub mod sprite;
 pub mod systems;
 pub mod tiled;
 pub mod transform;
+pub mod vfs;
 
 pub use anyhow;
 pub use nalgebra;
