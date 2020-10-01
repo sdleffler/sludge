@@ -105,7 +105,7 @@ pub fn error<'lua>(
     }
 }
 
-pub fn load<'lua>(lua: LuaContext<'lua>) -> Result<LuaTable<'lua>> {
+pub fn load<'lua>(lua: LuaContext<'lua>) -> Result<LuaValue<'lua>> {
     let table = lua.create_table_from(vec![
         ("log", lua.create_function(log)?),
         ("error", lua.create_function(error)?),
@@ -115,23 +115,9 @@ pub fn load<'lua>(lua: LuaContext<'lua>) -> Result<LuaTable<'lua>> {
         ("trace", lua.create_function(trace)?),
     ])?;
 
-    Ok(table)
+    Ok(LuaValue::Table(table))
 }
 
-// #[derive(Debug, Clone, Copy)]
-// pub struct LogModule;
-
-// impl Module for LogModule {
-//     fn load<'lua>(&self, lua: LuaContext<'lua>) -> Result<(&str, LuaTable<'lua>)> {
-//         let table = lua.create_table_from(vec![
-//             ("log", lua.create_function(log)?),
-//             ("error", lua.create_function(error)?),
-//             ("warn", lua.create_function(warn)?),
-//             ("info", lua.create_function(info)?),
-//             ("debug", lua.create_function(debug)?),
-//             ("trace", lua.create_function(trace)?),
-//         ])?;
-
-//         Ok(("log", table))
-//     }
-// }
+inventory::submit! {
+    crate::api::Module::new("log", load)
+}

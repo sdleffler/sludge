@@ -16,11 +16,11 @@ pub type Atom = DefaultAtom;
 
 mod utils;
 
+pub mod api;
 pub mod dependency_graph;
 pub mod ecs;
 pub mod input;
 pub mod math;
-pub mod modules;
 pub mod resources;
 pub mod scene;
 pub mod tiled;
@@ -33,7 +33,9 @@ pub use warmy;
 
 pub mod prelude {
     pub use anyhow::*;
+    pub use inventory;
     pub use rlua::prelude::*;
+    pub use rlua_serde;
     pub use serde::{Deserialize, Serialize};
     pub use serde_json;
 
@@ -41,6 +43,7 @@ pub mod prelude {
 }
 
 use crate::{
+    api::Registry,
     dependency_graph::DependencyGraph,
     resources::{Resources, SharedFetch, SharedFetchMut, SharedResources},
 };
@@ -84,15 +87,15 @@ impl Space {
         let (scheduler, queue_handle) = Scheduler::new();
         resources.insert(scheduler);
         resources.insert(queue_handle);
+        resources.insert(Registry::new()?);
 
         let shared_resources = SharedResources::from(resources);
 
         lua.context(|lua_ctx| -> Result<_> {
             lua_ctx.set_named_registry_value(RESOURCES_REGISTRY_KEY, shared_resources.clone())?;
-            let sludge_table = lua_ctx.create_table()?;
-            let globals = lua_ctx.globals();
-            crate::load_core(lua_ctx, &sludge_table)?;
-            globals.set("sludge", sludge_table)?;
+            lua_ctx
+                .globals()
+                .set("sludge", crate::api::load(lua_ctx)?)?;
 
             Ok(())
         })?;
@@ -421,73 +424,6 @@ impl<'s, 'lua> SchedulerWithContext<'s, 'lua> {
 
         Ok(())
     }
-}
-
-fn load_core<'lua>(lua: LuaContext<'lua>, table: &LuaTable<'lua>) -> Result<()> {
-    // Steal coroutine then get rid of it from the global table so that
-    // all coroutine manipulation goes through Space.
-    let coroutine = lua.globals().get::<_, LuaTable>("coroutine")?;
-    lua.globals().set("coroutine", LuaValue::Nil)?;
-
-    let spawn = lua.create_function(|ctx, task: LuaValue| {
-        let thread = match task {
-            LuaValue::Function(f) => ctx.create_thread(f)?,
-            LuaValue::Thread(th) => th,
-            _ => {
-                return Err(LuaError::FromLuaConversionError {
-                    to: "thread or function",
-                    from: "lua value",
-                    message: None,
-                })
-            }
-        };
-
-        let key = ctx.create_registry_value(thread.clone())?;
-        ctx.resources()
-            .fetch::<SchedulerQueueChannel>()
-            .spawn
-            .try_send(key)
-            .unwrap();
-        Ok(thread)
-    })?;
-
-    let broadcast = lua.create_function(|ctx, string: LuaString| {
-        ctx.resources()
-            .fetch::<SchedulerQueueChannel>()
-            .event
-            .try_send(Event(Atom::from(string.to_str()?)))
-            .unwrap();
-        Ok(())
-    })?;
-
-    let yield_ = coroutine.get::<_, LuaFunction>("yield")?;
-    let create = coroutine.get::<_, LuaFunction>("create")?;
-    let wrap = coroutine.get::<_, LuaFunction>("wrap")?;
-    let running = coroutine.get::<_, LuaFunction>("running")?;
-    let status = coroutine.get::<_, LuaFunction>("status")?;
-    let resume = coroutine.get::<_, LuaFunction>("resume")?;
-
-    table.set(
-        "thread",
-        lua.create_table_from(vec![
-            ("spawn", spawn),
-            ("broadcast", broadcast),
-            ("yield", yield_),
-            ("create", create),
-            ("wrap", wrap),
-            ("running", running),
-            ("status", status),
-            ("resume", resume),
-        ])?,
-    )?;
-
-    table.set("log", crate::modules::log::load(lua)?)?;
-
-    ["print", "dofile", "load", "loadstring", "loadfile"]
-        .iter()
-        .try_for_each(|&s| lua.globals().set(s, LuaValue::Nil))?;
-
-    Ok(())
 }
 
 // /// Basic logging setup to log to the console with `fern`.

@@ -32,6 +32,8 @@ serde = "1.0.116"
 serde_json = "1.0.57"
 warmy = { path = "../warmy", features = ["arc"] }
 aseprite = { path = "../aseprite" }
+inventory = "0.1.9"
+rlua_serde = { path = "../rlua_serde" }
 
 [dev-dependencies]
 approx = "0.3.2"

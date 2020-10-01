@@ -130,9 +130,12 @@ pub fn new_transform(_ctx: LuaContext, _: ()) -> LuaResult<Transform> {
     Ok(Transform(na::Transform2::identity()))
 }
 
-pub fn load<'lua>(lua: LuaContext<'lua>) -> Result<(&str, LuaTable<'lua>)> {
-    let table =
-        lua.create_table_from(vec![("new_transform", lua.create_function(new_transform)?)])?;
+pub fn load<'lua>(lua: LuaContext<'lua>) -> Result<LuaValue<'lua>> {
+    let table = lua.create_table_from(vec![("Transform", lua.create_function(new_transform)?)])?;
 
-    Ok(("math", table))
+    Ok(LuaValue::Table(table))
+}
+
+inventory::submit! {
+    crate::api::Module::new("math", load)
 }

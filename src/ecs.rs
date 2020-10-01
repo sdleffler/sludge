@@ -18,27 +18,27 @@ pub use hecs::{
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct WrappedEntity(u64);
+pub struct LightEntity(u64);
 
-impl From<Entity> for WrappedEntity {
-    fn from(entity: Entity) -> WrappedEntity {
+impl From<Entity> for LightEntity {
+    fn from(entity: Entity) -> LightEntity {
         Self(entity.to_bits())
     }
 }
 
-impl From<WrappedEntity> for Entity {
-    fn from(wrapped: WrappedEntity) -> Entity {
+impl From<LightEntity> for Entity {
+    fn from(wrapped: LightEntity) -> Entity {
         Entity::from_bits(wrapped.0)
     }
 }
 
-impl<'lua> ToLua<'lua> for WrappedEntity {
+impl<'lua> ToLua<'lua> for LightEntity {
     fn to_lua(self, _lua: LuaContext<'lua>) -> LuaResult<LuaValue<'lua>> {
         Ok(LuaValue::LightUserData(LuaLightUserData(self.0 as *mut _)))
     }
 }
 
-impl<'lua> FromLua<'lua> for WrappedEntity {
+impl<'lua> FromLua<'lua> for LightEntity {
     fn from_lua(lua_value: LuaValue<'lua>, lua: LuaContext<'lua>) -> LuaResult<Self> {
         let lud = LuaLightUserData::from_lua(lua_value, lua)?;
         Ok(Self(lud.0 as u64))

@@ -84,14 +84,22 @@ impl Resources {
     }
 
     pub fn fetch<T: Any + Send>(&self) -> Fetch<T> {
-        let borrow = self.map[&TypeId::of::<T>()].borrow();
+        let borrow = self
+            .map
+            .get(&TypeId::of::<T>())
+            .unwrap_or_else(|| panic!("no entry found for `{}`", std::any::type_name::<T>()))
+            .borrow();
         Fetch(AtomicRef::map(borrow, |boxed| {
             boxed.downcast_ref().unwrap()
         }))
     }
 
     pub fn fetch_mut<T: Any + Send>(&self) -> FetchMut<T> {
-        let borrow = self.map[&TypeId::of::<T>()].borrow_mut();
+        let borrow = self
+            .map
+            .get(&TypeId::of::<T>())
+            .unwrap_or_else(|| panic!("no entry found for `{}`", std::any::type_name::<T>()))
+            .borrow_mut();
         FetchMut(AtomicRefMut::map(borrow, |boxed| {
             boxed.downcast_mut().unwrap()
         }))
