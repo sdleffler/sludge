@@ -6,7 +6,8 @@ use {
     },
     rand::distributions::uniform::Uniform,
     sludge::{
-        ecs::{components::Transform, Flags, SmartComponent, World},
+        components::Transform,
+        ecs::{Flags, SmartComponent, World},
         prelude::*,
     },
 };
@@ -119,7 +120,7 @@ impl EventHandler for MainState {
 
                     if let Some(mut tx) = maybe_tx {
                         let tx = &mut *tx;
-                        *tx.local_mut() = na::convert(na::Translation2::from(spatial.pos));
+                        *tx.local_mut() = na::convert(na::Translation3::from(spatial.pos.push(0.)));
                     }
 
                     batch

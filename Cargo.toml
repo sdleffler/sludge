@@ -11,7 +11,7 @@ default = ["ggez"]
 rlua = { path = "../rlua" }
 nalgebra = { version = "0.22.0", features = ["mint", "serde-serialize"] }
 ncollide2d = "0.24.0"
-hecs = { path = "../hecs" }
+hecs = { path = "../hecs", features = ["macros"] }
 generational-arena = { path = "../generational-arena" }
 derivative = "2.1.1"
 anyhow = "1.0.32"

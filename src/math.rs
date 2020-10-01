@@ -1,8 +1,9 @@
 pub use nalgebra as na;
 
 pub use nalgebra::{
-    Isometry2, Matrix2, Matrix3, Matrix4, Point2, Rotation2, Similarity2, Transform2, Translation2,
-    Unit, UnitComplex, Vector2,
+    Complex, Isometry2, Isometry3, Matrix2, Matrix3, Matrix4, Point2, Point3, Quaternion,
+    Rotation2, Rotation3, Similarity2, Similarity3, Transform2, Transform3, Translation2,
+    Translation3, Unit, UnitComplex, UnitQuaternion, Vector2, Vector3,
 };
 
 #[rustfmt::skip]

@@ -1,13 +1,50 @@
-use {hashbrown::HashSet, shrev::ReaderId, std::marker::PhantomData};
+use {
+    hashbrown::HashSet,
+    serde::{Deserialize, Serialize},
+    shrev::ReaderId,
+    std::{any::TypeId, marker::PhantomData},
+};
 
 use crate::{
-    ecs::{
-        components::{Parent, Transform},
-        hierarchy::{Hierarchy, HierarchyEvent, ParentComponent},
-        ComponentEvent, Entity, World,
-    },
+    components::Parent,
+    ecs::{ComponentEvent, Entity, Flags, SmartComponent, World},
+    hierarchy::{Hierarchy, HierarchyEvent, ParentComponent},
+    math::Transform3,
     resources::SharedResources,
 };
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct Transform {
+    pub(crate) local: Transform3<f32>,
+    pub(crate) global: Transform3<f32>,
+}
+
+impl Transform {
+    pub fn new(transform: Transform3<f32>) -> Self {
+        Self {
+            local: transform,
+            global: transform,
+        }
+    }
+
+    pub fn local(&self) -> &Transform3<f32> {
+        &self.local
+    }
+
+    pub fn local_mut(&mut self) -> &mut Transform3<f32> {
+        &mut self.local
+    }
+
+    pub fn global(&self) -> &Transform3<f32> {
+        &self.global
+    }
+}
+
+impl<'a> SmartComponent<&'a Flags> for Transform {
+    fn on_borrow_mut(&mut self, entity: Entity, flags: &'a Flags) {
+        flags[&TypeId::of::<Self>()].add_atomic(entity.id());
+    }
+}
 
 pub struct TransformGraph<P: ParentComponent = Parent> {
     hierarchy_events: ReaderId<HierarchyEvent>,
@@ -102,8 +139,8 @@ impl<P: ParentComponent> TransformGraph<P> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::components::Parent;
-    use {approx::assert_relative_eq, nalgebra as na};
+    use crate::{components::Parent, math::*};
+    use approx::assert_relative_eq;
 
     #[test]
     fn parent_update() {
@@ -118,9 +155,9 @@ mod tests {
         resources.borrow_mut().insert(transforms);
 
         let e1 = {
-            let mut tx = na::Transform2::identity();
-            tx *= &na::Translation2::new(5., 7.);
-            tx *= &na::Rotation2::new(::std::f32::consts::PI);
+            let mut tx = Transform3::identity();
+            tx *= &Translation3::new(5., 7., 0.);
+            tx *= &Rotation3::from_axis_angle(&Vector3::z_axis(), ::std::f32::consts::PI);
             resources.fetch_mut::<World>().spawn((Transform::new(tx),))
         };
 
@@ -130,8 +167,8 @@ mod tests {
         resources.fetch_mut::<TransformGraph>().update(&resources);
 
         let e2 = {
-            let mut tx = na::Transform2::identity();
-            tx *= &na::Translation2::new(5., 3.);
+            let mut tx = Transform3::identity();
+            tx *= &Translation3::new(5., 3., 0.);
             resources
                 .fetch_mut::<World>()
                 .spawn((Transform::new(tx), Parent::new(e1)))
@@ -145,8 +182,8 @@ mod tests {
         let tx2 = *resources.fetch::<World>().get::<Transform>(e2).unwrap();
 
         assert_relative_eq!(
-            tx2.global.transform_point(&na::Point2::origin()),
-            na::Point2::new(-10., -10.)
+            tx2.global.transform_point(&Point3::origin()),
+            Point3::new(-10., -10., 0.)
         );
 
         resources.fetch_mut::<World>().despawn(e1).unwrap();
@@ -159,8 +196,8 @@ mod tests {
         let tx2 = *resources.fetch::<World>().get::<Transform>(e2).unwrap();
 
         assert_relative_eq!(
-            tx2.global.transform_point(&na::Point2::origin()),
-            na::Point2::new(5., 3.)
+            tx2.global.transform_point(&Point3::origin()),
+            Point3::new(5., 3., 0.)
         );
     }
 }

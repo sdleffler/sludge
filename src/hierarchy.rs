@@ -3,13 +3,36 @@ use {
     hecs::SmartComponent,
     hibitset::{BitSet, BitSetLike},
     shrev::{EventChannel, ReaderId},
-    std::marker::PhantomData,
+    std::{any::TypeId, marker::PhantomData},
 };
 
 use crate::{
     ecs::{ComponentEvent, Entity, Flags, World},
     resources::SharedResources,
 };
+
+#[derive(Debug, Clone, Copy)]
+pub struct Parent {
+    pub parent_entity: Entity,
+}
+
+impl Parent {
+    pub fn new(parent_entity: Entity) -> Self {
+        Self { parent_entity }
+    }
+}
+
+impl<'a> SmartComponent<&'a Flags> for Parent {
+    fn on_borrow_mut(&mut self, entity: hecs::Entity, context: &'a Flags) {
+        context[&TypeId::of::<Self>()].add_atomic(entity.id());
+    }
+}
+
+impl ParentComponent for Parent {
+    fn parent_entity(&self) -> Entity {
+        self.parent_entity
+    }
+}
 
 pub trait ParentComponent: for<'a> SmartComponent<&'a Flags> {
     fn parent_entity(&self) -> Entity;

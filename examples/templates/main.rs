@@ -8,10 +8,10 @@ use {
         },
         timer,
     },
-    rand::distributions::uniform::Uniform,
+    serde::{Deserialize, Serialize},
     sludge::{
         api::Template,
-        ecs::{components::Transform, Entity, Flags, SmartComponent, World},
+        ecs::{Entity, Flags, SmartComponent, World},
         prelude::*,
         SludgeLuaContextExt,
     },
@@ -40,12 +40,16 @@ impl Template for BulletTemplate {
         self.from_table(lua, table)
     }
 
-    fn to_table<'lua>(&self, lua: LuaContext<'lua>, instance: Entity) -> Result<LuaTable<'lua>> {
+    fn to_table<'lua>(
+        &self,
+        lua: LuaContext<'lua>,
+        instance: Entity,
+    ) -> Result<Option<LuaTable<'lua>>> {
         let resources = lua.resources();
         let world = resources.fetch::<World>();
 
         let spatial = rlua_serde::to_value(lua, &*world.get::<Spatial>(instance)?)?;
-        Ok(lua.create_table_from(vec![("Spatial", spatial)])?)
+        Ok(Some(lua.create_table_from(vec![("Spatial", spatial)])?))
     }
 
     fn from_table<'lua>(&self, lua: LuaContext<'lua>, table: LuaTable<'lua>) -> Result<Entity> {
@@ -75,16 +79,6 @@ struct Spatial {
 }
 
 impl<'a> SmartComponent<&'a Flags> for Spatial {}
-
-impl Spatial {
-    fn new() -> Self {
-        Self {
-            pos: na::zero(),
-            vel: na::zero(),
-            acc: na::zero(),
-        }
-    }
-}
 
 struct SpriteIndex {
     idx: SpriteIdx,
@@ -133,11 +127,7 @@ impl MainState {
 impl EventHandler for MainState {
     fn update(&mut self, ctx: &mut ggez::Context) -> ggez::GameResult<()> {
         const DT: f32 = 1. / 60.;
-        let Self {
-            space,
-            bullet_count,
-            ..
-        } = self;
+        let Self { space, .. } = self;
 
         space.lua().context(|lua| {
             while timer::check_update_time(ctx, 60) {
@@ -146,28 +136,6 @@ impl EventHandler for MainState {
                     .with_context(lua)
                     .update(1.0)
                     .unwrap();
-
-                let (w, h) = (320., 240.);
-                {
-                    // let mut world = space.fetch_mut::<World>();
-                    // for _ in 0..10 {
-                    //     let pos = na::Vector2::new(w / 2., h / 2.);
-                    //     world.spawn((
-                    //         Spatial {
-                    //             pos,
-                    //             vel: na::Vector2::from_distribution(
-                    //                 &Uniform::new(-30., 30.),
-                    //                 &mut rand::thread_rng(),
-                    //             ),
-                    //             ..Spatial::new()
-                    //         },
-                    //         SpriteIndex {
-                    //             idx: batch.add((na::Point2::from(pos),)),
-                    //         },
-                    //     ));
-                    //     *bullet_count += 1;
-                    // }
-                }
 
                 let world = space.fetch::<World>();
                 let mut batch = space.fetch_mut::<SpriteBatch>();

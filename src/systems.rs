@@ -1,13 +1,11 @@
 use {anyhow::*, rlua::prelude::*, std::marker::PhantomData};
 
 use crate::{
-    ecs::{
-        components::Parent,
-        hierarchy::{Hierarchy, ParentComponent},
-        transform::TransformGraph,
-        World,
-    },
+    components::Parent,
+    ecs::World,
+    hierarchy::{Hierarchy, ParentComponent},
     resources::{Resources, SharedResources},
+    transform::TransformGraph,
 };
 
 #[derive(Debug, Clone, Copy, Default)]

@@ -9,11 +9,9 @@ use {
     std::{any::TypeId, sync::Arc},
 };
 
-pub mod components;
-pub mod log;
-pub mod math;
-pub mod thread;
-pub mod world;
+mod log;
+mod math;
+mod thread;
 
 pub trait Accessor: Send + Sync + 'static {
     fn to_userdata<'lua>(
@@ -52,7 +50,14 @@ pub trait Template: Send + Sync + 'static {
         self.from_table(lua, LuaTable::from_lua_multi(args, lua)?)
     }
 
-    fn to_table<'lua>(&self, lua: LuaContext<'lua>, instance: Entity) -> Result<LuaTable<'lua>>;
+    fn to_table<'lua>(
+        &self,
+        _lua: LuaContext<'lua>,
+        _instance: Entity,
+    ) -> Result<Option<LuaTable<'lua>>> {
+        Ok(None)
+    }
+
     fn from_table<'lua>(&self, lua: LuaContext<'lua>, table: LuaTable<'lua>) -> Result<Entity>;
 }
 
@@ -74,7 +79,11 @@ impl Template for LuaTemplate {
             .into())
     }
 
-    fn to_table<'lua>(&self, lua: LuaContext<'lua>, instance: Entity) -> Result<LuaTable<'lua>> {
+    fn to_table<'lua>(
+        &self,
+        lua: LuaContext<'lua>,
+        instance: Entity,
+    ) -> Result<Option<LuaTable<'lua>>> {
         Ok(lua
             .registry_value::<LuaTable<'lua>>(&self.key)?
             .get::<_, LuaFunction<'lua>>("to_table")?
@@ -234,18 +243,6 @@ impl LuaUserData for Templates {
     }
 }
 
-// pub fn sludge_spawn<'lua>(
-//     lua: LuaContext<'lua>,
-//     (template, args): (String, LuaMultiValue<'lua>),
-// ) -> LuaResult<LightEntity> {
-//     let resources = lua.resources();
-//     let registry = resources.fetch::<Registry>();
-//     Ok(registry.templates[&template]
-//         .constructor(lua, args)
-//         .to_lua_err()?
-//         .into())
-// }
-
 pub fn sludge_to_accessor<'lua>(
     lua: LuaContext<'lua>,
     (entity, accessors): (LightEntity, LuaVariadic<String>),
@@ -254,13 +251,12 @@ pub fn sludge_to_accessor<'lua>(
     let resources = lua.resources();
     let registry = resources.fetch::<Registry>();
     for accessor_name in accessors {
-        let accessor = registry
-            .accessors
-            .get(&accessor_name)
-            .ok_or_else(|| anyhow!("accessor {} not found", &accessor_name))
-            .to_lua_err()?;
-        let userdata = accessor.to_userdata(lua, entity.into()).to_lua_err()?;
-        out.push(LuaValue::UserData(userdata));
+        if let Some(accessor) = registry.accessors.get(&accessor_name) {
+            let userdata = accessor.to_userdata(lua, entity.into()).to_lua_err()?;
+            out.push(LuaValue::UserData(userdata));
+        } else {
+            out.push(LuaValue::Nil);
+        }
     }
     Ok(LuaMultiValue::from_vec(out))
 }

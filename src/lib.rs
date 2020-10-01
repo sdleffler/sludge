@@ -17,18 +17,24 @@ pub type Atom = DefaultAtom;
 mod utils;
 
 pub mod api;
+pub mod components;
 pub mod dependency_graph;
 pub mod ecs;
+pub mod hierarchy;
 pub mod input;
 pub mod math;
 pub mod resources;
 pub mod scene;
+pub mod sprite;
+pub mod systems;
 pub mod tiled;
+pub mod transform;
 
 pub use anyhow;
 pub use aseprite;
 pub use nalgebra;
 pub use rlua;
+pub use serde;
 pub use warmy;
 
 pub mod prelude {
@@ -36,10 +42,14 @@ pub mod prelude {
     pub use inventory;
     pub use rlua::prelude::*;
     pub use rlua_serde;
-    pub use serde::{Deserialize, Serialize};
     pub use serde_json;
 
-    pub use crate::{math::*, Scheduler, Space};
+    pub use crate::{
+        api::{Accessor, StaticAccessor, StaticTemplate, Template},
+        ecs::*,
+        math::*,
+        Scheduler, SludgeLuaContextExt, Space,
+    };
 }
 
 use crate::{
@@ -106,14 +116,14 @@ impl Space {
             dependency_graph: DependencyGraph::new(),
         };
 
-        this.register(crate::ecs::systems::WorldEventSystem, "world", &[])?;
+        this.register(crate::systems::WorldEventSystem, "world", &[])?;
         this.register(
-            crate::ecs::systems::DefaultHierarchySystem::new(),
+            crate::systems::DefaultHierarchySystem::new(),
             "hierarchy",
             &["world"],
         )?;
         this.register(
-            crate::ecs::systems::DefaultTransformSystem::new(),
+            crate::systems::DefaultTransformSystem::new(),
             "transform",
             &["world", "hierarchy"],
         )?;
