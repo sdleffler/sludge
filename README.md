@@ -1,5 +1,7 @@
 # SLUDGE - Lua-based extensions to the HECS ECS for scripting and serialization
 
+This crate is an extreme work in progress.
+
 ## Lua API
 
 ### `sludge`
