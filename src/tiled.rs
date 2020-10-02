@@ -201,7 +201,7 @@ impl Map {
 
 impl<C> Load<C, Key> for TileSheet
 where
-    TileSheet: for<'a> Inspect<'a, C, &'a mut SharedResources>,
+    TileSheet: for<'a> Inspect<'a, C, &'a SharedResources>,
 {
     type Error = Error;
 
@@ -218,7 +218,7 @@ where
 
 impl<C> Load<C, Key> for Map
 where
-    Map: for<'a> Inspect<'a, C, &'a mut SharedResources>,
+    Map: for<'a> Inspect<'a, C, &'a SharedResources>,
 {
     type Error = Error;
 

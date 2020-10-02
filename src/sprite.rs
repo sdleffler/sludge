@@ -1,10 +1,10 @@
 use {
     anyhow::*,
     aseprite::SpritesheetData,
-    generational_arena::{Arena, Index},
     hashbrown::HashMap,
     serde::{Deserialize, Serialize},
     std::{io::Read, ops},
+    thunderdome::{Arena, Index},
 };
 
 use crate::{

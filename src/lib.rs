@@ -5,7 +5,6 @@ use {
     atomic_refcell::{AtomicRef, AtomicRefCell, AtomicRefMut},
     crossbeam_channel::{Receiver, Sender},
     derivative::Derivative,
-    generational_arena::{Arena, Index},
     hashbrown::HashMap,
     nalgebra as na,
     rlua::prelude::*,
@@ -17,6 +16,7 @@ use {
         sync::Arc,
     },
     string_cache::DefaultAtom,
+    thunderdome::{Arena, Index},
 };
 
 pub type Atom = DefaultAtom;
@@ -38,6 +38,9 @@ pub mod systems;
 pub mod tiled;
 pub mod transform;
 pub mod vfs;
+
+#[cfg(feature = "ggez")]
+pub mod ggez;
 
 pub use anyhow;
 pub use nalgebra;
@@ -320,7 +323,7 @@ impl Scheduler {
                     // `None` will get returned here if the thread's already been rescheduled.
                     // `threads.increment_gen` invalidates all of the indices which previously
                     // pointed to this thread.
-                    if let Some(new_index) = self.threads.increment_gen(index) {
+                    if let Some(new_index) = self.threads.invalidate(index) {
                         self.queue.push(TimedWakeup {
                             thread: new_index,
                             wakeup: 0,
@@ -344,7 +347,7 @@ impl Scheduler {
                 let value = lua.registry_value::<LuaThread>(key)?;
                 match value.resume::<_, LuaMultiValue>(()) {
                     Ok(mv) if value.status() == LuaThreadStatus::Resumable => {
-                        let new_index = self.threads.increment_gen(sleeping.thread).unwrap();
+                        let new_index = self.threads.invalidate(sleeping.thread).unwrap();
 
                         // Take the yielded values provided by the coroutine and turn
                         // them into events/wakeup times.
@@ -381,7 +384,7 @@ impl Scheduler {
                     Err(lua_error) => {
                         log::error!(
                             "fatal error in Lua thread {:?}: {}",
-                            sleeping.thread.into_raw_parts(),
+                            sleeping.thread.to_bits(),
                             lua_error
                         );
                     }
