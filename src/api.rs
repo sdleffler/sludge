@@ -202,7 +202,7 @@ impl LuaUserData for WrappedTemplate {
 pub type ModuleLoader = Box<dyn for<'lua> Fn(LuaContext<'lua>) -> Result<LuaValue<'lua>> + 'static>;
 
 pub struct Module {
-    path: &'static [&'static str],
+    path: Vec<&'static str>,
     load: ModuleLoader,
 }
 
@@ -212,7 +212,17 @@ impl Module {
         F: for<'lua> Fn(LuaContext<'lua>) -> Result<LuaValue<'lua>> + 'static,
     {
         Self {
-            path,
+            path: path.to_owned(),
+            load: Box::new(load),
+        }
+    }
+
+    pub fn parse<F>(path: &'static str, load: F) -> Self
+    where
+        F: for<'lua> Fn(LuaContext<'lua>) -> Result<LuaValue<'lua>> + 'static,
+    {
+        Self {
+            path: path.split(".").collect(),
             load: Box::new(load),
         }
     }
@@ -232,7 +242,7 @@ pub fn sludge_template<'lua>(lua: LuaContext<'lua>, name: String) -> LuaResult<L
 }
 
 inventory::submit! {
-    Module::new(&["sludge", "Template"], |lua| {
+    Module::parse("sludge.Template", |lua| {
         Ok(LuaValue::Function(lua.create_function(sludge_template)?))
     })
 }
@@ -257,7 +267,7 @@ impl LuaUserData for Templates {
 }
 
 inventory::submit! {
-    Module::new(&["sludge", "templates"], |lua| {
+    Module::parse("sludge.templates", |lua| {
         Ok(LuaValue::UserData(lua.create_userdata(Templates)?))
     })
 }
@@ -281,7 +291,7 @@ pub fn sludge_to_accessor<'lua>(
 }
 
 inventory::submit! {
-    Module::new(&["sludge", "to_accessor"], |lua| {
+    Module::parse("sludge.to_accessor", |lua| {
         Ok(LuaValue::Function(lua.create_function(sludge_to_accessor)?))
     })
 }
