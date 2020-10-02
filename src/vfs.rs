@@ -38,12 +38,14 @@
 
 use {
     anyhow::*,
-    std::cell::RefCell,
-    std::collections::VecDeque,
-    std::fmt::{self, Debug},
-    std::fs,
-    std::io::{self, Read, Seek, Write},
-    std::path::{self, Path, PathBuf},
+    atomic_refcell::AtomicRefCell,
+    std::{
+        collections::VecDeque,
+        fmt::{self, Debug},
+        fs,
+        io::{self, Read, Seek, Write},
+        path::{self, Path, PathBuf},
+    },
     zip,
 };
 
@@ -120,7 +122,7 @@ impl OpenOptions {
     }
 }
 
-pub trait VFS: Debug {
+pub trait VFS: Debug + Send + Sync {
     /// Open the file at this path with the given options
     fn open_options(&self, path: &Path, open_options: OpenOptions) -> Result<Box<dyn VFile>>;
     /// Open the file at this path for reading
@@ -534,7 +536,7 @@ impl VFS for OverlayFS {
     }
 }
 
-trait ZipArchiveAccess {
+trait ZipArchiveAccess: Send + Sync {
     fn by_name<'a>(&'a mut self, name: &str) -> zip::result::ZipResult<zip::read::ZipFile<'a>>;
     fn by_index<'a>(
         &'a mut self,
@@ -543,7 +545,7 @@ trait ZipArchiveAccess {
     fn len(&self) -> usize;
 }
 
-impl<T: Read + Seek> ZipArchiveAccess for zip::ZipArchive<T> {
+impl<T: Read + Seek + Send + Sync> ZipArchiveAccess for zip::ZipArchive<T> {
     fn by_name(&mut self, name: &str) -> zip::result::ZipResult<zip::read::ZipFile> {
         //let filename = sanitize_path(Path::new(name)).unwrap_or(PathBuf::from(&name));
         let filename = sanitize_path(Path::new(name)).ok_or(zip::result::ZipError::FileNotFound)?;
@@ -579,7 +581,7 @@ pub struct ZipFS {
     // HORRIFICALLY BROKEN BY DESIGN SO WE'RE JUST GONNA REFCELL IT AND COPY
     // ALL CONTENTS OUT OF IT AAAAA.
     source: Option<PathBuf>,
-    archive: RefCell<Box<dyn ZipArchiveAccess>>,
+    archive: AtomicRefCell<Box<dyn ZipArchiveAccess>>,
     // We keep an index of what files are in the zip file
     // because trying to read it lazily is a pain in the butt.
     index: Vec<String>,
@@ -596,7 +598,7 @@ impl ZipFS {
     /// in-memory `std::io::Cursor`.
     pub fn from_read<R>(reader: R) -> Result<Self>
     where
-        R: Read + Seek + 'static,
+        R: Read + Seek + Send + Sync + 'static,
     {
         let archive = Box::new(zip::ZipArchive::new(reader)?);
         ZipFS::from_boxed_archive(archive, None)
@@ -617,7 +619,7 @@ impl ZipFS {
             .collect();
         Ok(Self {
             source,
-            archive: RefCell::new(archive),
+            archive: AtomicRefCell::new(archive),
             index: idx,
         })
     }
@@ -728,10 +730,8 @@ impl VFS for ZipFS {
                 self
             );
         }
-        let mut stupid_archive_borrow = self
-            .archive
-            .try_borrow_mut()
-            .expect("Couldn't borrow ZipArchive in ZipFS::open_options(); should never happen!");
+        let mut stupid_archive_borrow = self.archive.borrow_mut();
+        //.expect("Couldn't borrow ZipArchive in ZipFS::open_options(); should never happen!");
         let mut f = stupid_archive_borrow.by_name(path)?;
         let zipfile = ZipFileWrapper::new(&mut f)?;
         Ok(Box::new(zipfile) as Box<dyn VFile>)
@@ -762,10 +762,9 @@ impl VFS for ZipFS {
     }
 
     fn exists(&self, path: &Path) -> bool {
-        let mut stupid_archive_borrow = self
-            .archive
-            .try_borrow_mut()
-            .expect("Couldn't borrow ZipArchive in ZipFS::exists(); should never happen!");
+        let mut stupid_archive_borrow = self.archive.borrow_mut();
+        // .try_borrow_mut()
+        // .expect("Couldn't borrow ZipArchive in ZipFS::exists(); should never happen!");
         if let Ok(path) = convenient_path_to_str(path) {
             stupid_archive_borrow.by_name(path).is_ok()
         } else {
@@ -775,10 +774,9 @@ impl VFS for ZipFS {
 
     fn metadata(&self, path: &Path) -> Result<Box<dyn VMetadata>> {
         let path = convenient_path_to_str(path)?;
-        let mut stupid_archive_borrow = self
-            .archive
-            .try_borrow_mut()
-            .expect("Couldn't borrow ZipArchive in ZipFS::metadata(); should never happen!");
+        let mut stupid_archive_borrow = self.archive.borrow_mut();
+        // .try_borrow_mut()
+        // .expect("Couldn't borrow ZipArchive in ZipFS::metadata(); should never happen!");
         match ZipMetadata::new(path, &mut **stupid_archive_borrow) {
             None => bail!("Metadata not found in zip file for {}", path),
             Some(md) => Ok(Box::new(md) as Box<dyn VMetadata>),

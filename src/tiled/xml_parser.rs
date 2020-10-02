@@ -3,14 +3,15 @@
 //! MIT.
 
 use {
+    anyhow::*,
     base64,
     std::{
         collections::HashMap,
-        fmt,
-        io::{BufReader, Error, Read},
+        io::{BufReader, Read},
         path::Path,
         str::FromStr,
     },
+    thiserror::Error,
     xml::{
         attribute::OwnedAttribute,
         reader::{Error as XmlError, EventReader, XmlEvent},
@@ -45,7 +46,7 @@ macro_rules! get_attrs {
                 }
             }
             if !(true $(&& $var.is_some())*) {
-                return Err($err);
+                bail!($err);
             }
             (($($oVar),*), ($($var.unwrap()),*))
         }
@@ -74,7 +75,7 @@ macro_rules! parse_tag {
                         break;
                     }
                 }
-                XmlEvent::EndDocument => return Err(TiledError::PrematureEnd("Document ended before we expected.".to_string())),
+                XmlEvent::EndDocument => bail!(TiledError::PrematureEnd("Document ended before we expected.".to_string())),
                 _ => {}
             }
         }
@@ -111,45 +112,24 @@ impl FromStr for Colour {
 }
 
 /// Errors which occured when parsing the file
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum TiledError {
     /// A attribute was missing, had the wrong type of wasn't formated
     /// correctly.
+    #[error("{0}")]
     MalformedAttributes(String),
     /// An error occured when decompressing using the
     /// [flate2](https://github.com/alexcrichton/flate2-rs) crate.
+    #[error("{0}")]
     DecompressingError(Error),
+    #[error("{0}")]
     Base64DecodingError(base64::DecodeError),
+    #[error("{0}")]
     XmlDecodingError(XmlError),
+    #[error("{0}")]
     PrematureEnd(String),
+    #[error("{0}")]
     Other(String),
-}
-
-impl fmt::Display for TiledError {
-    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        match *self {
-            TiledError::MalformedAttributes(ref s) => write!(fmt, "{}", s),
-            TiledError::DecompressingError(ref e) => write!(fmt, "{}", e),
-            TiledError::Base64DecodingError(ref e) => write!(fmt, "{}", e),
-            TiledError::XmlDecodingError(ref e) => write!(fmt, "{}", e),
-            TiledError::PrematureEnd(ref e) => write!(fmt, "{}", e),
-            TiledError::Other(ref s) => write!(fmt, "{}", s),
-        }
-    }
-}
-
-// This is a skeleton implementation, which should probably be extended in the future.
-impl std::error::Error for TiledError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match *self {
-            TiledError::MalformedAttributes(_) => None,
-            TiledError::DecompressingError(ref e) => Some(e as &dyn std::error::Error),
-            TiledError::Base64DecodingError(ref e) => Some(e as &dyn std::error::Error),
-            TiledError::XmlDecodingError(ref e) => Some(e as &dyn std::error::Error),
-            TiledError::PrematureEnd(_) => None,
-            TiledError::Other(_) => None,
-        }
-    }
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -162,29 +142,29 @@ pub enum PropertyValue {
 }
 
 impl PropertyValue {
-    fn new(property_type: String, value: String) -> Result<PropertyValue, TiledError> {
+    fn new(property_type: String, value: String) -> Result<PropertyValue, Error> {
         // Check the property type against the value.
         match property_type.as_str() {
             "bool" => match value.parse() {
                 Ok(val) => Ok(PropertyValue::BoolValue(val)),
-                Err(err) => Err(TiledError::Other(err.to_string())),
+                Err(err) => bail!(TiledError::Other(err.to_string())),
             },
             "float" => match value.parse() {
                 Ok(val) => Ok(PropertyValue::FloatValue(val)),
-                Err(err) => Err(TiledError::Other(err.to_string())),
+                Err(err) => bail!(TiledError::Other(err.to_string())),
             },
             "int" => match value.parse() {
                 Ok(val) => Ok(PropertyValue::IntValue(val)),
-                Err(err) => Err(TiledError::Other(err.to_string())),
+                Err(err) => bail!(TiledError::Other(err.to_string())),
             },
             "color" if value.len() > 1 => match u32::from_str_radix(&value[1..], 16) {
                 Ok(color) => Ok(PropertyValue::ColorValue(color)),
-                Err(_) => Err(TiledError::Other(format!(
+                Err(_) => bail!(TiledError::Other(format!(
                     "Improperly formatted color property"
                 ))),
             },
             "string" => Ok(PropertyValue::StringValue(value)),
-            _ => Err(TiledError::Other(format!(
+            _ => bail!(TiledError::Other(format!(
                 "Unknown property type \"{}\"",
                 property_type
             ))),
@@ -194,7 +174,7 @@ impl PropertyValue {
 
 pub type Properties = HashMap<String, PropertyValue>;
 
-fn parse_properties<R: Read>(parser: &mut EventReader<R>) -> Result<Properties, TiledError> {
+fn parse_properties<R: Read>(parser: &mut EventReader<R>) -> Result<Properties, Error> {
     let mut p = HashMap::new();
     parse_tag!(parser, "properties", {
         "property" => |attrs:Vec<OwnedAttribute>| {
@@ -242,7 +222,7 @@ impl Map {
         parser: &mut EventReader<R>,
         attrs: Vec<OwnedAttribute>,
         map_path: Option<&Path>,
-    ) -> Result<Map, TiledError> {
+    ) -> Result<Map> {
         let ((c, infinite), (v, o, w, h, tw, th)) = get_attrs!(
             attrs,
             optionals: [
@@ -257,7 +237,7 @@ impl Map {
                 ("tilewidth", tile_width, |v:String| v.parse().ok()),
                 ("tileheight", tile_height, |v:String| v.parse().ok()),
             ],
-            TiledError::MalformedAttributes("map must have a version, width and height with correct types".to_string())
+            Error::from(TiledError::MalformedAttributes("map must have a version, width and height with correct types".to_string()))
         );
 
         let mut tilesets = Vec::new();
@@ -370,7 +350,7 @@ impl Tileset {
         parser: &mut EventReader<R>,
         attrs: Vec<OwnedAttribute>,
         map_path: Option<&Path>,
-    ) -> Result<Tileset, TiledError> {
+    ) -> Result<Tileset, Error> {
         Tileset::new_internal(parser, &attrs)
             .or_else(|_| Tileset::new_reference(fs, &attrs, map_path))
     }
@@ -378,7 +358,7 @@ impl Tileset {
     fn new_internal<R: Read>(
         parser: &mut EventReader<R>,
         attrs: &Vec<OwnedAttribute>,
-    ) -> Result<Tileset, TiledError> {
+    ) -> Result<Tileset, Error> {
         let ((spacing, margin, tilecount), (first_gid, name, width, height)) = get_attrs!(
            attrs,
            optionals: [
@@ -432,7 +412,7 @@ impl Tileset {
         fs: &mut Filesystem,
         attrs: &Vec<OwnedAttribute>,
         map_path: Option<&Path>,
-    ) -> Result<Tileset, TiledError> {
+    ) -> Result<Tileset, Error> {
         let ((), (first_gid, source)) = get_attrs!(
             attrs,
             optionals: [],
@@ -457,7 +437,7 @@ impl Tileset {
         file: R,
         first_gid: u32,
         source: Option<String>,
-    ) -> Result<Tileset, TiledError> {
+    ) -> Result<Tileset, Error> {
         let mut tileset_parser = EventReader::new(file);
         loop {
             match tileset_parser
@@ -477,9 +457,9 @@ impl Tileset {
                     }
                 }
                 XmlEvent::EndDocument => {
-                    return Err(TiledError::PrematureEnd(
+                    bail!(TiledError::PrematureEnd(
                         "Tileset Document ended before map was parsed".to_string(),
-                    ))
+                    ));
                 }
                 _ => {}
             }
@@ -491,7 +471,7 @@ impl Tileset {
         source: Option<String>,
         parser: &mut EventReader<R>,
         attrs: &Vec<OwnedAttribute>,
-    ) -> Result<Tileset, TiledError> {
+    ) -> Result<Tileset, Error> {
         let ((spacing, margin, tilecount), (name, width, height)) = get_attrs!(
             attrs,
             optionals: [
@@ -556,7 +536,7 @@ impl Tile {
     fn new<R: Read>(
         parser: &mut EventReader<R>,
         attrs: Vec<OwnedAttribute>,
-    ) -> Result<Tile, TiledError> {
+    ) -> Result<Tile, Error> {
         let ((tile_type, probability), id) = get_attrs!(
             attrs,
             optionals: [
@@ -616,7 +596,7 @@ impl Image {
     fn new<R: Read>(
         parser: &mut EventReader<R>,
         attrs: Vec<OwnedAttribute>,
-    ) -> Result<Image, TiledError> {
+    ) -> Result<Image, Error> {
         let (c, (s, w, h)) = get_attrs!(
             attrs,
             optionals: [
@@ -692,7 +672,7 @@ impl Layer {
         width: u32,
         layer_index: u32,
         infinite: bool,
-    ) -> Result<Layer, TiledError> {
+    ) -> Result<Layer, Error> {
         let ((o, v), n) = get_attrs!(
             attrs,
             optionals: [
@@ -752,7 +732,7 @@ impl Chunk {
         attrs: Vec<OwnedAttribute>,
         encoding: Option<String>,
         compression: Option<String>,
-    ) -> Result<Chunk, TiledError> {
+    ) -> Result<Chunk, Error> {
         let ((), (x, y, width, height)) = get_attrs!(
             attrs,
             optionals: [],
@@ -793,7 +773,7 @@ impl ImageLayer {
         parser: &mut EventReader<R>,
         attrs: Vec<OwnedAttribute>,
         layer_index: u32,
-    ) -> Result<ImageLayer, TiledError> {
+    ) -> Result<ImageLayer, Error> {
         let ((o, v, ox, oy), n) = get_attrs!(
             attrs,
             optionals: [
@@ -850,7 +830,7 @@ impl ObjectGroup {
         parser: &mut EventReader<R>,
         attrs: Vec<OwnedAttribute>,
         layer_index: Option<u32>,
-    ) -> Result<ObjectGroup, TiledError> {
+    ) -> Result<ObjectGroup, Error> {
         let ((o, v, c, n), ()) = get_attrs!(
             attrs,
             optionals: [
@@ -915,7 +895,7 @@ impl Object {
     fn new<R: Read>(
         parser: &mut EventReader<R>,
         attrs: Vec<OwnedAttribute>,
-    ) -> Result<Object, TiledError> {
+    ) -> Result<Object, Error> {
         let ((id, gid, n, t, w, h, v, r), (x, y)) = get_attrs!(
             attrs,
             optionals: [
@@ -992,7 +972,7 @@ impl Object {
         })
     }
 
-    fn new_polyline(attrs: Vec<OwnedAttribute>) -> Result<ObjectShape, TiledError> {
+    fn new_polyline(attrs: Vec<OwnedAttribute>) -> Result<ObjectShape, Error> {
         let ((), s) = get_attrs!(
             attrs,
             optionals: [],
@@ -1005,7 +985,7 @@ impl Object {
         Ok(ObjectShape::Polyline { points: points })
     }
 
-    fn new_polygon(attrs: Vec<OwnedAttribute>) -> Result<ObjectShape, TiledError> {
+    fn new_polygon(attrs: Vec<OwnedAttribute>) -> Result<ObjectShape, Error> {
         let ((), s) = get_attrs!(
             attrs,
             optionals: [],
@@ -1018,23 +998,23 @@ impl Object {
         Ok(ObjectShape::Polygon { points: points })
     }
 
-    fn new_point(x: f32, y: f32) -> Result<ObjectShape, TiledError> {
+    fn new_point(x: f32, y: f32) -> Result<ObjectShape, Error> {
         Ok(ObjectShape::Point(x, y))
     }
 
-    fn parse_points(s: String) -> Result<Vec<(f32, f32)>, TiledError> {
+    fn parse_points(s: String) -> Result<Vec<(f32, f32)>, Error> {
         let pairs = s.split(' ');
         let mut points = Vec::new();
         for v in pairs.map(|p| p.split(',')) {
             let v: Vec<&str> = v.collect();
             if v.len() != 2 {
-                return Err(TiledError::MalformedAttributes(
+                bail!(TiledError::MalformedAttributes(
                     "one of a polyline's points does not have an x and y coordinate".to_string(),
                 ));
             }
             let (x, y) = (v[0].parse().ok(), v[1].parse().ok());
             if x.is_none() || y.is_none() {
-                return Err(TiledError::MalformedAttributes(
+                bail!(TiledError::MalformedAttributes(
                     "one of polyline's points does not have i32eger coordinates".to_string(),
                 ));
             }
@@ -1051,7 +1031,7 @@ pub struct Frame {
 }
 
 impl Frame {
-    fn new(attrs: Vec<OwnedAttribute>) -> Result<Frame, TiledError> {
+    fn new(attrs: Vec<OwnedAttribute>) -> Result<Frame, Error> {
         let ((), (tile_id, duration)) = get_attrs!(
             attrs,
             optionals: [],
@@ -1068,7 +1048,7 @@ impl Frame {
     }
 }
 
-fn parse_animation<R: Read>(parser: &mut EventReader<R>) -> Result<Vec<Frame>, TiledError> {
+fn parse_animation<R: Read>(parser: &mut EventReader<R>) -> Result<Vec<Frame>, Error> {
     let mut animation = Vec::new();
     parse_tag!(parser, "animation", {
         "frame" => |attrs| {
@@ -1083,7 +1063,7 @@ fn parse_infinite_data<R: Read>(
     parser: &mut EventReader<R>,
     attrs: Vec<OwnedAttribute>,
     _width: u32,
-) -> Result<LayerData, TiledError> {
+) -> Result<LayerData, Error> {
     let ((e, c), ()) = get_attrs!(
         attrs,
         optionals: [
@@ -1109,7 +1089,7 @@ fn parse_data<R: Read>(
     parser: &mut EventReader<R>,
     attrs: Vec<OwnedAttribute>,
     width: u32,
-) -> Result<LayerData, TiledError> {
+) -> Result<LayerData, Error> {
     let ((e, c), ()) = get_attrs!(
         attrs,
         optionals: [
@@ -1130,17 +1110,15 @@ fn parse_data_line<R: Read>(
     compression: Option<String>,
     parser: &mut EventReader<R>,
     width: u32,
-) -> Result<Vec<Vec<LayerTile>>, TiledError> {
+) -> Result<Vec<Vec<LayerTile>>, Error> {
     match (encoding, compression) {
-        (None, None) => {
-            return Err(TiledError::Other(
-                "XML format is currently not supported".to_string(),
-            ))
-        }
+        (None, None) => bail!(TiledError::Other(
+            "XML format is currently not supported".to_string(),
+        )),
         (Some(e), None) => match e.as_ref() {
             "base64" => return parse_base64(parser).map(|v| convert_to_tile(&v, width)),
             "csv" => return decode_csv(parser),
-            e => return Err(TiledError::Other(format!("Unknown encoding format {}", e))),
+            e => bail!(TiledError::Other(format!("Unknown encoding format {}", e))),
         },
         (Some(e), Some(c)) => match (e.as_ref(), c.as_ref()) {
             ("base64", "zlib") => {
@@ -1158,22 +1136,22 @@ fn parse_data_line<R: Read>(
                     .and_then(decode_zstd)
                     .map(|v| convert_to_tile(&v, width))
             }
-            (e, c) => {
-                return Err(TiledError::Other(format!(
-                    "Unknown combination of {} encoding and {} compression",
-                    e, c
-                )))
-            }
+            (e, c) => bail!(TiledError::Other(format!(
+                "Unknown combination of {} encoding and {} compression",
+                e, c
+            ))),
         },
-        _ => return Err(TiledError::Other("Missing encoding format".to_string())),
+        _ => bail!(TiledError::Other("Missing encoding format".to_string())),
     };
 }
 
-fn parse_base64<R: Read>(parser: &mut EventReader<R>) -> Result<Vec<u8>, TiledError> {
+fn parse_base64<R: Read>(parser: &mut EventReader<R>) -> Result<Vec<u8>> {
     loop {
         match parser.next().map_err(TiledError::XmlDecodingError)? {
             XmlEvent::Characters(s) => {
-                return base64::decode(s.trim().as_bytes()).map_err(TiledError::Base64DecodingError)
+                return Ok(
+                    base64::decode(s.trim().as_bytes()).map_err(TiledError::Base64DecodingError)?
+                );
             }
             XmlEvent::EndElement { name, .. } => {
                 if name.local_name == "data" {
@@ -1185,43 +1163,44 @@ fn parse_base64<R: Read>(parser: &mut EventReader<R>) -> Result<Vec<u8>, TiledEr
     }
 }
 
-fn decode_zlib(data: Vec<u8>) -> Result<Vec<u8>, TiledError> {
+fn decode_zlib(data: Vec<u8>) -> Result<Vec<u8>> {
     use libflate::zlib::Decoder;
-    let mut zd =
-        Decoder::new(BufReader::new(&data[..])).map_err(|e| TiledError::DecompressingError(e))?;
+    let mut zd = Decoder::new(BufReader::new(&data[..]))
+        .map_err(|e| TiledError::DecompressingError(e.into()))?;
     let mut data = Vec::new();
     match zd.read_to_end(&mut data) {
         Ok(_v) => {}
-        Err(e) => return Err(TiledError::DecompressingError(e)),
+        Err(e) => bail!(TiledError::DecompressingError(e.into())),
     }
     Ok(data)
 }
 
-fn decode_gzip(data: Vec<u8>) -> Result<Vec<u8>, TiledError> {
+fn decode_gzip(data: Vec<u8>) -> Result<Vec<u8>, Error> {
     use libflate::gzip::Decoder;
-    let mut zd =
-        Decoder::new(BufReader::new(&data[..])).map_err(|e| TiledError::DecompressingError(e))?;
+    let mut zd = Decoder::new(BufReader::new(&data[..]))
+        .map_err(|e| TiledError::DecompressingError(e.into()))?;
 
     let mut data = Vec::new();
     zd.read_to_end(&mut data)
-        .map_err(|e| TiledError::DecompressingError(e))?;
+        .map_err(|e| TiledError::DecompressingError(e.into()))?;
     Ok(data)
 }
 
-fn decode_zstd(data: Vec<u8>) -> Result<Vec<u8>, TiledError> {
+fn decode_zstd(data: Vec<u8>) -> Result<Vec<u8>, Error> {
     use std::io::Cursor;
     use zstd::stream::read::Decoder;
 
     let buff = Cursor::new(&data);
-    let mut zd = Decoder::with_buffer(buff).map_err(|e| TiledError::DecompressingError(e))?;
+    let mut zd =
+        Decoder::with_buffer(buff).map_err(|e| TiledError::DecompressingError(e.into()))?;
 
     let mut data = Vec::new();
     zd.read_to_end(&mut data)
-        .map_err(|e| TiledError::DecompressingError(e))?;
+        .map_err(|e| TiledError::DecompressingError(e.into()))?;
     Ok(data)
 }
 
-fn decode_csv<R: Read>(parser: &mut EventReader<R>) -> Result<Vec<Vec<LayerTile>>, TiledError> {
+fn decode_csv<R: Read>(parser: &mut EventReader<R>) -> Result<Vec<Vec<LayerTile>>, Error> {
     loop {
         match parser.next().map_err(TiledError::XmlDecodingError)? {
             XmlEvent::Characters(s) => {
@@ -1268,11 +1247,7 @@ fn convert_to_tile(all: &Vec<u8>, width: u32) -> Vec<Vec<LayerTile>> {
     data
 }
 
-fn parse_impl<R: Read>(
-    fs: &mut Filesystem,
-    reader: R,
-    map_path: Option<&Path>,
-) -> Result<Map, TiledError> {
+fn parse_impl<R: Read>(fs: &mut Filesystem, reader: R, map_path: Option<&Path>) -> Result<Map> {
     let mut parser = EventReader::new(reader);
     loop {
         match parser.next().map_err(TiledError::XmlDecodingError)? {
@@ -1286,7 +1261,8 @@ fn parse_impl<R: Read>(
             XmlEvent::EndDocument => {
                 return Err(TiledError::PrematureEnd(
                     "Document ended before map was parsed".to_string(),
-                ))
+                )
+                .into())
             }
             _ => {}
         }
@@ -1302,24 +1278,24 @@ pub fn parse_with_path<R: Read>(
     filesystem: &mut Filesystem,
     reader: R,
     path: &Path,
-) -> Result<Map, TiledError> {
+) -> Result<Map, Error> {
     parse_impl(filesystem, reader, Some(path))
 }
 
 /// Parse a file hopefully containing a Tiled map and try to parse it.  If the
 /// file has an external tileset, the tileset file will be loaded using a path
 /// relative to the map file's path.
-pub fn parse_file(filesystem: &mut Filesystem, path: &Path) -> Result<Map, TiledError> {
+pub fn parse_file(filesystem: &mut Filesystem, path: &Path) -> Result<Map> {
     let file = filesystem
         .open(path)
-        .map_err(|_| TiledError::Other(format!("Map file not found: {:?}", path)))?;
+        .with_context(|| TiledError::Other(format!("Map file not found: {:?}", path)))?;
     parse_impl(filesystem, file, Some(path))
 }
 
 /// Parse a buffer hopefully containing the contents of a Tiled file and try to
 /// parse it.
 #[allow(dead_code)]
-pub fn parse<R: Read>(filesystem: &mut Filesystem, reader: R) -> Result<Map, TiledError> {
+pub fn parse<R: Read>(filesystem: &mut Filesystem, reader: R) -> Result<Map, Error> {
     parse_impl(filesystem, reader, None)
 }
 
@@ -1328,6 +1304,6 @@ pub fn parse<R: Read>(filesystem: &mut Filesystem, reader: R) -> Result<Map, Til
 /// External tilesets do not have a firstgid attribute.  That lives in the
 /// map. You must pass in `first_gid`.  If you do not need to use gids for anything,
 /// passing in 1 will work fine.
-pub fn parse_tileset<R: Read>(reader: R, first_gid: u32) -> Result<Tileset, TiledError> {
+pub fn parse_tileset<R: Read>(reader: R, first_gid: u32) -> Result<Tileset, Error> {
     Tileset::new_external(reader, first_gid, None)
 }

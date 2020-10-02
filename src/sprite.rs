@@ -4,10 +4,16 @@ use {
     generational_arena::{Arena, Index},
     hashbrown::HashMap,
     serde::{Deserialize, Serialize},
-    std::ops,
+    std::{io::Read, ops},
 };
 
-use crate::{ecs::*, math::*};
+use crate::{
+    ecs::*,
+    filesystem::Filesystem,
+    math::*,
+    resources::{Inspect, Key, Load, Loaded, Storage},
+    SharedResources,
+};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -327,5 +333,23 @@ impl<T: Send + Sync + 'static> SpriteSheetManager<T> {
         }
 
         Ok(())
+    }
+}
+
+impl<C> Load<C, Key> for SpriteSheet
+where
+    SpriteSheet: for<'a> Inspect<'a, C, &'a mut SharedResources>,
+{
+    type Error = Error;
+
+    fn load(key: Key, _storage: &mut Storage<C, Key>, ctx: &mut C) -> Result<Loaded<Self, Key>> {
+        match key {
+            Key::Path(path) => {
+                let mut fh = Self::inspect(ctx).fetch_mut::<Filesystem>().open(&path)?;
+                let mut buf = String::new();
+                fh.read_to_string(&mut buf)?;
+                Ok(SpriteSheet::from_json(&buf)?.into())
+            } //_ => bail!("can only load from logical"),
+        }
     }
 }

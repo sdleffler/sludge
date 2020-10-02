@@ -10,6 +10,7 @@ use crate::{
     filesystem::Filesystem,
     resources::{Inspect, Key, Load, Loaded, Storage},
     tiled::xml_parser::LayerData,
+    SharedResources,
 };
 
 mod xml_parser;
@@ -200,14 +201,14 @@ impl Map {
 
 impl<C> Load<C, Key> for TileSheet
 where
-    TileSheet: for<'a> Inspect<'a, C, &'a mut Filesystem>,
+    TileSheet: for<'a> Inspect<'a, C, &'a mut SharedResources>,
 {
     type Error = Error;
 
     fn load(key: Key, _storage: &mut Storage<C, Key>, ctx: &mut C) -> Result<Loaded<Self, Key>> {
         match key {
             Key::Path(path) => {
-                let fh = Self::inspect(ctx).open(&path)?;
+                let fh = Self::inspect(ctx).fetch_mut::<Filesystem>().open(&path)?;
                 let tiled = xml_parser::parse_tileset(fh, 1)?;
                 Ok(TileSheet::from_tiled(&tiled)?.into())
             } //_ => bail!("can only load from logical"),
@@ -217,14 +218,17 @@ where
 
 impl<C> Load<C, Key> for Map
 where
-    Map: for<'a> Inspect<'a, C, &'a mut Filesystem>,
+    Map: for<'a> Inspect<'a, C, &'a mut SharedResources>,
 {
     type Error = Error;
 
     fn load(key: Key, _storage: &mut Storage<C, Key>, ctx: &mut C) -> Result<Loaded<Self, Key>> {
         match key {
             Key::Path(path) => {
-                let tiled = xml_parser::parse_file(Self::inspect(ctx), &path)?;
+                let tiled = xml_parser::parse_file(
+                    &mut *Self::inspect(ctx).fetch_mut::<Filesystem>(),
+                    &path,
+                )?;
 
                 let mut deps = vec![];
                 let tile_sheets = tiled

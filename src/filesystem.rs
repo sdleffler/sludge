@@ -322,7 +322,10 @@ impl Filesystem {
     /// for `.mount()`. Rather, it can be used to read zip files from sources
     /// such as `std::io::Cursor::new(includes_bytes!(...))` in order to embed
     /// resources into the game's executable.
-    pub fn add_zip_file<R: io::Read + io::Seek + 'static>(&mut self, reader: R) -> Result<()> {
+    pub fn add_zip_file<R: io::Read + io::Seek + Send + Sync + 'static>(
+        &mut self,
+        reader: R,
+    ) -> Result<()> {
         let zipfs = vfs::ZipFS::from_read(reader)?;
         log::trace!("Adding zip file from reader");
         self.vfs.push_back(Box::new(zipfs));
