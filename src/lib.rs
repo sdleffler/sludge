@@ -24,8 +24,10 @@ pub type Atom = DefaultAtom;
 mod utils;
 
 pub mod api;
+pub mod collide;
 pub mod components;
 pub mod dependency_graph;
+pub mod dispatcher;
 pub mod ecs;
 pub mod filesystem;
 pub mod hierarchy;
@@ -63,7 +65,7 @@ pub mod prelude {
     };
 }
 
-use crate::{api::Registry, dependency_graph::DependencyGraph};
+use crate::{api::Registry, dispatcher::Dispatcher};
 
 const RESOURCES_REGISTRY_KEY: &'static str = "sludge.resources";
 
@@ -93,7 +95,7 @@ pub struct Space {
     resources: SharedResources,
 
     #[derivative(Debug = "ignore")]
-    dependency_graph: DependencyGraph<Box<dyn System>>,
+    dispatcher: Dispatcher,
 }
 
 impl Space {
@@ -118,7 +120,7 @@ impl Space {
         let mut this = Self {
             lua,
             resources: shared_resources,
-            dependency_graph: DependencyGraph::new(),
+            dispatcher: Dispatcher::new(),
         };
 
         this.register(crate::systems::WorldEventSystem, "WorldEvent", &[])?;
@@ -139,36 +141,27 @@ impl Space {
     }
 
     pub fn register<S: System>(&mut self, system: S, name: &str, deps: &[&str]) -> Result<()> {
-        ensure!(
-            self.dependency_graph
-                .insert(Box::new(system), name, deps.iter().copied())?
-                .is_none(),
-            "system already exists!"
-        );
-
-        Ok(())
+        self.dispatcher.register(system, name, deps)
     }
 
     pub fn refresh(&mut self) -> Result<()> {
-        if self.dependency_graph.update()? {
-            for (name, sys) in self.dependency_graph.sorted() {
-                self.lua
-                    .context(|lua| sys.init(lua, &mut *self.resources.borrow_mut()))?;
-                log::info!("initialized system `{}`", name);
-            }
-        }
+        let Self {
+            lua,
+            dispatcher,
+            resources,
+        } = self;
 
-        Ok(())
+        lua.context(|lua| dispatcher.refresh(lua, &mut *resources.borrow_mut()))
     }
 
     pub fn update(&mut self) -> Result<()> {
-        self.refresh()?;
+        let Self {
+            lua,
+            dispatcher,
+            resources,
+        } = self;
 
-        for (_, sys) in self.dependency_graph.sorted() {
-            self.lua.context(|lua| sys.update(lua, &self.resources))?;
-        }
-
-        Ok(())
+        lua.context(|lua| dispatcher.update(lua, resources))
     }
 
     pub fn fetch<T: Any + Send + Sync>(&self) -> SharedFetch<T> {

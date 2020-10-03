@@ -156,7 +156,7 @@ mod tests {
 
         let e1 = {
             let mut tx = Transform3::identity();
-            tx *= &Translation3::new(5., 7., 0.);
+            tx *= &Translation3::new(-5., -7., 0.);
             tx *= &Rotation3::from_axis_angle(&Vector3::z_axis(), ::std::f32::consts::PI);
             resources.fetch_mut::<World>().spawn((Transform::new(tx),))
         };

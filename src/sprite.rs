@@ -11,15 +11,15 @@ use crate::{
     ecs::*,
     filesystem::Filesystem,
     math::*,
-    resources::{Inspect, Key, Load, Loaded, Storage},
+    resources::{Inspect, Key, Load, Loaded, Res, Storage},
     SharedResources,
 };
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[serde(transparent)]
 pub struct TagId(u32);
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[serde(transparent)]
 pub struct FrameId(u32);
 
@@ -232,7 +232,7 @@ impl<'a> SmartComponent<&'a Flags> for SpriteSheetId {}
 
 #[derive(Debug)]
 pub struct SpriteSheetEntry<T: Send + Sync + 'static> {
-    pub sheet: SpriteSheet,
+    pub sheet: Res<SpriteSheet>,
     pub userdata: T,
 }
 
@@ -272,7 +272,7 @@ impl<T: Send + Sync + 'static> SpriteSheetManager<T> {
     pub fn insert(
         &mut self,
         maybe_name: Option<&str>,
-        sheet: SpriteSheet,
+        sheet: Res<SpriteSheet>,
         userdata: T,
     ) -> Result<SpriteSheetId> {
         let idx = self.sheets.insert(SpriteSheetEntry { sheet, userdata });
@@ -322,8 +322,10 @@ impl<T: Send + Sync + 'static> SpriteSheetManager<T> {
                 None => bail!("spritesheet not found for index {:?}", *sheet_id),
             };
 
-            if let Some((new_tag, maybe_new_frame)) =
-                entry.sheet.update_animation_inner(dt, &*tag, &*frame)
+            if let Some((new_tag, maybe_new_frame)) = entry
+                .sheet
+                .borrow()
+                .update_animation_inner(dt, &*tag, &*frame)
             {
                 *tag = new_tag;
                 if let Some(new_frame) = maybe_new_frame {

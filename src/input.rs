@@ -104,8 +104,8 @@ impl Default for AxisState {
         AxisState {
             position: 0.0,
             direction: 0.0,
-            acceleration: 4.0,
-            gravity: 3.0,
+            acceleration: 16.0,
+            gravity: 12.0,
         }
     }
 }

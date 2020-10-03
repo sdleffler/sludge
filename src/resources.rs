@@ -5,11 +5,15 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use crate::SharedResources;
+
 /// Reexport everything from warmy except for the `Key` trait and `SimpleKey` as we expect
 /// users to use our `Key` type.
 pub use warmy::{
-    Discovery, Inspect, Load, Loaded, Res, Storage, Store, StoreError, StoreErrorOr, StoreOpt,
+    Discovery, Inspect, Load, Loaded, Res, Storage, StoreError, StoreErrorOr, StoreOpt,
 };
+
+pub type Store = warmy::Store<SharedResources, Key>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
