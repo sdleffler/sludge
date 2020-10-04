@@ -8,7 +8,7 @@ pub use nalgebra::{
 
 pub use ncollide2d::{
     self as nc,
-    bounding_volume::{self, AABB},
+    bounding_volume::{self, BoundingVolume, HasBoundingVolume, AABB},
     shape::{Ball, Cuboid},
 };
 
