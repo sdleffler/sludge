@@ -24,7 +24,6 @@ pub type Atom = DefaultAtom;
 mod utils;
 
 pub mod api;
-pub mod collide;
 pub mod components;
 pub mod dependency_graph;
 pub mod dispatcher;
