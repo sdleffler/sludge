@@ -4,7 +4,7 @@ use {
     anyhow::*,
     atomic_refcell::{AtomicRef, AtomicRefCell, AtomicRefMut},
     crossbeam_channel::{Receiver, Sender},
-    derivative::Derivative,
+    derivative::*,
     hashbrown::HashMap,
     nalgebra as na,
     rlua::prelude::*,
@@ -35,6 +35,7 @@ pub mod input;
 pub mod math;
 pub mod resources;
 pub mod scene;
+pub mod spatial_2d;
 pub mod sprite;
 pub mod systems;
 pub mod tiled;
@@ -61,7 +62,7 @@ pub mod prelude {
         api::{Accessor, StaticAccessor, StaticTemplate, Template},
         ecs::*,
         math::*,
-        Scheduler, SludgeLuaContextExt, Space,
+        Resources, Scheduler, SharedResources, SludgeLuaContextExt, Space, System,
     };
 }
 

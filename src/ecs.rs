@@ -7,8 +7,8 @@ use {
 };
 
 pub use hecs::{
-    Bundle, Component, ComponentError, DynamicBundle, Entity, EntityRef, NoSuchEntity, Query,
-    QueryBorrow, QueryOne, Ref, RefMut, SmartComponent,
+    Bundle, Component, ComponentError, DynamicBundle, Entity, EntityBuilder, EntityRef,
+    NoSuchEntity, Query, QueryBorrow, QueryOne, Ref, RefMut, SmartComponent,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

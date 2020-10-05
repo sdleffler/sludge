@@ -7,8 +7,6 @@ use {
     std::ops,
 };
 
-pub mod spatial_hash;
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(from = "BoundingBox2Proxy", into = "BoundingBox2Proxy")]
 pub struct BoundingBox2(pub AABB<f32>);

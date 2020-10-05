@@ -26,7 +26,6 @@ atomic_refcell = "0.1.6"
 string_cache = "0.8.0"
 ggez = { git = "https://github.com/sdleffler/ggez", optional = true }
 petgraph = "0.5.1"
-sludge-macros = { path = "macros", version = "0.1.0", optional = true }
 serde = "1.0.116"
 serde_json = "1.0.57"
 warmy = { git = "https://github.com/sdleffler/warmy", features = ["arc"] }

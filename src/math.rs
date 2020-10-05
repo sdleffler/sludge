@@ -9,7 +9,8 @@ pub use nalgebra::{
 pub use ncollide2d::{
     self as nc,
     bounding_volume::{self, BoundingVolume, HasBoundingVolume, AABB},
-    shape::{Ball, Cuboid},
+    query::{self, Proximity},
+    shape::{Ball, Cuboid, ShapeHandle},
 };
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -31,6 +32,13 @@ impl<T: Scalar> Box2<T> {
         T: RealField,
     {
         self.origin + self.extent / na::convert::<_, T>(2.)
+    }
+
+    pub fn to_aabb(self) -> AABB<T>
+    where
+        T: RealField,
+    {
+        AABB::new(self.origin, self.origin + self.extent)
     }
 }
 
