@@ -23,6 +23,7 @@ pub struct Frame {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TileData {
+    tile_type: Option<String>,
     local_id: u32,
     frames: Vec<Frame>,
 }
@@ -32,6 +33,7 @@ pub struct TileSheet {
     name: String,
 
     first_global_id: u32,
+    tile_count: u32,
 
     /// Path to the image file.
     source: PathBuf,
@@ -45,9 +47,8 @@ pub struct TileSheet {
     margin: u32,
     spacing: u32,
 
-    tile_data: Vec<TileData>,
-
-    tile_count: u32,
+    /// Mapping local IDs to tile data.
+    tile_data: HashMap<u32, TileData>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -70,18 +71,23 @@ impl TileSheet {
         let tile_data = tiled
             .tiles
             .iter()
-            .map(|tile| TileData {
-                local_id: tile.id,
-                frames: tile
-                    .animation
-                    .as_ref()
-                    .into_iter()
-                    .flatten()
-                    .map(|frame| Frame {
-                        local_id: frame.tile_id,
-                        duration: frame.duration,
-                    })
-                    .collect(),
+            .map(|tile| {
+                let tile_data = TileData {
+                    tile_type: tile.tile_type.clone(),
+                    local_id: tile.id,
+                    frames: tile
+                        .animation
+                        .as_ref()
+                        .into_iter()
+                        .flatten()
+                        .map(|frame| Frame {
+                            local_id: frame.tile_id,
+                            duration: frame.duration,
+                        })
+                        .collect(),
+                };
+
+                (tile.id, tile_data)
             })
             .collect();
 
@@ -133,6 +139,11 @@ impl TileSheet {
                 extents: extent,
             }
         })
+    }
+
+    pub fn last_global_id(&self) -> u32 {
+        assert!(self.tile_count > 0, "tilesheet has no tiles");
+        self.first_global_id + self.tile_count - 1
     }
 }
 
@@ -196,6 +207,12 @@ impl Map {
 
     pub fn tile_sheets(&self) -> &[TileSheet] {
         &self.tile_sheets
+    }
+
+    pub fn get_tile_sheet_for_gid(&self, gid: u32) -> Option<&TileSheet> {
+        self.tile_sheets
+            .iter()
+            .find(|ts| ts.first_global_id <= gid && gid <= ts.last_global_id())
     }
 }
 

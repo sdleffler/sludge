@@ -11,7 +11,7 @@ use {
         path::Path,
         str::FromStr,
     },
-    thiserror::Error,
+    thiserror::*,
     xml::{
         attribute::OwnedAttribute,
         reader::{Error as XmlError, EventReader, XmlEvent},
