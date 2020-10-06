@@ -6,7 +6,6 @@ use {
 };
 
 pub mod spatial_hash;
-pub mod tile_grid;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(from = "PositionProxy", into = "PositionProxy")]
@@ -14,7 +13,7 @@ pub struct Position(pub Isometry2<f32>);
 
 impl Default for Position {
     fn default() -> Self {
-        Self(Isometry2::from_parts(na::one(), na::one()))
+        Self(Isometry2::identity())
     }
 }
 
@@ -74,46 +73,52 @@ impl ops::DerefMut for Position {
 }
 
 impl Position {
-    pub fn position(&self) -> Point2<f32> {
+    pub fn center(&self) -> Point2<f32> {
         Point2::from(self.0.translation.vector)
     }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(from = "VelocityProxy", into = "VelocityProxy")]
-pub struct Velocity(pub Isometry2<f32>);
+pub struct Velocity(pub Velocity2<f32>);
+
+impl Default for Velocity {
+    fn default() -> Self {
+        Self(Velocity2::zero())
+    }
+}
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename = "Velocity")]
 #[serde(default)]
 struct VelocityProxy {
-    velocity: Vector2<f32>,
-    angle: f32,
+    x: f32,
+    y: f32,
+    angular: f32,
 }
 
 impl Default for VelocityProxy {
     fn default() -> Self {
         Self {
-            velocity: Vector2::zeros(),
-            angle: 0.,
+            x: 0.,
+            y: 0.,
+            angular: 0.,
         }
     }
 }
 
 impl From<VelocityProxy> for Velocity {
     fn from(de: VelocityProxy) -> Self {
-        Self(Isometry2::from_parts(
-            Translation2::from(de.velocity),
-            UnitComplex::new(de.angle),
-        ))
+        Self(Velocity2::new(Vector2::new(de.x, de.y), de.angular))
     }
 }
 
 impl From<Velocity> for VelocityProxy {
     fn from(Velocity(ser): Velocity) -> Self {
         Self {
-            velocity: ser.translation.vector,
-            angle: ser.rotation.angle(),
+            x: ser.linear.x,
+            y: ser.linear.y,
+            angular: ser.angular,
         }
     }
 }
@@ -121,7 +126,7 @@ impl From<Velocity> for VelocityProxy {
 impl<'a> SmartComponent<&'a Flags> for Velocity {}
 
 impl ops::Deref for Velocity {
-    type Target = Isometry2<f32>;
+    type Target = Velocity2<f32>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -131,16 +136,6 @@ impl ops::Deref for Velocity {
 impl ops::DerefMut for Velocity {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
-    }
-}
-
-impl Velocity {
-    pub fn linear(&self) -> Vector2<f32> {
-        self.translation.vector
-    }
-
-    pub fn angular(&self) -> f32 {
-        self.rotation.angle()
     }
 }
 

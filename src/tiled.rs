@@ -193,9 +193,23 @@ impl<TileProperties> TileSheet<TileProperties> {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Chunk {
+    pub x: i32,
+    pub y: i32,
     pub w: u32,
     pub h: u32,
     pub data: Vec<u32>,
+}
+
+impl Chunk {
+    pub fn tiles(&self) -> impl Iterator<Item = ((i32, i32), u32)> + '_ {
+        let (w, x, y) = (self.w, self.x, self.y);
+        self.data
+            .iter()
+            .copied()
+            .enumerate()
+            .map(move |(i, n)| ((i as u32 % w, i as u32 / w), n))
+            .map(move |((i, j), n)| ((i as i32 + x, j as i32 + y), n))
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -222,8 +236,15 @@ impl Default for TileLayer {
     }
 }
 
+impl<L> TileLayer<L> {
+    pub fn chunks(&self) -> impl Iterator<Item = ((i32, i32), &Chunk)> + '_ {
+        self.chunks.iter().map(|(&k, v)| (k, v))
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(bound(deserialize = "LayerProperties: DeserializeOwned"))]
+#[non_exhaustive]
 pub enum Layer<LayerProperties = ron::Value> {
     #[serde(bound(deserialize = "LayerProperties: DeserializeOwned"))]
     TileLayer(TileLayer<LayerProperties>),
@@ -267,6 +288,11 @@ impl<LayerProperties, TileProperties> Map<LayerProperties, TileProperties> {
         self.tile_sheets
             .iter()
             .find(|ts| ts.first_global_id <= gid && gid <= ts.last_global_id())
+    }
+
+    pub fn get_tile_data_for_gid(&self, gid: u32) -> Option<&TileData<TileProperties>> {
+        self.get_tile_sheet_for_gid(gid)
+            .and_then(|ts| ts.tile_data.get(&(gid - ts.first_global_id)))
     }
 }
 
@@ -327,6 +353,8 @@ where
                                 chunks.insert(
                                     (0, 0),
                                     Chunk {
+                                        x: 0,
+                                        y: 0,
                                         w: tiled.width,
                                         h: tiled.height,
                                         data: data.iter().flatten().map(|lt| lt.gid).collect(),
@@ -338,6 +366,8 @@ where
                                     chunks.insert(
                                         (x, y),
                                         Chunk {
+                                            x: tiled_chunk.x,
+                                            y: tiled_chunk.y,
                                             w: tiled_chunk.width,
                                             h: tiled_chunk.height,
                                             data: tiled_chunk

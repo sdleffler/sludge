@@ -24,6 +24,7 @@ pub type Atom = DefaultAtom;
 mod utils;
 
 pub mod api;
+pub mod chunked_grid;
 pub mod components;
 pub mod dependency_graph;
 pub mod dispatcher;
