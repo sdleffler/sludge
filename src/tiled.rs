@@ -2,7 +2,7 @@ use {
     anyhow::*,
     hashbrown::HashMap,
     nalgebra as na,
-    serde::{Deserialize, Serialize},
+    serde::{de::DeserializeOwned, Deserialize, Serialize},
     std::path::{Path, PathBuf},
 };
 
@@ -15,21 +15,50 @@ use crate::{
 
 mod xml_parser;
 
+fn deserialize_properties<T: DeserializeOwned>(properties: &xml_parser::Properties) -> Result<T> {
+    use xml_parser::PropertyValue::*;
+
+    let ron_map = properties
+        .iter()
+        .map(|(k, v)| {
+            let key = k.to_owned();
+            let value = match v {
+                BoolValue(b) => ron::Value::Bool(*b),
+                FloatValue(f) => {
+                    ron::Value::Number(ron::Number::Float(ron::value::Float::new(*f as f64)))
+                }
+                IntValue(i) => ron::Value::Number(ron::Number::Integer(*i as i64)),
+                ColorValue(_) => bail!("Color property values not yet supported!"),
+                StringValue(s) => ron::Value::String(s.to_owned()),
+            };
+
+            Ok((ron::Value::String(key), value))
+        })
+        .collect::<Result<ron::Map>>()?;
+
+    ron::Value::Map(ron_map).into_rust().map_err(Error::from)
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Frame {
-    local_id: u32,
-    duration: u32,
+    pub local_id: u32,
+    pub duration: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TileData {
-    tile_type: Option<String>,
-    local_id: u32,
-    frames: Vec<Frame>,
+#[serde(bound(deserialize = "TileProperties: DeserializeOwned"))]
+pub struct TileData<TileProperties = ron::Value> {
+    pub tile_type: Option<String>,
+    pub local_id: u32,
+    pub frames: Vec<Frame>,
+
+    #[serde(bound(deserialize = "TileProperties: DeserializeOwned"))]
+    pub properties: TileProperties,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TileSheet {
+#[serde(bound(deserialize = "TileProperties: DeserializeOwned"))]
+pub struct TileSheet<TileProperties = ron::Map> {
     name: String,
 
     first_global_id: u32,
@@ -48,7 +77,8 @@ pub struct TileSheet {
     spacing: u32,
 
     /// Mapping local IDs to tile data.
-    tile_data: HashMap<u32, TileData>,
+    #[serde(bound(deserialize = "TileProperties: DeserializeOwned"))]
+    tile_data: HashMap<u32, TileData<TileProperties>>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -60,8 +90,11 @@ pub struct TileSheetRegion {
     pub extents: na::Vector2<u32>,
 }
 
-impl TileSheet {
-    fn from_tiled(tiled: &xml_parser::Tileset) -> Result<Self> {
+impl<TileProperties> TileSheet<TileProperties> {
+    fn from_tiled(tiled: &xml_parser::Tileset) -> Result<Self>
+    where
+        TileProperties: DeserializeOwned,
+    {
         ensure!(
             tiled.images.len() == 1,
             "tileset must have exactly one image"
@@ -85,11 +118,12 @@ impl TileSheet {
                             duration: frame.duration,
                         })
                         .collect(),
+                    properties: deserialize_properties(&tile.properties)?,
                 };
 
-                (tile.id, tile_data)
+                Ok((tile.id, tile_data))
             })
-            .collect();
+            .collect::<Result<_>>()?;
 
         Ok(TileSheet {
             name: tiled.name.clone(),
@@ -141,6 +175,16 @@ impl TileSheet {
         })
     }
 
+    pub fn iter_tile_data(&self) -> impl Iterator<Item = (u32, &TileData<TileProperties>)> + '_ {
+        self.tile_data
+            .iter()
+            .map(move |(local_id, tile)| (local_id + self.first_global_id, tile))
+    }
+
+    pub fn first_global_id(&self) -> u32 {
+        self.first_global_id
+    }
+
     pub fn last_global_id(&self) -> u32 {
         assert!(self.tile_count > 0, "tilesheet has no tiles");
         self.first_global_id + self.tile_count - 1
@@ -155,11 +199,15 @@ pub struct Chunk {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TileLayer {
+#[serde(bound(deserialize = "LayerProperties: DeserializeOwned"))]
+pub struct TileLayer<LayerProperties = ron::Value> {
     pub name: Option<String>,
     pub opacity: f32,
     pub visible: bool,
     pub chunks: HashMap<(i32, i32), Chunk>,
+
+    #[serde(bound(deserialize = "LayerProperties: DeserializeOwned"))]
+    pub properties: LayerProperties,
 }
 
 impl Default for TileLayer {
@@ -169,17 +217,23 @@ impl Default for TileLayer {
             opacity: 1.0,
             visible: true,
             chunks: HashMap::new(),
+            properties: ron::Value::Map(ron::Map::default()),
         }
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum Layer {
-    TileLayer(TileLayer),
+#[serde(bound(deserialize = "LayerProperties: DeserializeOwned"))]
+pub enum Layer<LayerProperties = ron::Value> {
+    #[serde(bound(deserialize = "LayerProperties: DeserializeOwned"))]
+    TileLayer(TileLayer<LayerProperties>),
 }
 
-#[derive(Debug, Clone)]
-pub struct Map {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound(
+    deserialize = "LayerProperties: DeserializeOwned, TileProperties: DeserializeOwned"
+))]
+pub struct Map<LayerProperties = ron::Value, TileProperties = ron::Value> {
     source: PathBuf,
 
     width: u32,
@@ -188,11 +242,11 @@ pub struct Map {
     tile_width: u32,
     tile_height: u32,
 
-    tile_sheets: Vec<TileSheet>,
-    layers: Vec<Layer>,
+    tile_sheets: Vec<TileSheet<TileProperties>>,
+    layers: Vec<Layer<LayerProperties>>,
 }
 
-impl Map {
+impl<LayerProperties, TileProperties> Map<LayerProperties, TileProperties> {
     pub fn dimensions(&self) -> (u32, u32) {
         (self.width, self.height)
     }
@@ -201,24 +255,25 @@ impl Map {
         (self.tile_width, self.tile_height)
     }
 
-    pub fn layers(&self) -> &[Layer] {
+    pub fn layers(&self) -> &[Layer<LayerProperties>] {
         &self.layers
     }
 
-    pub fn tile_sheets(&self) -> &[TileSheet] {
+    pub fn tile_sheets(&self) -> &[TileSheet<TileProperties>] {
         &self.tile_sheets
     }
 
-    pub fn get_tile_sheet_for_gid(&self, gid: u32) -> Option<&TileSheet> {
+    pub fn get_tile_sheet_for_gid(&self, gid: u32) -> Option<&TileSheet<TileProperties>> {
         self.tile_sheets
             .iter()
             .find(|ts| ts.first_global_id <= gid && gid <= ts.last_global_id())
     }
 }
 
-impl<C> Load<C, Key> for TileSheet
+impl<C, TileProperties> Load<C, Key> for TileSheet<TileProperties>
 where
-    TileSheet: for<'a> Inspect<'a, C, &'a SharedResources>,
+    Self: for<'a> Inspect<'a, C, &'a SharedResources>,
+    TileProperties: DeserializeOwned + 'static,
 {
     type Error = Error;
 
@@ -233,9 +288,11 @@ where
     }
 }
 
-impl<C> Load<C, Key> for Map
+impl<C, LayerProperties, TileProperties> Load<C, Key> for Map<LayerProperties, TileProperties>
 where
-    Map: for<'a> Inspect<'a, C, &'a SharedResources>,
+    Self: for<'a> Inspect<'a, C, &'a SharedResources>,
+    LayerProperties: DeserializeOwned + 'static,
+    TileProperties: DeserializeOwned + 'static,
 {
     type Error = Error;
 
@@ -302,6 +359,7 @@ where
                                 visible: layer.visible,
                                 opacity: layer.opacity,
                                 chunks,
+                                properties: deserialize_properties(&layer.properties)?,
                             }),
                         ))
                     })

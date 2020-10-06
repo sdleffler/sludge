@@ -11,7 +11,7 @@ use {
     std::{
         any::{Any, TypeId},
         collections::BinaryHeap,
-        ops,
+        fmt, ops,
         pin::Pin,
         sync::Arc,
     },
@@ -61,11 +61,51 @@ pub mod prelude {
         api::{Accessor, StaticAccessor, StaticTemplate, Template},
         ecs::*,
         math::*,
-        Resources, Scheduler, SharedResources, SludgeLuaContextExt, Space, System,
+        Resources, Scheduler, SharedResources, SludgeLuaContextExt, SludgeResultExt, Space, System,
     };
 }
 
 use crate::{api::Registry, dispatcher::Dispatcher};
+
+pub trait SludgeResultExt: Sized {
+    type Ok;
+    type Err;
+
+    fn log_err(self, target: &str, level: log::Level) -> Self
+    where
+        Self::Err: fmt::Display;
+
+    fn log_warn_err(self, target: &str) -> Self
+    where
+        Self::Err: fmt::Display,
+    {
+        self.log_err(target, log::Level::Warn)
+    }
+
+    fn log_error_err(self, target: &str) -> Self
+    where
+        Self::Err: fmt::Display,
+    {
+        self.log_err(target, log::Level::Error)
+    }
+}
+
+impl<T, E> SludgeResultExt for Result<T, E> {
+    type Ok = T;
+    type Err = E;
+
+    #[track_caller]
+    fn log_err(self, target: &str, level: log::Level) -> Self
+    where
+        E: fmt::Display,
+    {
+        if let Err(ref e) = &self {
+            log::log!(target: target, level, "{}", e);
+        }
+
+        self
+    }
+}
 
 const RESOURCES_REGISTRY_KEY: &'static str = "sludge.resources";
 

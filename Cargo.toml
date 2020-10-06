@@ -47,6 +47,7 @@ thunderdome = { git = "https://github.com/sdleffler/thunderdome", branch = "main
 aseprite = "0.1.3"
 shrev = "1.1.1"
 smallvec = "1.4.2"
+ron = "0.6.2"
 
 [dev-dependencies]
 approx = "0.3.2"

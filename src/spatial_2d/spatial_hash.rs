@@ -295,7 +295,7 @@ impl SpatialHasher {
             let mut query = world.query_one::<(&Position, &Shape)>(added).unwrap();
             if let Some((pos, shape)) = query.get() {
                 let index = self.grid.insert(
-                    nc::bounding_volume::aabb(&*shape.handle, &(**pos * shape.local)),
+                    nc2d::bounding_volume::aabb(&*shape.handle, &(**pos * shape.local)),
                     added,
                 );
                 added_buf.push((added, index));
@@ -308,7 +308,7 @@ impl SpatialHasher {
         {
             self.grid.update(
                 *index,
-                nc::bounding_volume::aabb(&*shape.handle, &(**pos * shape.local)),
+                nc2d::bounding_volume::aabb(&*shape.handle, &(**pos * shape.local)),
             );
         }
 
@@ -343,7 +343,7 @@ impl System for SpatialHashingSystem {
         let mut added_buf = Vec::new();
         for (e, (pos, shape)) in world.query::<(&Position, &Shape)>().iter() {
             let index = spatial_hasher.grid.insert(
-                nc::bounding_volume::aabb(&*shape.handle, &(**pos * shape.local)),
+                nc2d::bounding_volume::aabb(&*shape.handle, &(**pos * shape.local)),
                 e,
             );
             added_buf.push((e, index));

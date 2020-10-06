@@ -6,23 +6,33 @@ use {
 };
 
 pub mod spatial_hash;
+pub mod tile_grid;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(from = "PositionProxy", into = "PositionProxy")]
 pub struct Position(pub Isometry2<f32>);
 
+impl Default for Position {
+    fn default() -> Self {
+        Self(Isometry2::from_parts(na::one(), na::one()))
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(rename = "Position")]
-#[serde(default)]
 struct PositionProxy {
-    position: Vector2<f32>,
+    x: f32,
+    y: f32,
+
+    #[serde(default)]
     angle: f32,
 }
 
 impl Default for PositionProxy {
     fn default() -> Self {
         Self {
-            position: Vector2::zeros(),
+            x: 0.,
+            y: 0.,
             angle: 0.,
         }
     }
@@ -31,7 +41,7 @@ impl Default for PositionProxy {
 impl From<PositionProxy> for Position {
     fn from(de: PositionProxy) -> Self {
         Self(Isometry2::from_parts(
-            Translation2::from(de.position),
+            Translation2::new(de.x, de.y),
             UnitComplex::new(de.angle),
         ))
     }
@@ -40,7 +50,8 @@ impl From<PositionProxy> for Position {
 impl From<Position> for PositionProxy {
     fn from(Position(ser): Position) -> Self {
         Self {
-            position: ser.translation.vector,
+            x: ser.translation.vector.x,
+            y: ser.translation.vector.y,
             angle: ser.rotation.angle(),
         }
     }

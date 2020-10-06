@@ -7,7 +7,7 @@ pub use nalgebra::{
 };
 
 pub use ncollide2d::{
-    self as nc,
+    self as nc2d,
     bounding_volume::{self, BoundingVolume, HasBoundingVolume, AABB},
     query::{self, Proximity},
     shape::{Ball, Cuboid, ShapeHandle},
@@ -73,4 +73,17 @@ pub fn smooth_subpixels(position: Point2<f32>, direction: Vector2<f32>) -> Point
     }
 
     pixel_pos
+}
+
+pub mod grid_2d {
+    use super::*;
+
+    pub fn to_grid_indices(grid_size: f32, aabb: &AABB<f32>) -> impl Iterator<Item = (i32, i32)> {
+        let x_start = (aabb.mins.x / grid_size).floor() as i32;
+        let x_end = (aabb.maxs.x / grid_size).ceil() as i32;
+        let y_start = (aabb.mins.y / grid_size).floor() as i32;
+        let y_end = (aabb.maxs.y / grid_size).ceil() as i32;
+
+        (x_start..x_end).flat_map(move |i| (y_start..y_end).map(move |j| (i, j)))
+    }
 }
