@@ -50,6 +50,7 @@ smallvec = "1.4.2"
 ron = "0.6.2"
 num-traits = "0.2.12"
 num-derive = "0.3.2"
+sludge-macros = { path = "macros" }
 
 [dev-dependencies]
 approx = "0.3.2"

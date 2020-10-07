@@ -11,7 +11,7 @@ use {
     serde::{Deserialize, Serialize},
     sludge::{
         api::Template,
-        ecs::{Entity, Flags, SmartComponent, World},
+        ecs::{Entity, World},
         prelude::*,
         SludgeLuaContextExt,
     },
@@ -71,20 +71,17 @@ inventory::submit! {
     sludge::api::StaticTemplate::new("Bullet", BulletTemplate)
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, SimpleComponent)]
 struct Spatial {
     pos: na::Vector2<f32>,
     vel: na::Vector2<f32>,
     acc: na::Vector2<f32>,
 }
 
-impl<'a> SmartComponent<&'a Flags> for Spatial {}
-
+#[derive(SimpleComponent)]
 struct SpriteIndex {
     idx: SpriteIdx,
 }
-
-impl<'a> SmartComponent<&'a Flags> for SpriteIndex {}
 
 struct MainState {
     space: Space,

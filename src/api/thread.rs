@@ -1,4 +1,4 @@
-use crate::{Atom, Event, SchedulerQueueChannel, SludgeLuaContextExt};
+use crate::{Atom, Event, EventName, SchedulerQueueChannel, SludgeLuaContextExt};
 use {anyhow::*, rlua::prelude::*};
 
 pub fn load<'lua>(lua: LuaContext<'lua>) -> Result<LuaValue<'lua>> {
@@ -29,11 +29,24 @@ pub fn load<'lua>(lua: LuaContext<'lua>) -> Result<LuaValue<'lua>> {
         Ok(thread)
     })?;
 
-    let broadcast = lua.create_function(|ctx, string: LuaString| {
+    let broadcast = lua.create_function(|ctx, (string, args): (LuaString, LuaMultiValue)| {
+        let event = Event {
+            name: EventName(Atom::from(string.to_str()?)),
+            args: if args.is_empty() {
+                None
+            } else {
+                Some(
+                    args.into_iter()
+                        .map(|v| ctx.create_registry_value(v))
+                        .collect::<LuaResult<_>>()?,
+                )
+            },
+        };
+
         ctx.resources()
             .fetch::<SchedulerQueueChannel>()
             .event
-            .try_send(Event(Atom::from(string.to_str()?)))
+            .try_send(event)
             .unwrap();
         Ok(())
     })?;

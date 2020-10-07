@@ -1,6 +1,6 @@
 use {
     hashbrown::HashMap,
-    hibitset::{AtomicBitSet, BitSetLike},
+    hibitset::{AtomicBitSet, BitSet, BitSetLike},
     rlua::prelude::*,
     shrev::{EventChannel, EventIterator, ReaderId},
     std::any::TypeId,
@@ -10,6 +10,9 @@ pub use hecs::{
     Bundle, Component, ComponentError, DynamicBundle, Entity, EntityBuilder, EntityRef,
     NoSuchEntity, Query, QueryBorrow, QueryOne, Ref, RefMut, SmartComponent,
 };
+
+#[doc(hidden)]
+pub type SmartComponentContext<'a> = &'a Flags;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct LightEntity(u64);
@@ -46,10 +49,27 @@ pub enum ComponentEvent {
     Removed(Entity),
 }
 
+#[derive(Default)]
+pub(crate) struct Debouncer {
+    inserted: BitSet,
+    removed: BitSet,
+    channel: EventChannel<ComponentEvent>,
+}
+
+impl Debouncer {
+    pub(crate) fn track_inserted(&mut self, entity: Entity) {
+        self.inserted.add(entity.id());
+    }
+
+    pub(crate) fn track_removed(&mut self, entity: Entity) {
+        self.removed.add(entity.id());
+    }
+}
+
 pub struct World {
     ecs: hecs::World,
     flags: HashMap<TypeId, AtomicBitSet>,
-    channels: HashMap<TypeId, EventChannel<ComponentEvent>>,
+    channels: HashMap<TypeId, Debouncer>,
 }
 
 pub type Flags = HashMap<TypeId, AtomicBitSet>;
@@ -75,7 +95,7 @@ impl World {
             self.flags.entry(typeid).or_default();
 
             if let Some(channel) = self.channels.get_mut(&typeid) {
-                channel.single_write(ComponentEvent::Inserted(entity));
+                channel.track_inserted(entity);
             }
         }
 
@@ -85,7 +105,7 @@ impl World {
     pub fn despawn(&mut self, entity: Entity) -> Result<(), NoSuchEntity> {
         for typeid in self.ecs.entity(entity)?.component_types() {
             if let Some(channel) = self.channels.get_mut(&typeid) {
-                channel.single_write(ComponentEvent::Removed(entity));
+                channel.track_removed(entity);
             }
         }
 
@@ -165,7 +185,7 @@ impl World {
                 self.flags.entry(typeid).or_default();
 
                 if let Some(channel) = self.channels.get_mut(&typeid) {
-                    channel.single_write(ComponentEvent::Inserted(entity));
+                    channel.track_inserted(entity);
                 }
             }
         });
@@ -181,7 +201,7 @@ impl World {
         let typeid = TypeId::of::<C>();
         self.flags.entry(typeid).or_default();
         if let Some(channel) = self.channels.get_mut(&typeid) {
-            channel.single_write(ComponentEvent::Inserted(entity));
+            channel.track_inserted(entity);
         }
 
         self.ecs.insert_one(entity, component)
@@ -191,7 +211,7 @@ impl World {
         T::with_static_ids(|typeids| {
             for typeid in typeids.iter().copied() {
                 if let Some(channel) = self.channels.get_mut(&typeid) {
-                    channel.single_write(ComponentEvent::Removed(entity));
+                    channel.track_removed(entity);
                 }
             }
         });
@@ -201,7 +221,7 @@ impl World {
 
     pub fn remove_one<T: Component>(&mut self, entity: Entity) -> Result<T, ComponentError> {
         if let Some(channel) = self.channels.get_mut(&TypeId::of::<T>()) {
-            channel.single_write(ComponentEvent::Removed(entity));
+            channel.track_removed(entity);
         }
 
         self.ecs.remove_one(entity)
@@ -214,6 +234,7 @@ impl World {
         self.channels
             .get(&TypeId::of::<T>())
             .unwrap()
+            .channel
             .read(reader_id)
     }
 
@@ -221,6 +242,7 @@ impl World {
         self.channels
             .entry(TypeId::of::<T>())
             .or_default()
+            .channel
             .register_reader()
     }
 
@@ -233,7 +255,8 @@ impl World {
                         .iter()
                         .filter_map(|id| unsafe { ecs.resolve_unknown_gen(id) })
                     {
-                        channel.single_write(ComponentEvent::Modified(entity));
+                        unimplemented!("debounce");
+                        //channel.single_write(ComponentEvent::Modified(entity));
                     }
                 }
 
