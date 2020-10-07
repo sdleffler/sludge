@@ -7,7 +7,7 @@ use {
 
 use crate::{
     components::Parent,
-    ecs::{ComponentEvent, Entity, Flags, SmartComponent, World},
+    ecs::{ComponentEvent, Entity, FlaggedComponent, ScContext, SmartComponent, World},
     hierarchy::{Hierarchy, HierarchyEvent, ParentComponent},
     math::Transform3,
     SharedResources,
@@ -40,10 +40,14 @@ impl Transform {
     }
 }
 
-impl<'a> SmartComponent<&'a Flags> for Transform {
-    fn on_borrow_mut(&mut self, entity: Entity, flags: &'a Flags) {
-        flags[&TypeId::of::<Self>()].add_atomic(entity.id());
+impl<'a> SmartComponent<ScContext<'a>> for Transform {
+    fn on_borrow_mut(&mut self, entity: Entity, flags: ScContext<'a>) {
+        flags[&TypeId::of::<Self>()].emit_modified_atomic(entity);
     }
+}
+
+inventory::submit! {
+    FlaggedComponent::of::<Transform>()
 }
 
 pub struct TransformGraph<P: ParentComponent = Parent> {

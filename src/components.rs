@@ -3,7 +3,7 @@ use {
     serde::{Deserialize, Serialize},
 };
 
-use crate::ecs::Flags;
+use crate::ecs::ScContext;
 
 pub use crate::{
     hierarchy::Parent,
@@ -17,7 +17,7 @@ pub struct Template {
     name: String,
 }
 
-impl<'a> SmartComponent<&'a Flags> for Template {}
+impl<'a> SmartComponent<ScContext<'a>> for Template {}
 
 impl Template {
     pub fn new(name: String) -> Self {

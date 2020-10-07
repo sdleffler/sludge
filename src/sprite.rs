@@ -225,10 +225,10 @@ pub struct SpriteTag {
 #[derive(Debug, Clone, Copy)]
 pub struct SpriteSheetId(Index);
 
-impl<'a> SmartComponent<&'a Flags> for SpriteName {}
-impl<'a> SmartComponent<&'a Flags> for SpriteFrame {}
-impl<'a> SmartComponent<&'a Flags> for SpriteTag {}
-impl<'a> SmartComponent<&'a Flags> for SpriteSheetId {}
+impl<'a> SmartComponent<ScContext<'a>> for SpriteName {}
+impl<'a> SmartComponent<ScContext<'a>> for SpriteFrame {}
+impl<'a> SmartComponent<ScContext<'a>> for SpriteTag {}
+impl<'a> SmartComponent<ScContext<'a>> for SpriteSheetId {}
 
 #[derive(Debug)]
 pub struct SpriteSheetEntry<T: Send + Sync + 'static> {

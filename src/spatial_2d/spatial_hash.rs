@@ -15,7 +15,7 @@ use {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SpatialIndex(Index);
 
-impl<'a> SmartComponent<&'a Flags> for SpatialIndex {}
+impl<'a> SmartComponent<ScContext<'a>> for SpatialIndex {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct BucketIndex(Index);

@@ -10,10 +10,14 @@ pub struct LayerIndex {
     pub layer: i32,
 }
 
-impl<'a> SmartComponent<&'a Flags> for LayerIndex {
-    fn on_borrow_mut(&mut self, entity: Entity, context: &'a Flags) {
-        context[&TypeId::of::<Self>()].add_atomic(entity.id());
+impl<'a> SmartComponent<ScContext<'a>> for LayerIndex {
+    fn on_borrow_mut(&mut self, entity: Entity, context: ScContext<'a>) {
+        context[&TypeId::of::<Self>()].emit_modified_atomic(entity);
     }
+}
+
+inventory::submit! {
+    FlaggedComponent::of::<LayerIndex>()
 }
 
 #[derive(Debug)]

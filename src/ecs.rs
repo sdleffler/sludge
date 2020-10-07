@@ -1,9 +1,13 @@
 use {
     hashbrown::HashMap,
-    hibitset::{AtomicBitSet, BitSet, BitSetLike},
+    hibitset::*,
     rlua::prelude::*,
     shrev::{EventChannel, EventIterator, ReaderId},
-    std::any::TypeId,
+    std::{
+        any::{Any, TypeId},
+        pin::Pin,
+        sync::{RwLock, RwLockReadGuard},
+    },
 };
 
 pub use hecs::{
@@ -12,7 +16,17 @@ pub use hecs::{
 };
 
 #[doc(hidden)]
-pub type SmartComponentContext<'a> = &'a Flags;
+pub type ScContext<'a> = &'a HashMap<TypeId, EventEmitter>;
+
+pub struct FlaggedComponent(TypeId);
+
+impl FlaggedComponent {
+    pub fn of<T: Any>() -> Self {
+        Self(TypeId::of::<T>())
+    }
+}
+
+inventory::collect!(FlaggedComponent);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct LightEntity(u64);
@@ -42,6 +56,36 @@ impl<'lua> FromLua<'lua> for LightEntity {
     }
 }
 
+pub struct ComponentEventIterator<'a> {
+    _outer: Pin<RwLockReadGuard<'a, EventChannel<ComponentEvent>>>,
+    iter: EventIterator<'a, ComponentEvent>,
+}
+
+impl<'a> ComponentEventIterator<'a> {
+    fn new(
+        guard: Pin<RwLockReadGuard<'a, EventChannel<ComponentEvent>>>,
+        reader_id: &'a mut ReaderId<ComponentEvent>,
+    ) -> Self {
+        let iter = unsafe {
+            let inner_ptr = &*guard as *const EventChannel<ComponentEvent>;
+            (*inner_ptr).read(reader_id)
+        };
+
+        Self {
+            _outer: guard,
+            iter,
+        }
+    }
+}
+
+impl<'a> Iterator for ComponentEventIterator<'a> {
+    type Item = &'a ComponentEvent;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next()
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum ComponentEvent {
     Inserted(Entity),
@@ -50,36 +94,70 @@ pub enum ComponentEvent {
 }
 
 #[derive(Default)]
-pub(crate) struct Debouncer {
+pub struct EventEmitter {
     inserted: BitSet,
+    modified: AtomicBitSet,
     removed: BitSet,
-    channel: EventChannel<ComponentEvent>,
+    channel: RwLock<EventChannel<ComponentEvent>>,
 }
 
-impl Debouncer {
-    pub(crate) fn track_inserted(&mut self, entity: Entity) {
-        self.inserted.add(entity.id());
+impl EventEmitter {
+    pub fn emit_inserted(&mut self, entity: Entity) {
+        if !self.inserted.add(entity.id()) {
+            self.channel
+                .get_mut()
+                .unwrap()
+                .single_write(ComponentEvent::Inserted(entity));
+        }
     }
 
-    pub(crate) fn track_removed(&mut self, entity: Entity) {
-        self.removed.add(entity.id());
+    pub fn emit_modified(&mut self, entity: Entity) {
+        if !self.modified.add(entity.id()) {
+            self.channel
+                .get_mut()
+                .unwrap()
+                .single_write(ComponentEvent::Modified(entity));
+        }
+    }
+
+    pub fn emit_modified_atomic(&self, entity: Entity) {
+        if !self.modified.add_atomic(entity.id()) {
+            self.channel
+                .write()
+                .unwrap()
+                .single_write(ComponentEvent::Modified(entity));
+        }
+    }
+
+    pub fn emit_removed(&mut self, entity: Entity) {
+        if !self.removed.add(entity.id()) {
+            self.channel
+                .get_mut()
+                .unwrap()
+                .single_write(ComponentEvent::Removed(entity));
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.inserted.clear();
+        self.modified.clear();
+        self.removed.clear();
     }
 }
 
 pub struct World {
     ecs: hecs::World,
-    flags: HashMap<TypeId, AtomicBitSet>,
-    channels: HashMap<TypeId, Debouncer>,
+    channels: HashMap<TypeId, EventEmitter>,
 }
-
-pub type Flags = HashMap<TypeId, AtomicBitSet>;
 
 impl World {
     pub fn new() -> Self {
         Self {
             ecs: hecs::World::new(),
-            flags: HashMap::new(),
-            channels: HashMap::new(),
+            channels: inventory::iter::<FlaggedComponent>
+                .into_iter()
+                .map(|fc| (fc.0, EventEmitter::default()))
+                .collect(),
         }
     }
 
@@ -92,10 +170,10 @@ impl World {
             .expect("just created")
             .component_types()
         {
-            self.flags.entry(typeid).or_default();
+            self.channels.entry(typeid).or_default();
 
             if let Some(channel) = self.channels.get_mut(&typeid) {
-                channel.track_inserted(entity);
+                channel.emit_inserted(entity);
             }
         }
 
@@ -105,7 +183,7 @@ impl World {
     pub fn despawn(&mut self, entity: Entity) -> Result<(), NoSuchEntity> {
         for typeid in self.ecs.entity(entity)?.component_types() {
             if let Some(channel) = self.channels.get_mut(&typeid) {
-                channel.track_removed(entity);
+                channel.emit_removed(entity);
             }
         }
 
@@ -116,43 +194,43 @@ impl World {
         self.ecs.contains(entity)
     }
 
-    pub fn query<'w, Q>(&'w self) -> QueryBorrow<'w, Q, &'w Flags>
+    pub fn query<'w, Q>(&'w self) -> QueryBorrow<'w, Q, ScContext<'w>>
     where
-        Q: Query<'w, &'w Flags>,
+        Q: Query<'w, ScContext<'w>>,
     {
-        self.ecs.query_with_context(&self.flags)
+        self.ecs.query_with_context(&self.channels)
     }
 
     pub fn query_one<'w, Q>(
         &'w self,
         entity: Entity,
-    ) -> Result<QueryOne<'w, Q, &'w Flags>, NoSuchEntity>
+    ) -> Result<QueryOne<'w, Q, ScContext<'w>>, NoSuchEntity>
     where
-        Q: Query<'w, &'w Flags>,
+        Q: Query<'w, ScContext<'w>>,
     {
-        self.ecs.query_one_with_context(entity, &self.flags)
+        self.ecs.query_one_with_context(entity, &self.channels)
     }
 
-    pub fn get<'w, C: SmartComponent<&'w Flags>>(
+    pub fn get<'w, C: SmartComponent<ScContext<'w>>>(
         &'w self,
         entity: Entity,
-    ) -> Result<Ref<'w, C, &'w Flags>, ComponentError> {
-        self.ecs.get_with_context(entity, &self.flags)
+    ) -> Result<Ref<'w, C, ScContext<'w>>, ComponentError> {
+        self.ecs.get_with_context(entity, &self.channels)
     }
 
-    pub fn get_mut<'w, C: SmartComponent<&'w Flags>>(
+    pub fn get_mut<'w, C: SmartComponent<ScContext<'w>>>(
         &'w self,
         entity: Entity,
-    ) -> Result<RefMut<'w, C, &'w Flags>, ComponentError> {
-        self.ecs.get_mut_with_context(entity, &self.flags)
+    ) -> Result<RefMut<'w, C, ScContext<'w>>, ComponentError> {
+        self.ecs.get_mut_with_context(entity, &self.channels)
     }
 
     pub fn query_raw<'w, Q: Query<'w>>(&'w self) -> QueryBorrow<'w, Q, ()> {
         self.ecs.query_with_context(())
     }
 
-    pub fn entity(&self, entity: Entity) -> Result<EntityRef<&Flags>, NoSuchEntity> {
-        self.ecs.entity_with_context(entity, &self.flags)
+    pub fn entity(&self, entity: Entity) -> Result<EntityRef<ScContext>, NoSuchEntity> {
+        self.ecs.entity_with_context(entity, &self.channels)
     }
 
     pub fn query_one_raw<'w, Q: Query<'w>>(
@@ -182,10 +260,10 @@ impl World {
         // FIXME: find a way to do this w/o the undocumented/unstable DynamicBundle::with_ids
         bundle.with_ids(|typeids| {
             for typeid in typeids.iter().copied() {
-                self.flags.entry(typeid).or_default();
+                self.channels.entry(typeid).or_default();
 
                 if let Some(channel) = self.channels.get_mut(&typeid) {
-                    channel.track_inserted(entity);
+                    channel.emit_inserted(entity);
                 }
             }
         });
@@ -199,9 +277,9 @@ impl World {
         component: C,
     ) -> Result<(), NoSuchEntity> {
         let typeid = TypeId::of::<C>();
-        self.flags.entry(typeid).or_default();
+        self.channels.entry(typeid).or_default();
         if let Some(channel) = self.channels.get_mut(&typeid) {
-            channel.track_inserted(entity);
+            channel.emit_inserted(entity);
         }
 
         self.ecs.insert_one(entity, component)
@@ -211,7 +289,7 @@ impl World {
         T::with_static_ids(|typeids| {
             for typeid in typeids.iter().copied() {
                 if let Some(channel) = self.channels.get_mut(&typeid) {
-                    channel.track_removed(entity);
+                    channel.emit_removed(entity);
                 }
             }
         });
@@ -221,21 +299,27 @@ impl World {
 
     pub fn remove_one<T: Component>(&mut self, entity: Entity) -> Result<T, ComponentError> {
         if let Some(channel) = self.channels.get_mut(&TypeId::of::<T>()) {
-            channel.track_removed(entity);
+            channel.emit_removed(entity);
         }
 
         self.ecs.remove_one(entity)
     }
 
-    pub fn poll<T: Component>(
-        &self,
-        reader_id: &mut ReaderId<ComponentEvent>,
-    ) -> EventIterator<ComponentEvent> {
-        self.channels
-            .get(&TypeId::of::<T>())
-            .unwrap()
-            .channel
-            .read(reader_id)
+    pub fn poll<'a, T: Component>(
+        &'a self,
+        reader_id: &'a mut ReaderId<ComponentEvent>,
+    ) -> ComponentEventIterator<'a> {
+        ComponentEventIterator::new(
+            Pin::new(
+                self.channels
+                    .get(&TypeId::of::<T>())
+                    .unwrap()
+                    .channel
+                    .read()
+                    .unwrap(),
+            ),
+            reader_id,
+        )
     }
 
     pub fn track<T: Component>(&mut self) -> ReaderId<ComponentEvent> {
@@ -243,25 +327,14 @@ impl World {
             .entry(TypeId::of::<T>())
             .or_default()
             .channel
+            .get_mut()
+            .unwrap()
             .register_reader()
     }
 
     pub fn flush_events(&mut self) {
-        for (typeid, set) in self.flags.iter_mut() {
-            if !set.is_empty() {
-                if let Some(channel) = self.channels.get_mut(&typeid) {
-                    let ecs = &self.ecs;
-                    for entity in set
-                        .iter()
-                        .filter_map(|id| unsafe { ecs.resolve_unknown_gen(id) })
-                    {
-                        unimplemented!("debounce");
-                        //channel.single_write(ComponentEvent::Modified(entity));
-                    }
-                }
-
-                set.clear();
-            }
+        for (_, channel) in self.channels.iter_mut() {
+            channel.clear();
         }
     }
 }

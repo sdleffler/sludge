@@ -56,7 +56,7 @@ impl From<Position> for PositionProxy {
     }
 }
 
-impl<'a> SmartComponent<&'a Flags> for Position {}
+impl<'a> SmartComponent<ScContext<'a>> for Position {}
 
 impl ops::Deref for Position {
     type Target = Isometry2<f32>;
@@ -123,7 +123,7 @@ impl From<Velocity> for VelocityProxy {
     }
 }
 
-impl<'a> SmartComponent<&'a Flags> for Velocity {}
+impl<'a> SmartComponent<ScContext<'a>> for Velocity {}
 
 impl ops::Deref for Velocity {
     type Target = Velocity2<f32>;
@@ -145,7 +145,7 @@ pub struct Shape {
     pub handle: ShapeHandle<f32>,
 }
 
-impl<'a> SmartComponent<&'a Flags> for Shape {}
+impl<'a> SmartComponent<ScContext<'a>> for Shape {}
 
 impl Shape {
     pub fn new(local: Isometry2<f32>, handle: ShapeHandle<f32>) -> Self {

@@ -68,18 +68,10 @@ pub use sludge_macros::*;
 
 #[doc(hidden)]
 pub use {
-    crate::ecs::{Entity, SmartComponentContext},
+    crate::ecs::{Entity, ScContext},
+    inventory,
     std::any::TypeId,
 };
-
-#[doc(hidden)]
-mod sludge {
-    #[doc(hidden)]
-    pub use {
-        crate::ecs::{Entity, SmartComponentContext},
-        std::any::TypeId,
-    };
-}
 
 use crate::{api::Registry, dispatcher::Dispatcher};
 

@@ -21,7 +21,7 @@ pub fn derive_simple_component(input: proc_macro::TokenStream) -> proc_macro::To
 
     let expanded = quote! {
         // The generated impl.
-        impl #impl_generics ::sludge::ecs::SmartComponent<::sludge::ecs::SmartComponentContext<#context_lifetime>>
+        impl #impl_generics ::sludge::ecs::SmartComponent<::sludge::ecs::ScContext<#context_lifetime>>
             for #name #ty_generics #where_clause {}
     };
 
@@ -48,11 +48,16 @@ pub fn derive_flagged_component(input: proc_macro::TokenStream) -> proc_macro::T
 
     let expanded = quote! {
         // The generated impl.
-        impl #impl_generics ::sludge::SmartComponent<::sludge::SmartComponentContext<#context_lifetime>>
+        impl #impl_generics ::sludge::SmartComponent<::sludge::ScContext<#context_lifetime>>
             for #name #original_generics #where_clause {
-            fn on_borrow_mut(&self, entity: ::sludge::Entity, context: ::sludge::SmartComponentContext<#context_lifetime>) {
-                context[&::sludge::TypeId::of::<#name #original_generics>()].add_atomic(entity.id());
+            fn on_borrow_mut(&self, entity: ::sludge::Entity, context: ::sludge::ScContext<#context_lifetime>) {
+                context[&::sludge::TypeId::of::<#name #original_generics>()].set_modified_atomic(entity.id());
             }
+        }
+
+        // Register the flagged component so that `World`s create a channel for it.
+        ::sludge::inventory::submit! {
+            ::sludge::FlaggedComponent::of::<Parent>()
         }
     };
 

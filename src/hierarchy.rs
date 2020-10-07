@@ -7,7 +7,7 @@ use {
 };
 
 use crate::{
-    ecs::{ComponentEvent, Entity, Flags, World},
+    ecs::{ComponentEvent, Entity, FlaggedComponent, ScContext, World},
     SharedResources,
 };
 
@@ -22,10 +22,14 @@ impl Parent {
     }
 }
 
-impl<'a> SmartComponent<&'a Flags> for Parent {
-    fn on_borrow_mut(&mut self, entity: hecs::Entity, context: &'a Flags) {
-        context[&TypeId::of::<Self>()].add_atomic(entity.id());
+impl<'a> SmartComponent<ScContext<'a>> for Parent {
+    fn on_borrow_mut(&mut self, entity: hecs::Entity, context: ScContext<'a>) {
+        context[&TypeId::of::<Self>()].emit_modified_atomic(entity);
     }
+}
+
+inventory::submit! {
+    FlaggedComponent::of::<Parent>()
 }
 
 impl ParentComponent for Parent {
@@ -34,7 +38,7 @@ impl ParentComponent for Parent {
     }
 }
 
-pub trait ParentComponent: for<'a> SmartComponent<&'a Flags> {
+pub trait ParentComponent: for<'a> SmartComponent<ScContext<'a>> {
     fn parent_entity(&self) -> Entity;
 }
 

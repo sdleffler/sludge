@@ -5,21 +5,15 @@ use {
         graphics, timer,
     },
     rand::distributions::uniform::Uniform,
-    sludge::{
-        components::Transform,
-        ecs::{Flags, SmartComponent, World},
-        prelude::*,
-    },
+    sludge::{components::Transform, ecs::World, prelude::*},
 };
 
-#[derive(Debug)]
+#[derive(Debug, SimpleComponent)]
 struct Spatial {
     pos: na::Vector2<f32>,
     vel: na::Vector2<f32>,
     acc: na::Vector2<f32>,
 }
-
-impl<'a> SmartComponent<&'a Flags> for Spatial {}
 
 impl Spatial {
     fn new() -> Self {
@@ -31,11 +25,10 @@ impl Spatial {
     }
 }
 
+#[derive(SimpleComponent)]
 struct SpriteIndex {
     idx: graphics::spritebatch::SpriteIdx,
 }
-
-impl<'a> SmartComponent<&'a Flags> for SpriteIndex {}
 
 struct MainState {
     space: Space,
