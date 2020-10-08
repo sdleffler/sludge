@@ -20,7 +20,7 @@ impl crate::System for WorldEventSystem {
     }
 
     fn update(&self, _lua: LuaContext, resources: &SharedResources) -> Result<()> {
-        resources.fetch_mut::<World>().flush_events();
+        resources.fetch_mut::<World>().flush_queue()?;
 
         Ok(())
     }

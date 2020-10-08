@@ -8,7 +8,7 @@ use {
         any::{Any, TypeId},
         fmt,
         pin::Pin,
-        sync::{RwLock, RwLockReadGuard},
+        sync::{Mutex, RwLock, RwLockReadGuard},
     },
 };
 
@@ -35,7 +35,11 @@ enum Command {
     Insert(Entity, EntityBuilder),
     Remove(
         Entity,
-        fn(world: &mut World, entity: Entity) -> Result<(), ComponentError>,
+        fn(
+            channels: &mut HashMap<TypeId, EventEmitter>,
+            ecs: &mut hecs::World,
+            entity: Entity,
+        ) -> Result<(), ComponentError>,
     ),
     Despawn(Entity),
 }
@@ -59,6 +63,7 @@ impl fmt::Debug for Command {
     }
 }
 
+#[derive(Default)]
 pub struct CommandBuffer {
     pool: Vec<EntityBuilder>,
     cmds: Vec<Command>,
@@ -100,8 +105,12 @@ impl CommandBuffer {
     }
 
     pub fn remove<T: Bundle>(&mut self, entity: Entity) -> &mut Self {
-        fn do_remove<T: Bundle>(world: &mut World, entity: Entity) -> Result<(), ComponentError> {
-            world.remove::<T>(entity)?;
+        fn do_remove<T: Bundle>(
+            channels: &mut HashMap<TypeId, EventEmitter>,
+            ecs: &mut hecs::World,
+            entity: Entity,
+        ) -> Result<(), ComponentError> {
+            World::do_remove(channels, ecs, entity)?;
             Ok(())
         }
 
@@ -112,43 +121,6 @@ impl CommandBuffer {
     pub fn despawn(&mut self, entity: Entity) -> &mut Self {
         self.cmds.push(Command::Despawn(entity));
         self
-    }
-
-    pub fn flush(&mut self, world: &mut World) -> Result<()> {
-        let mut errors = Vec::new();
-
-        for cmd in self.cmds.drain(..) {
-            let res = match cmd {
-                Command::Spawn(mut bundle) => {
-                    world.spawn(bundle.build());
-                    self.pool.push(bundle);
-                    Ok(())
-                }
-                Command::Insert(entity, mut bundle) => {
-                    let res = world.insert(entity, bundle.build());
-                    self.pool.push(bundle);
-                    res.map_err(|err| Error::from(err).to_string())
-                }
-                Command::Remove(entity, remover) => {
-                    remover(world, entity).map_err(|err| Error::from(err).to_string())
-                }
-                Command::Despawn(entity) => world
-                    .despawn(entity)
-                    .map_err(|err| Error::from(err).to_string()),
-            };
-
-            if let Err(err) = res {
-                errors.push(err);
-            }
-        }
-
-        match errors.is_empty() {
-            true => Ok(()),
-            false => Err(anyhow!(
-                "errors while flushing command buffer to world: `{}`",
-                errors.join(",")
-            )),
-        }
     }
 }
 
@@ -271,6 +243,8 @@ impl EventEmitter {
 
 pub struct World {
     ecs: hecs::World,
+    buffers: Mutex<Vec<CommandBuffer>>,
+    queued: Mutex<Vec<CommandBuffer>>,
     channels: HashMap<TypeId, EventEmitter>,
 }
 
@@ -278,6 +252,8 @@ impl World {
     pub fn new() -> Self {
         Self {
             ecs: hecs::World::new(),
+            buffers: Mutex::new(Vec::new()),
+            queued: Mutex::new(Vec::new()),
             channels: inventory::iter::<FlaggedComponent>
                 .into_iter()
                 .map(|fc| (fc.0, EventEmitter::default()))
@@ -286,17 +262,20 @@ impl World {
     }
 
     pub fn spawn(&mut self, components: impl DynamicBundle) -> Entity {
-        let entity = self.ecs.spawn(components);
+        Self::do_spawn(&mut self.channels, &mut self.ecs, components)
+    }
 
-        for typeid in self
-            .ecs
-            .entity(entity)
-            .expect("just created")
-            .component_types()
-        {
-            self.channels.entry(typeid).or_default();
+    fn do_spawn(
+        channels: &mut HashMap<TypeId, EventEmitter>,
+        ecs: &mut hecs::World,
+        components: impl DynamicBundle,
+    ) -> Entity {
+        let entity = ecs.spawn(components);
 
-            if let Some(channel) = self.channels.get_mut(&typeid) {
+        for typeid in ecs.entity(entity).expect("just created").component_types() {
+            channels.entry(typeid).or_default();
+
+            if let Some(channel) = channels.get_mut(&typeid) {
                 channel.emit_inserted(entity);
             }
         }
@@ -305,13 +284,21 @@ impl World {
     }
 
     pub fn despawn(&mut self, entity: Entity) -> Result<(), NoSuchEntity> {
-        for typeid in self.ecs.entity(entity)?.component_types() {
-            if let Some(channel) = self.channels.get_mut(&typeid) {
+        Self::do_despawn(&mut self.channels, &mut self.ecs, entity)
+    }
+
+    fn do_despawn(
+        channels: &mut HashMap<TypeId, EventEmitter>,
+        ecs: &mut hecs::World,
+        entity: Entity,
+    ) -> Result<(), NoSuchEntity> {
+        for typeid in ecs.entity(entity)?.component_types() {
+            if let Some(channel) = channels.get_mut(&typeid) {
                 channel.emit_removed(entity);
             }
         }
 
-        self.ecs.despawn(entity)
+        ecs.despawn(entity)
     }
 
     pub fn contains(&self, entity: Entity) -> bool {
@@ -381,18 +368,27 @@ impl World {
         entity: Entity,
         bundle: impl DynamicBundle,
     ) -> Result<(), NoSuchEntity> {
+        Self::do_insert(&mut self.channels, &mut self.ecs, entity, bundle)
+    }
+
+    fn do_insert(
+        channels: &mut HashMap<TypeId, EventEmitter>,
+        ecs: &mut hecs::World,
+        entity: Entity,
+        bundle: impl DynamicBundle,
+    ) -> Result<(), NoSuchEntity> {
         // FIXME: find a way to do this w/o the undocumented/unstable DynamicBundle::with_ids
         bundle.with_ids(|typeids| {
             for typeid in typeids.iter().copied() {
-                self.channels.entry(typeid).or_default();
+                channels.entry(typeid).or_default();
 
-                if let Some(channel) = self.channels.get_mut(&typeid) {
+                if let Some(channel) = channels.get_mut(&typeid) {
                     channel.emit_inserted(entity);
                 }
             }
         });
 
-        self.ecs.insert(entity, bundle)
+        ecs.insert(entity, bundle)
     }
 
     pub fn insert_one<C: Component>(
@@ -410,15 +406,23 @@ impl World {
     }
 
     pub fn remove<T: Bundle>(&mut self, entity: Entity) -> Result<T, ComponentError> {
+        Self::do_remove::<T>(&mut self.channels, &mut self.ecs, entity)
+    }
+
+    fn do_remove<T: Bundle>(
+        channels: &mut HashMap<TypeId, EventEmitter>,
+        ecs: &mut hecs::World,
+        entity: Entity,
+    ) -> Result<T, ComponentError> {
         T::with_static_ids(|typeids| {
             for typeid in typeids.iter().copied() {
-                if let Some(channel) = self.channels.get_mut(&typeid) {
+                if let Some(channel) = channels.get_mut(&typeid) {
                     channel.emit_removed(entity);
                 }
             }
         });
 
-        self.ecs.remove(entity)
+        ecs.remove(entity)
     }
 
     pub fn remove_one<T: Component>(&mut self, entity: Entity) -> Result<T, ComponentError> {
@@ -456,9 +460,63 @@ impl World {
             .register_reader()
     }
 
-    pub fn flush_events(&mut self) {
+    pub fn get_buffer(&self) -> CommandBuffer {
+        self.buffers.lock().unwrap().pop().unwrap_or_default()
+    }
+
+    pub fn queue_buffer(&self, buffer: CommandBuffer) {
+        self.queued.lock().unwrap().push(buffer);
+    }
+
+    pub fn flush_queue(&mut self) -> Result<()> {
+        let mut pool = self.buffers.lock().unwrap();
+        let mut errors = Vec::new();
+        for mut buffer in self.queued.lock().unwrap().drain(..) {
+            for cmd in buffer.cmds.drain(..) {
+                let res = match cmd {
+                    Command::Spawn(mut bundle) => {
+                        Self::do_spawn(&mut self.channels, &mut self.ecs, bundle.build());
+                        buffer.pool.push(bundle);
+                        Ok(())
+                    }
+                    Command::Insert(entity, mut bundle) => {
+                        let res = Self::do_insert(
+                            &mut self.channels,
+                            &mut self.ecs,
+                            entity,
+                            bundle.build(),
+                        );
+                        buffer.pool.push(bundle);
+                        res.map_err(|err| Error::from(err).to_string())
+                    }
+                    Command::Remove(entity, remover) => {
+                        remover(&mut self.channels, &mut self.ecs, entity)
+                            .map_err(|err| Error::from(err).to_string())
+                    }
+                    Command::Despawn(entity) => {
+                        Self::do_despawn(&mut self.channels, &mut self.ecs, entity)
+                            .map_err(|err| Error::from(err).to_string())
+                    }
+                };
+
+                if let Err(err) = res {
+                    errors.push(err);
+                }
+            }
+
+            pool.push(buffer);
+        }
+
         for (_, channel) in self.channels.iter_mut() {
             channel.clear();
+        }
+
+        match errors.is_empty() {
+            true => Ok(()),
+            false => Err(anyhow!(
+                "errors while flushing command queue: `{}`",
+                errors.join(",")
+            )),
         }
     }
 }
