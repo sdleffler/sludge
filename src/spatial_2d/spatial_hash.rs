@@ -256,7 +256,7 @@ impl SpatialHasher {
         self.removed.clear();
 
         // TODO: command buffer queuing for asynchronous add/remove
-        let world = &mut *resources.fetch_mut::<World>();
+        let world = &*resources.fetch::<World>();
 
         for &event in world.poll::<Position>(&mut self.position_events) {
             match event {
@@ -290,7 +290,8 @@ impl SpatialHasher {
             }
         }
 
-        let mut added_buf = Vec::new();
+        let mut cmds = world.get_buffer();
+
         for added in self.added.drain() {
             let mut query = world.query_one::<(&Position, &Shape)>(added).unwrap();
             if let Some((pos, shape)) = query.get() {
@@ -298,34 +299,24 @@ impl SpatialHasher {
                     nc2d::bounding_volume::aabb(&*shape.handle, &(**pos * shape.local)),
                     added,
                 );
-                added_buf.push((added, index));
+                cmds.insert(added, (index,));
             }
         }
 
-        for (_, (pos, shape, index)) in world
-            .query::<(&Position, &Shape, &mut SpatialIndex)>()
-            .iter()
-        {
+        for (_, (pos, shape, index)) in world.query::<(&Position, &Shape, &SpatialIndex)>().iter() {
             self.grid.update(
                 *index,
                 nc2d::bounding_volume::aabb(&*shape.handle, &(**pos * shape.local)),
             );
         }
 
-        let mut removed_buf = Vec::new();
         for removed in self.removed.drain() {
             if let Ok(_index) = world.get::<SpatialIndex>(removed) {
-                removed_buf.push(removed);
+                cmds.remove::<(SpatialIndex,)>(removed);
             }
         }
 
-        for (entity, index) in added_buf {
-            let _ = world.insert(entity, (index,));
-        }
-
-        for entity in removed_buf {
-            let _ = world.remove::<(SpatialIndex,)>(entity);
-        }
+        world.queue_buffer(cmds);
     }
 }
 

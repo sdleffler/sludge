@@ -5,7 +5,7 @@ use crate::{
     ecs::World,
     hierarchy::{Hierarchy, ParentComponent},
     transform::TransformGraph,
-    Resources, SharedResources,
+    Resources, SharedResources, SludgeResultExt,
 };
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -20,7 +20,10 @@ impl crate::System for WorldEventSystem {
     }
 
     fn update(&self, _lua: LuaContext, resources: &SharedResources) -> Result<()> {
-        resources.fetch_mut::<World>().flush_queue()?;
+        let _ = resources
+            .fetch_mut::<World>()
+            .flush_queue()
+            .log_error_err("sludge::ecs");
 
         Ok(())
     }

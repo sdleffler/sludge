@@ -64,6 +64,7 @@ impl fmt::Debug for Command {
 }
 
 #[derive(Default)]
+#[must_use = "CommandBuffers do nothing unless queued!"]
 pub struct CommandBuffer {
     pool: Vec<EntityBuilder>,
     cmds: Vec<Command>,
