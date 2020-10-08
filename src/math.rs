@@ -22,14 +22,14 @@ pub use ncollide2d::{
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Box2<T: Scalar> {
-    pub origin: Point2<T>,
+    pub mins: Point2<T>,
     pub extent: Vector2<T>,
 }
 
 impl<T: Scalar> Box2<T> {
     pub fn new(x: T, y: T, w: T, h: T) -> Self {
         Self {
-            origin: Point2::new(x, y),
+            mins: Point2::new(x, y),
             extent: Vector2::new(w, h),
         }
     }
@@ -38,14 +38,14 @@ impl<T: Scalar> Box2<T> {
     where
         T: RealField,
     {
-        self.origin + self.extent / na::convert::<_, T>(2.)
+        self.mins + self.extent / na::convert::<_, T>(2.)
     }
 
     pub fn to_aabb(self) -> AABB<T>
     where
         T: RealField,
     {
-        AABB::new(self.origin, self.origin + self.extent)
+        AABB::new(self.mins, self.mins + self.extent)
     }
 }
 

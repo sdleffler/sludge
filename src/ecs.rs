@@ -1,10 +1,12 @@
 use {
+    anyhow::*,
     hashbrown::HashMap,
     hibitset::*,
     rlua::prelude::*,
     shrev::{EventChannel, EventIterator, ReaderId},
     std::{
         any::{Any, TypeId},
+        fmt,
         pin::Pin,
         sync::{RwLock, RwLockReadGuard},
     },
@@ -27,6 +29,128 @@ impl FlaggedComponent {
 }
 
 inventory::collect!(FlaggedComponent);
+
+enum Command {
+    Spawn(EntityBuilder),
+    Insert(Entity, EntityBuilder),
+    Remove(
+        Entity,
+        fn(world: &mut World, entity: Entity) -> Result<(), ComponentError>,
+    ),
+    Despawn(Entity),
+}
+
+impl fmt::Debug for Command {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Spawn(_) => f.debug_tuple("Spawn").field(&format_args!("_")).finish(),
+            Self::Insert(entity, _) => f
+                .debug_tuple("Insert")
+                .field(entity)
+                .field(&format_args!("_"))
+                .finish(),
+            Self::Remove(entity, _) => f
+                .debug_tuple("Remove")
+                .field(entity)
+                .field(&format_args!("_"))
+                .finish(),
+            Self::Despawn(entity) => f.debug_tuple("Despawn").field(entity).finish(),
+        }
+    }
+}
+
+pub struct CommandBuffer {
+    pool: Vec<EntityBuilder>,
+    cmds: Vec<Command>,
+}
+
+impl fmt::Debug for CommandBuffer {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("CommandBuffer")
+            .field("pool", &self.pool.len())
+            .field("cmds", &self.cmds)
+            .finish()
+    }
+}
+
+impl CommandBuffer {
+    pub fn new() -> Self {
+        Self {
+            pool: Vec::new(),
+            cmds: Vec::new(),
+        }
+    }
+
+    fn get_or_make_builder(&mut self) -> EntityBuilder {
+        self.pool.pop().unwrap_or_default()
+    }
+
+    pub fn spawn(&mut self, bundle: impl DynamicBundle) -> &mut Self {
+        let mut eb = self.get_or_make_builder();
+        eb.add_bundle(bundle);
+        self.cmds.push(Command::Spawn(eb));
+        self
+    }
+
+    pub fn insert(&mut self, entity: Entity, bundle: impl DynamicBundle) -> &mut Self {
+        let mut eb = self.get_or_make_builder();
+        eb.add_bundle(bundle);
+        self.cmds.push(Command::Insert(entity, eb));
+        self
+    }
+
+    pub fn remove<T: Bundle>(&mut self, entity: Entity) -> &mut Self {
+        fn do_remove<T: Bundle>(world: &mut World, entity: Entity) -> Result<(), ComponentError> {
+            world.remove::<T>(entity)?;
+            Ok(())
+        }
+
+        self.cmds.push(Command::Remove(entity, do_remove::<T>));
+        self
+    }
+
+    pub fn despawn(&mut self, entity: Entity) -> &mut Self {
+        self.cmds.push(Command::Despawn(entity));
+        self
+    }
+
+    pub fn flush(&mut self, world: &mut World) -> Result<()> {
+        let mut errors = Vec::new();
+
+        for cmd in self.cmds.drain(..) {
+            let res = match cmd {
+                Command::Spawn(mut bundle) => {
+                    world.spawn(bundle.build());
+                    self.pool.push(bundle);
+                    Ok(())
+                }
+                Command::Insert(entity, mut bundle) => {
+                    let res = world.insert(entity, bundle.build());
+                    self.pool.push(bundle);
+                    res.map_err(|err| Error::from(err).to_string())
+                }
+                Command::Remove(entity, remover) => {
+                    remover(world, entity).map_err(|err| Error::from(err).to_string())
+                }
+                Command::Despawn(entity) => world
+                    .despawn(entity)
+                    .map_err(|err| Error::from(err).to_string()),
+            };
+
+            if let Err(err) = res {
+                errors.push(err);
+            }
+        }
+
+        match errors.is_empty() {
+            true => Ok(()),
+            false => Err(anyhow!(
+                "errors while flushing command buffer to world: `{}`",
+                errors.join(",")
+            )),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct LightEntity(u64);

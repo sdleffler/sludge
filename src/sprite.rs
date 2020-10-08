@@ -48,6 +48,13 @@ pub struct Tag {
     pub direction: Direction,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum NextFrame {
+    /// Returned if this is just the next frame ID.
+    Stepped(FrameId),
+    Wrapped(FrameId),
+}
+
 impl Tag {
     pub fn first_frame(&self) -> FrameId {
         match self.direction {
@@ -56,20 +63,36 @@ impl Tag {
         }
     }
 
-    pub fn next_frame(&self, FrameId(current): FrameId) -> FrameId {
+    pub fn last_frame(&self) -> FrameId {
         match self.direction {
-            Direction::Forward if current == self.to => FrameId(self.from),
-            Direction::Reverse if current == self.from => FrameId(self.to),
-            Direction::Pingpong if current == self.to => FrameId(na::max(self.to - 1, self.from)),
-            Direction::Pingpong if current == self.from => FrameId(na::min(self.from + 1, self.to)),
-            _ => FrameId(current + 1),
+            Direction::Forward | Direction::Pingpong => FrameId(self.to),
+            Direction::Reverse => FrameId(self.from),
+        }
+    }
+
+    /// Returns `Err` if this next frame would loop the animation, `Ok` otherwise.
+    pub fn next_frame(&self, FrameId(current): FrameId) -> Result<FrameId, FrameId> {
+        match self.direction {
+            Direction::Forward if current == self.to => Err(FrameId(self.from)),
+            Direction::Reverse if current == self.from => Err(FrameId(self.to)),
+            Direction::Pingpong if current == self.to => {
+                Err(FrameId(na::max(self.to - 1, self.from)))
+            }
+            Direction::Pingpong if current == self.from => {
+                Err(FrameId(na::min(self.from + 1, self.to)))
+            }
+            Direction::Forward => Ok(FrameId(current + 1)),
+            Direction::Reverse => Ok(FrameId(current - 1)),
+            Direction::Pingpong => unimplemented!("pingpong is broken!"),
         }
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Frame {
-    pub bounds: Box2<u32>,
+    pub frame: Box2<u32>,
+    pub frame_source: Box2<u32>,
+    pub source_size: Vector2<u32>,
     pub duration: u32,
 }
 
@@ -125,10 +148,14 @@ impl SpriteSheet {
             .frames
             .into_iter()
             .map(|frame| {
-                let r = frame.frame;
+                let fr = frame.frame;
+                let sb = frame.sprite_source_size;
+                let ss = frame.source_size;
 
                 Frame {
-                    bounds: Box2::new(r.x, r.y, r.w, r.h),
+                    frame: Box2::new(fr.x, fr.y, fr.w, fr.h),
+                    frame_source: Box2::new(sb.x, sb.y, sb.w, sb.h),
+                    source_size: Vector2::new(ss.w, ss.h),
                     duration: frame.duration,
                 }
             })
@@ -171,10 +198,19 @@ impl SpriteSheet {
             };
 
             if new_tag.remaining < 0. {
-                let new_frame = self[new_tag.tag_id].next_frame(*frame);
-                new_tag.remaining += self[new_frame].duration as f32;
-
-                Some((new_tag, Some(SpriteFrame(new_frame))))
+                match self[new_tag.tag_id].next_frame(*frame) {
+                    Err(_) if !tag.should_loop => Some((
+                        SpriteTag {
+                            is_paused: true,
+                            ..new_tag
+                        },
+                        Some(SpriteFrame(self[new_tag.tag_id].last_frame())),
+                    )),
+                    Ok(new_frame) | Err(new_frame) => {
+                        new_tag.remaining += self[new_frame].duration as f32;
+                        Some((new_tag, Some(SpriteFrame(new_frame))))
+                    }
+                }
             } else {
                 Some((new_tag, None))
             }
@@ -187,7 +223,7 @@ impl SpriteSheet {
         self.tag_ids.get(s.as_ref()).copied()
     }
 
-    pub fn at_tag(&self, tag_id: TagId) -> (SpriteFrame, SpriteTag) {
+    pub fn at_tag(&self, tag_id: TagId, should_loop: bool) -> (SpriteFrame, SpriteTag) {
         let tag = &self[tag_id];
         let ff = tag.first_frame();
         (
@@ -196,6 +232,7 @@ impl SpriteSheet {
                 tag_id,
                 remaining: self[ff].duration as f32,
                 is_paused: false,
+                should_loop,
             },
         )
     }
@@ -219,6 +256,8 @@ pub struct SpriteTag {
     pub remaining: f32,
     /// Whether this animation is running or paused.
     pub is_paused: bool,
+    /// Whether this animation should loop, or pause on the last frame.
+    pub should_loop: bool,
 }
 
 /// Component referring to a loaded `SpriteSheet` in a `SpriteSheetManager`.
