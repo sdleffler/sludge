@@ -6,8 +6,8 @@ authors = ["Sean Leffler <sean@errno.com>"]
 edition = "2018"
 
 [features]
-default = ["ggez-fuckery"]
-ggez-fuckery = ["ggez", "gilrs", "winit"]
+default = ["miniquad"]
+ggez-backend = ["ggez", "gfx", "gilrs", "winit"]
 
 [dependencies]
 rlua = { git = "https://github.com/sdleffler/rlua" }
@@ -25,6 +25,7 @@ hashbrown = { version = "0.9.0", features = ["serde"] }
 atomic_refcell = { git = "https://github.com/sdleffler/atomic_refcell" }
 string_cache = "0.8.0"
 ggez = { git = "https://github.com/sdleffler/ggez", optional = true }
+gfx = { version = "0.18", optional = true }
 petgraph = "0.5.1"
 serde = "1.0.116"
 serde_json = "1.0.57"
@@ -51,6 +52,8 @@ ron = "0.6.2"
 num-traits = "0.2.12"
 num-derive = "0.3.2"
 sludge-macros = { path = "macros" }
+miniquad = { path = "../../miniquad", optional = true }
+mint = "0.5"
 
 [dev-dependencies]
 approx = "0.3.2"
@@ -58,4 +61,13 @@ ggez = { git = "https://github.com/sdleffler/ggez" }
 rand = "0.7.3"
 
 [[example]]
-name = "bullets"
+name = "bullets-ggez"
+required-features = ["ggez-backend"]
+
+[[example]]
+name = "bullets-miniquad"
+required-features = ["miniquad"]
+
+[[example]]
+name = "templates-ggez"
+required-features = ["ggez-backend"]

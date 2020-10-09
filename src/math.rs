@@ -7,10 +7,13 @@ use {
     },
 };
 
+pub use mint;
+
 pub use nalgebra::{
-    self as na, Complex, Isometry2, Isometry3, Matrix2, Matrix3, Matrix4, Point2, Point3,
-    Quaternion, RealField, Rotation2, Rotation3, Scalar, Similarity2, Similarity3, Transform2,
-    Transform3, Translation2, Translation3, Unit, UnitComplex, UnitQuaternion, Vector2, Vector3,
+    self as na, Affine2, Affine3, Complex, Isometry2, Isometry3, Matrix2, Matrix3, Matrix4,
+    Orthographic3, Perspective3, Point2, Point3, Quaternion, RealField, Rotation2, Rotation3,
+    Scalar, Similarity2, Similarity3, Transform2, Transform3, Translation2, Translation3, Unit,
+    UnitComplex, UnitQuaternion, Vector2, Vector3, Vector4,
 };
 
 pub use ncollide2d::{
