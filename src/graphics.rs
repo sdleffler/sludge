@@ -90,6 +90,14 @@ impl Context {
 
 pub struct Mesh {
     bindings: mq::Bindings,
+    len: i32,
+}
+
+impl Mesh {
+    pub fn draw(&self, ctx: &mut Context) {
+        ctx.mq.apply_bindings(&self.bindings);
+        ctx.mq.draw(0, self.len, 1);
+    }
 }
 
 pub struct MeshBuilder {
@@ -119,6 +127,7 @@ impl MeshBuilder {
                 index_buffer,
                 images: vec![self.texture],
             },
+            len: self.indices.len() as i32,
         }
     }
 }
@@ -264,7 +273,7 @@ impl SpriteBatch {
         self.sprites.clear();
     }
 
-    pub fn flush(&mut self, ctx: &mut mq::Context) {
+    pub fn flush(&mut self, ctx: &mut Context) {
         if !self.dirty {
             return;
         }
@@ -279,21 +288,21 @@ impl SpriteBatch {
         if self.instances.len() > self.capacity {
             self.capacity = self.capacity * 2;
             self.bindings.vertex_buffers[1] = mq::Buffer::stream(
-                ctx,
+                &mut ctx.mq,
                 mq::BufferType::VertexBuffer,
                 self.capacity * mem::size_of::<shader::InstanceProperties>(),
             );
         }
 
-        self.bindings.vertex_buffers[1].update(ctx, &self.instances);
+        self.bindings.vertex_buffers[1].update(&mut ctx.mq, &self.instances);
 
         self.dirty = false;
     }
 
-    pub fn draw(&mut self, ctx: &mut mq::Context) {
+    pub fn draw(&mut self, ctx: &mut Context) {
         self.flush(ctx);
-        ctx.apply_bindings(&self.bindings);
-        ctx.draw(0, 6, self.instances.len() as i32);
+        ctx.mq.apply_bindings(&self.bindings);
+        ctx.mq.draw(0, 6, self.instances.len() as i32);
     }
 }
 
@@ -303,9 +312,9 @@ pub struct Canvas {
 }
 
 impl Canvas {
-    pub fn new(ctx: &mut mq::Context, width: u32, height: u32) -> Self {
+    pub fn new(ctx: &mut Context, width: u32, height: u32) -> Self {
         let color_img = mq::Texture::new_render_texture(
-            ctx,
+            &mut ctx.mq,
             mq::TextureParams {
                 width,
                 height,
@@ -315,7 +324,7 @@ impl Canvas {
             },
         );
         let depth_img = mq::Texture::new_render_texture(
-            ctx,
+            &mut ctx.mq,
             mq::TextureParams {
                 width,
                 height,
@@ -325,13 +334,14 @@ impl Canvas {
             },
         );
 
-        let render_pass = mq::RenderPass::new(ctx, color_img, depth_img);
+        let render_pass = mq::RenderPass::new(&mut ctx.mq, color_img, depth_img);
 
         let quad_vertices =
-            mq::Buffer::immutable(ctx, mq::BufferType::VertexBuffer, &quad_vertices());
-        let quad_indices = mq::Buffer::immutable(ctx, mq::BufferType::IndexBuffer, &quad_indices());
+            mq::Buffer::immutable(&mut ctx.mq, mq::BufferType::VertexBuffer, &quad_vertices());
+        let quad_indices =
+            mq::Buffer::immutable(&mut ctx.mq, mq::BufferType::IndexBuffer, &quad_indices());
         let instances = mq::Buffer::stream(
-            ctx,
+            &mut ctx.mq,
             mq::BufferType::VertexBuffer,
             mem::size_of::<shader::InstanceProperties>(),
         );
@@ -348,9 +358,9 @@ impl Canvas {
         }
     }
 
-    pub fn draw(&mut self, ctx: &mut mq::Context, instance: InstanceParam) {
-        self.bindings.vertex_buffers[1].update(ctx, &[instance.to_instance_properties()]);
-        ctx.apply_bindings(&self.bindings);
-        ctx.draw(0, 6, 1);
+    pub fn draw(&mut self, ctx: &mut Context, instance: InstanceParam) {
+        self.bindings.vertex_buffers[1].update(&mut ctx.mq, &[instance.to_instance_properties()]);
+        ctx.mq.apply_bindings(&self.bindings);
+        ctx.mq.draw(0, 6, 1);
     }
 }
