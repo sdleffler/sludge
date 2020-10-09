@@ -54,6 +54,7 @@ num-derive = "0.3.2"
 sludge-macros = { path = "macros" }
 miniquad = { path = "../../miniquad", optional = true }
 mint = "0.5"
+lyon = "0.16.2"
 
 [dev-dependencies]
 approx = "0.3.2"

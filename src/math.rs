@@ -11,9 +11,9 @@ pub use mint;
 
 pub use nalgebra::{
     self as na, Affine2, Affine3, Complex, Isometry2, Isometry3, Matrix2, Matrix3, Matrix4,
-    Orthographic3, Perspective3, Point2, Point3, Quaternion, RealField, Rotation2, Rotation3,
-    Scalar, Similarity2, Similarity3, Transform2, Transform3, Translation2, Translation3, Unit,
-    UnitComplex, UnitQuaternion, Vector2, Vector3, Vector4,
+    Orthographic3, Perspective3, Point2, Point3, Projective2, Projective3, Quaternion, RealField,
+    Rotation2, Rotation3, Scalar, Similarity2, Similarity3, Transform2, Transform3, Translation2,
+    Translation3, Unit, UnitComplex, UnitQuaternion, Vector2, Vector3, Vector4,
 };
 
 pub use ncollide2d::{
@@ -49,6 +49,22 @@ impl<T: Scalar> Box2<T> {
         T: RealField,
     {
         AABB::new(self.mins, self.mins + self.extent)
+    }
+
+    pub fn x(&self) -> T {
+        self.mins.coords.x.clone()
+    }
+
+    pub fn y(&self) -> T {
+        self.mins.coords.y.clone()
+    }
+
+    pub fn w(&self) -> T {
+        self.extent.x.clone()
+    }
+
+    pub fn h(&self) -> T {
+        self.extent.y.clone()
     }
 }
 

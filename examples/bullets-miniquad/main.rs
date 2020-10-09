@@ -51,8 +51,9 @@ impl MainState {
         // let mut canvas = graphics::Canvas::new(ctx, 320, 240, ggez::conf::NumSamples::One)?;
         // canvas.set_filter(graphics::FilterMode::Nearest);
 
-        let batch = SpriteBatch::with_capacity(&mut ctx.mq, ctx.null_texture, 4096 * 4);
-        let canvas = Canvas::new(&mut ctx.mq, 320, 240);
+        let null_texture = ctx.null_texture.clone();
+        let batch = SpriteBatch::with_capacity(&mut ctx, null_texture, 4096 * 4);
+        let canvas = Canvas::new(&mut ctx, 320, 240);
 
         Ok(MainState {
             context: ctx,
@@ -141,7 +142,7 @@ impl mq::EventHandlerFree for MainState {
         self.context.mq.apply_uniforms(&shader::Uniforms {
             mvp: *Orthographic3::new(0., 320., 0., 240., 1., -1.).as_matrix(),
         });
-        self.batch.draw(&mut self.context.mq);
+        self.batch.draw(&mut self.context);
         self.context.mq.end_render_pass();
 
         self.context.mq.begin_default_pass(Default::default());
@@ -150,7 +151,7 @@ impl mq::EventHandlerFree for MainState {
             mvp: *Orthographic3::new(0., 320., 0., 240., 1., -1.).as_matrix(),
         });
         self.canvas.draw(
-            &mut self.context.mq,
+            &mut self.context,
             InstanceParam::new().scale(Vector2::new(320., 240.)),
         );
         self.context.mq.end_render_pass();
