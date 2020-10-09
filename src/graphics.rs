@@ -7,7 +7,7 @@ use {
     },
     miniquad as mq,
     serde::{Deserialize, Serialize},
-    std::{mem, ops},
+    std::{mem, ops, sync::Arc},
     thunderdome::{Arena, Index},
 };
 
@@ -49,6 +49,52 @@ pub mod shader {
 }
 
 pub use shader::{InstanceProperties, Uniforms, Vertex};
+
+#[derive(Debug)]
+pub struct OwnedTexture {
+    pub texture: mq::Texture,
+}
+
+impl From<mq::Texture> for OwnedTexture {
+    fn from(texture: mq::Texture) -> Self {
+        Self { texture }
+    }
+}
+
+impl ops::Deref for OwnedTexture {
+    type Target = mq::Texture;
+
+    fn deref(&self) -> &Self::Target {
+        &self.texture
+    }
+}
+
+impl Drop for OwnedTexture {
+    fn drop(&mut self) {
+        self.texture.delete();
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Texture {
+    pub shared: Arc<OwnedTexture>,
+}
+
+impl ops::Deref for Texture {
+    type Target = mq::Texture;
+
+    fn deref(&self) -> &Self::Target {
+        &self.shared.texture
+    }
+}
+
+impl From<mq::Texture> for Texture {
+    fn from(texture: mq::Texture) -> Self {
+        Self {
+            shared: Arc::new(OwnedTexture::from(texture)),
+        }
+    }
+}
 
 /// A RGBA color in the `sRGB` color space represented as `f32`'s in the range `[0.0-1.0]`
 ///
@@ -397,7 +443,7 @@ impl TransformStack {
 pub struct Context {
     pub mq: mq::Context,
     pub pipeline: mq::Pipeline,
-    pub null_texture: mq::Texture,
+    pub null_texture: Texture,
     pub projection: Matrix4<f32>,
     pub modelview: TransformStack,
     pub quad_bindings: mq::Bindings,
@@ -432,7 +478,12 @@ impl Context {
             shader,
         );
 
-        let null_texture = mq::Texture::from_rgba8(&mut mq, 1, 1, &[255, 255, 255, 255]);
+        let null_texture = Texture::from(mq::Texture::from_rgba8(
+            &mut mq,
+            1,
+            1,
+            &[255, 255, 255, 255],
+        ));
 
         let quad_vertices =
             mq::Buffer::immutable(&mut mq, mq::BufferType::VertexBuffer, &quad_vertices());
@@ -442,13 +493,13 @@ impl Context {
         let instances = mq::Buffer::stream(
             &mut mq,
             mq::BufferType::VertexBuffer,
-            mem::size_of::<shader::InstanceProperties>(),
+            mem::size_of::<InstanceProperties>(),
         );
 
         let quad_bindings = mq::Bindings {
             vertex_buffers: vec![quad_vertices, instances],
             index_buffer: quad_indices,
-            images: vec![null_texture],
+            images: vec![*null_texture],
         };
 
         Ok(Self {
@@ -472,6 +523,10 @@ impl Context {
 }
 
 pub struct Mesh {
+    /// The shared reference to the texture, so that it doesn't get dropped and deleted.
+    /// The inner data is already in `bindings` so this is really just to keep it from
+    /// being dropped.
+    pub texture: Texture,
     pub bindings: mq::Bindings,
     pub len: i32,
 }
@@ -485,14 +540,17 @@ impl Mesh {
 
 pub struct MeshBuilder {
     pub buffer: t::geometry_builder::VertexBuffers<Vertex, u16>,
-    pub texture: mq::Texture,
+    pub texture: Texture,
 }
 
 impl MeshBuilder {
-    pub fn new(texture: mq::Texture) -> Self {
+    pub fn new<T>(texture: T) -> Self
+    where
+        T: Into<Texture>,
+    {
         Self {
             buffer: t::VertexBuffers::new(),
-            texture,
+            texture: texture.into(),
         }
     }
 
@@ -694,10 +752,11 @@ impl MeshBuilder {
         );
 
         Mesh {
+            texture: self.texture.clone(),
             bindings: mq::Bindings {
                 vertex_buffers: vec![vertex_buffer],
                 index_buffer,
-                images: vec![self.texture],
+                images: vec![*self.texture],
             },
             len: self.buffer.indices.len() as i32,
         }
@@ -741,10 +800,10 @@ impl InstanceParam {
         }
     }
 
-    pub fn to_instance_properties(&self) -> shader::InstanceProperties {
+    pub fn to_instance_properties(&self) -> InstanceProperties {
         let mins = self.src.mins;
         let maxs = self.src.mins + self.src.extent;
-        shader::InstanceProperties {
+        InstanceProperties {
             src: Vector4::new(mins.x, mins.y, maxs.x, maxs.y),
             tx: *self.tx.matrix(),
             color: LinearColor::from(self.color),
@@ -752,24 +811,24 @@ impl InstanceParam {
     }
 }
 
-fn quad_vertices() -> [shader::Vertex; 4] {
+fn quad_vertices() -> [Vertex; 4] {
     [
-        shader::Vertex {
+        Vertex {
             pos: Vector2::new(0., 0.),
             uv: Vector2::new(0., 0.),
             color: Color::WHITE.into(),
         },
-        shader::Vertex {
+        Vertex {
             pos: Vector2::new(1., 0.),
             uv: Vector2::new(1., 0.),
             color: Color::WHITE.into(),
         },
-        shader::Vertex {
+        Vertex {
             pos: Vector2::new(1., 1.),
             uv: Vector2::new(1., 1.),
             color: Color::WHITE.into(),
         },
-        shader::Vertex {
+        Vertex {
             pos: Vector2::new(0., 1.),
             uv: Vector2::new(0., 1.),
             color: Color::WHITE.into(),
@@ -786,10 +845,12 @@ pub struct SpriteIdx(Index);
 
 pub struct SpriteBatch {
     sprites: Arena<InstanceParam>,
-    instances: Vec<shader::InstanceProperties>,
+    instances: Vec<InstanceProperties>,
     bindings: mq::Bindings,
     capacity: usize,
     dirty: bool,
+    /// Shared reference to keep the texture alive.
+    _texture: Texture,
 }
 
 impl ops::Index<SpriteIdx> for SpriteBatch {
@@ -808,23 +869,26 @@ impl ops::IndexMut<SpriteIdx> for SpriteBatch {
 }
 
 impl SpriteBatch {
-    pub fn with_capacity(ctx: &mut Context, texture: mq::Texture, capacity: usize) -> Self {
+    pub fn with_capacity(ctx: &mut Context, texture: Texture, capacity: usize) -> Self {
         let instances = mq::Buffer::stream(
             &mut ctx.mq,
             mq::BufferType::VertexBuffer,
-            capacity * mem::size_of::<shader::InstanceProperties>(),
+            capacity * mem::size_of::<InstanceProperties>(),
         );
+
+        let bindings = mq::Bindings {
+            vertex_buffers: vec![ctx.quad_bindings.vertex_buffers[0], instances],
+            index_buffer: ctx.quad_bindings.index_buffer,
+            images: vec![*texture],
+        };
 
         Self {
             sprites: Arena::new(),
             instances: Vec::new(),
-            bindings: mq::Bindings {
-                vertex_buffers: vec![ctx.quad_bindings.vertex_buffers[0], instances],
-                index_buffer: ctx.quad_bindings.index_buffer,
-                images: vec![texture],
-            },
+            bindings,
             capacity,
             dirty: true,
+            _texture: texture,
         }
     }
 
@@ -858,7 +922,7 @@ impl SpriteBatch {
             self.bindings.vertex_buffers[1] = mq::Buffer::stream(
                 &mut ctx.mq,
                 mq::BufferType::VertexBuffer,
-                self.capacity * mem::size_of::<shader::InstanceProperties>(),
+                self.capacity * mem::size_of::<InstanceProperties>(),
             );
         }
 
@@ -877,6 +941,7 @@ impl SpriteBatch {
 pub struct Canvas {
     pub render_pass: mq::RenderPass,
     pub bindings: mq::Bindings,
+    pub texture: Texture,
 }
 
 impl Canvas {
@@ -911,7 +976,7 @@ impl Canvas {
         let instances = mq::Buffer::stream(
             &mut ctx.mq,
             mq::BufferType::VertexBuffer,
-            mem::size_of::<shader::InstanceProperties>(),
+            mem::size_of::<InstanceProperties>(),
         );
 
         let bindings = mq::Bindings {
@@ -923,6 +988,7 @@ impl Canvas {
         Self {
             render_pass,
             bindings,
+            texture: Texture::from(color_img),
         }
     }
 
