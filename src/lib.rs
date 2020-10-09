@@ -36,6 +36,7 @@ pub mod spatial_2d;
 pub mod sprite;
 pub mod systems;
 pub mod tiled;
+pub mod timer;
 pub mod transform;
 pub mod vfs;
 
