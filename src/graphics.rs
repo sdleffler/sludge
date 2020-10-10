@@ -7,7 +7,13 @@ use {
     },
     miniquad as mq,
     serde::{Deserialize, Serialize},
-    std::{mem, ops, sync::Arc},
+    std::{
+        mem, ops,
+        sync::{
+            atomic::{self, AtomicBool},
+            Arc, RwLock,
+        },
+    },
     thunderdome::{Arena, Index},
 };
 
@@ -75,6 +81,12 @@ impl Drop for OwnedBuffer {
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub enum BufferType {
+    VertexBuffer,
+    IndexBuffer,
+}
+
 #[derive(Debug, Clone)]
 pub struct Buffer {
     pub shared: Arc<OwnedBuffer>,
@@ -139,6 +151,24 @@ impl From<mq::Texture> for Texture {
         Self {
             shared: Arc::new(OwnedTexture::from(texture)),
         }
+    }
+}
+
+impl Texture {
+    /// Create a texture from a given buffer of RGBA image data.
+    pub fn from_rgba8(ctx: &mut Graphics, width: u16, height: u16, bytes: &[u8]) -> Self {
+        Self::from(mq::Texture::from_rgba8(&mut ctx.mq, width, height, bytes))
+    }
+
+    /// Parse a buffer containing the raw contents of an image file such as a PNG, GIF, etc.
+    pub fn from_memory(ctx: &mut Graphics, buffer: &[u8]) -> Result<Self> {
+        let rgba_image = image::load_from_memory(buffer)?.to_rgba();
+        Ok(Self::from_rgba8(
+            ctx,
+            rgba_image.width() as u16,
+            rgba_image.height() as u16,
+            &rgba_image.to_vec(),
+        ))
     }
 }
 
@@ -484,6 +514,7 @@ struct VertexBuilder {
 }
 
 impl t::BasicVertexConstructor<Vertex> for VertexBuilder {
+    #[inline]
     fn new_vertex(&mut self, point: Point) -> Vertex {
         Vertex {
             pos: Vector2::new(point.x, point.y),
@@ -494,6 +525,7 @@ impl t::BasicVertexConstructor<Vertex> for VertexBuilder {
 }
 
 impl t::FillVertexConstructor<Vertex> for VertexBuilder {
+    #[inline]
     fn new_vertex(&mut self, point: Point, _attributes: t::FillAttributes) -> Vertex {
         Vertex {
             pos: Vector2::new(point.x, point.y),
@@ -504,6 +536,7 @@ impl t::FillVertexConstructor<Vertex> for VertexBuilder {
 }
 
 impl t::StrokeVertexConstructor<Vertex> for VertexBuilder {
+    #[inline]
     fn new_vertex(&mut self, point: Point, _attributes: t::StrokeAttributes) -> Vertex {
         Vertex {
             pos: Vector2::new(point.x, point.y),
@@ -525,42 +558,50 @@ impl TransformStack {
         }
     }
 
+    #[inline]
     pub fn top(&self) -> &Matrix4<f32> {
         self.ts.last().unwrap()
     }
 
+    #[inline]
     pub fn top_mut(&mut self) -> &mut Matrix4<f32> {
         self.ts.last_mut().unwrap()
     }
 
+    #[inline]
     pub fn translate2(&mut self, v: &Vector2<f32>) -> &mut Self {
         *self.top_mut() *= Translation3::from(v.push(0.)).to_homogeneous();
         self
     }
 
+    #[inline]
     pub fn scale2(&mut self, v: &Vector2<f32>) -> &mut Self {
         *self.top_mut() *= Matrix3::from_diagonal(&v.push(1.)).to_homogeneous();
         self
     }
 
+    #[inline]
     pub fn rotate2(&mut self, angle: f32) -> &mut Self {
         *self.top_mut() *= UnitComplex::new(angle).to_homogeneous().to_homogeneous();
         self
     }
 
-    pub fn push(&mut self) {
-        self.ts.push(*self.top());
+    #[inline]
+    pub fn push(&mut self, tx: impl Into<Option<Matrix4<f32>>>) {
+        self.ts.push(tx.into().unwrap_or(*self.top()));
     }
 
+    #[inline]
     pub fn pop(&mut self) {
         self.ts.pop().expect("popped empty transform stack");
     }
 
+    #[inline]
     pub fn scope<T, F>(&mut self, thunk: F) -> T
     where
         F: FnOnce(&mut TransformStack) -> T,
     {
-        self.push();
+        self.push(None);
         let result = thunk(self);
         self.pop();
         result
@@ -641,10 +682,12 @@ impl Graphics {
         })
     }
 
+    #[inline]
     pub(crate) fn register_render_pass(&mut self, pass: RenderPass) {
         self.render_passes.push(pass);
     }
 
+    #[inline]
     pub(crate) fn expire_render_passes(&mut self) {
         for pass in self
             .render_passes
@@ -654,15 +697,39 @@ impl Graphics {
         }
     }
 
+    #[inline]
     pub fn transforms(&mut self) -> &mut TransformStack {
         &mut self.modelview
     }
 
+    #[inline]
+    pub fn mul_transform(&mut self, tx: Matrix4<f32>) {
+        *self.modelview.top_mut() *= tx;
+    }
+
+    #[inline]
+    pub fn push_multiplied_transform(&mut self, tx: Matrix4<f32>) {
+        let mult = self.modelview.top() * tx;
+        self.modelview.push(mult);
+    }
+
+    #[inline]
     pub fn apply_transforms(&mut self) {
         let mvp = self.projection * self.modelview.top();
         self.mq.apply_uniforms(&shader::Uniforms { mvp });
     }
 
+    #[inline]
+    pub fn push_transforms(&mut self, tx: impl Into<Option<Matrix4<f32>>>) {
+        self.modelview.push(tx);
+    }
+
+    #[inline]
+    pub fn pop_transforms(&mut self) {
+        self.modelview.pop();
+    }
+
+    #[inline]
     pub fn set_projection<M>(&mut self, projection: M)
     where
         M: Into<Matrix4<f32>>,
@@ -670,29 +737,40 @@ impl Graphics {
         self.projection = projection.into();
     }
 
+    #[inline]
     pub fn apply_default_pipeline(&mut self) {
         self.mq.apply_pipeline(&self.pipeline);
     }
 
+    #[inline]
     pub fn apply_pipeline(&mut self, pipeline: &Pipeline) {
         self.mq.apply_pipeline(&pipeline.mq);
     }
 
+    #[inline]
     pub fn commit_frame(&mut self) {
         self.mq.commit_frame();
         self.expire_render_passes();
     }
 
+    #[inline]
     pub fn begin_default_pass(&mut self, action: PassAction) {
         self.mq.begin_default_pass(action.into());
     }
 
+    #[inline]
     pub fn begin_pass(&mut self, pass: &RenderPass, action: PassAction) {
         self.mq.begin_pass(**pass, mq::PassAction::from(action));
     }
 
+    #[inline]
     pub fn end_pass(&mut self) {
         self.mq.end_render_pass();
+    }
+
+    #[inline]
+    pub fn draw(&mut self, drawable: &impl Drawable, param: impl Into<Option<InstanceParam>>) {
+        drawable.draw(self, param.into().unwrap_or_default());
     }
 }
 
@@ -955,10 +1033,12 @@ impl Default for InstanceParam {
 }
 
 impl InstanceParam {
+    #[inline]
     pub fn new() -> Self {
         Self::default()
     }
 
+    #[inline]
     pub fn translate(self, v: Vector2<f32>) -> Self {
         Self {
             tx: self.tx * Translation3::new(v.x, v.y, 0.),
@@ -966,6 +1046,7 @@ impl InstanceParam {
         }
     }
 
+    #[inline]
     pub fn scale(self, v: Vector2<f32>) -> Self {
         Self {
             tx: self.tx
@@ -974,6 +1055,7 @@ impl InstanceParam {
         }
     }
 
+    #[inline]
     pub fn to_instance_properties(&self) -> InstanceProperties {
         let mins = self.src.mins;
         let maxs = self.src.mins + self.src.extent;
@@ -1017,12 +1099,16 @@ fn quad_indices() -> [u16; 6] {
 #[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub struct SpriteIdx(Index);
 
+struct SpriteBatchInner {
+    instances: Vec<InstanceProperties>,
+    capacity: usize,
+    bindings: mq::Bindings,
+}
+
 pub struct SpriteBatch {
     sprites: Arena<InstanceParam>,
-    instances: Vec<InstanceProperties>,
-    bindings: mq::Bindings,
-    capacity: usize,
-    dirty: bool,
+    inner: RwLock<SpriteBatchInner>,
+    dirty: AtomicBool,
     /// Shared reference to keep the texture alive.
     _texture: Texture,
 }
@@ -1030,14 +1116,16 @@ pub struct SpriteBatch {
 impl ops::Index<SpriteIdx> for SpriteBatch {
     type Output = InstanceParam;
 
+    #[inline]
     fn index(&self, index: SpriteIdx) -> &Self::Output {
         &self.sprites[index.0]
     }
 }
 
 impl ops::IndexMut<SpriteIdx> for SpriteBatch {
+    #[inline]
     fn index_mut(&mut self, index: SpriteIdx) -> &mut Self::Output {
-        self.dirty = true;
+        self.dirty = AtomicBool::new(true);
         &mut self.sprites[index.0]
     }
 }
@@ -1058,57 +1146,80 @@ impl SpriteBatch {
 
         Self {
             sprites: Arena::new(),
-            instances: Vec::new(),
-            bindings,
-            capacity,
-            dirty: true,
+            inner: SpriteBatchInner {
+                instances: Vec::new(),
+                capacity,
+                bindings,
+            }
+            .into(),
+            dirty: AtomicBool::new(true),
             _texture: texture,
         }
     }
 
+    #[inline]
     pub fn insert(&mut self, param: InstanceParam) -> SpriteIdx {
-        self.dirty = true;
+        *self.dirty.get_mut() = true;
         SpriteIdx(self.sprites.insert(param))
     }
 
+    #[inline]
     pub fn remove(&mut self, index: SpriteIdx) {
+        *self.dirty.get_mut() = true;
         self.sprites.remove(index.0);
     }
 
+    #[inline]
     pub fn clear(&mut self) {
+        *self.dirty.get_mut() = true;
         self.sprites.clear();
     }
 
-    pub fn flush(&mut self, ctx: &mut Graphics) {
-        if !self.dirty {
+    pub fn flush(&self, ctx: &mut Graphics) {
+        if !self.dirty.load(atomic::Ordering::Relaxed) {
             return;
         }
 
-        self.instances.clear();
-        self.instances.extend(
+        let inner = &mut *self.inner.write().unwrap();
+
+        inner.instances.clear();
+        inner.instances.extend(
             self.sprites
                 .iter()
                 .map(|(_, param)| param.to_instance_properties()),
         );
 
-        if self.instances.len() > self.capacity {
-            self.capacity = self.capacity * 2;
-            self.bindings.vertex_buffers[1] = mq::Buffer::stream(
+        if inner.instances.len() > inner.capacity {
+            inner.capacity = inner.capacity * 2;
+            let new_buffer = mq::Buffer::stream(
                 &mut ctx.mq,
                 mq::BufferType::VertexBuffer,
-                self.capacity * mem::size_of::<InstanceProperties>(),
+                inner.capacity * mem::size_of::<InstanceProperties>(),
             );
+            let old_buffer = mem::replace(&mut inner.bindings.vertex_buffers[1], new_buffer);
+            old_buffer.delete();
         }
 
-        self.bindings.vertex_buffers[1].update(&mut ctx.mq, &self.instances);
+        inner.bindings.vertex_buffers[1].update(&mut ctx.mq, &inner.instances);
 
-        self.dirty = false;
+        self.dirty.store(false, atomic::Ordering::Relaxed);
     }
+}
 
-    pub fn draw(&mut self, ctx: &mut Graphics) {
+/// TODO: FIXME(sleffy) maybe? This implementation ignores the color and src parameters
+/// of the `InstanceParam`. Not sure there's much to be done about that, though, since
+/// the spritebatch has its own instance parameters.
+impl Drawable for SpriteBatch {
+    fn draw(&self, ctx: &mut Graphics, instance: InstanceParam) {
         self.flush(ctx);
-        ctx.mq.apply_bindings(&self.bindings);
-        ctx.mq.draw(0, 6, self.instances.len() as i32);
+        let inner = self.inner.read().unwrap();
+
+        ctx.push_multiplied_transform(instance.tx.to_homogeneous());
+        ctx.mq.apply_bindings(&inner.bindings);
+        ctx.apply_transforms();
+        ctx.mq.draw(0, 6, inner.instances.len() as i32);
+        ctx.pop_transforms();
+        ctx.apply_transforms();
     }
 }
 
@@ -1165,10 +1276,16 @@ impl Canvas {
             texture: color_img,
         }
     }
+}
 
-    pub fn draw(&mut self, ctx: &mut Graphics, instance: InstanceParam) {
+impl Drawable for Canvas {
+    fn draw(&self, ctx: &mut Graphics, instance: InstanceParam) {
         self.bindings.vertex_buffers[1].update(&mut ctx.mq, &[instance.to_instance_properties()]);
         ctx.mq.apply_bindings(&self.bindings);
         ctx.mq.draw(0, 6, 1);
     }
+}
+
+pub trait Drawable {
+    fn draw(&self, ctx: &mut Graphics, instance: InstanceParam);
 }
