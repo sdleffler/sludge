@@ -1,10 +1,21 @@
-use crate::{conf::Conf, graphics::Graphics};
+use crate::{
+    conf::Conf,
+    graphics::Graphics,
+    input::{KeyCode, KeyMods, MouseButton},
+};
 use {anyhow::*, miniquad as mq};
 
 pub trait EventHandler: Sized + 'static {
     fn init(ctx: Graphics) -> Result<Self>;
     fn update(&mut self) -> Result<()>;
     fn draw(&mut self) -> Result<()>;
+
+    fn key_down_event(&mut self, _keycode: KeyCode, _keymods: KeyMods, _repeat: bool) {}
+    fn key_up_event(&mut self, _keycode: KeyCode, _keymods: KeyMods) {}
+    fn mouse_motion_event(&mut self, _x: f32, _y: f32) {}
+    fn mouse_wheel_event(&mut self, _x: f32, _y: f32) {}
+    fn mouse_button_down_event(&mut self, _button: MouseButton, _x: f32, _y: f32) {}
+    fn mouse_button_up_event(&mut self, _button: MouseButton, _x: f32, _y: f32) {}
 }
 
 pub struct MqHandler<H: EventHandler> {
@@ -30,13 +41,36 @@ impl<H: EventHandler> mq::EventHandlerFree for MqHandler<H> {
     }
 
     fn resize_event(&mut self, _width: f32, _height: f32) {}
-    fn mouse_motion_event(&mut self, _x: f32, _y: f32) {}
-    fn mouse_wheel_event(&mut self, _x: f32, _y: f32) {}
-    fn mouse_button_down_event(&mut self, _button: mq::MouseButton, _x: f32, _y: f32) {}
-    fn mouse_button_up_event(&mut self, _button: mq::MouseButton, _x: f32, _y: f32) {}
+
+    fn mouse_motion_event(&mut self, x: f32, y: f32) {
+        self.handler.mouse_motion_event(x, y);
+    }
+
+    fn mouse_wheel_event(&mut self, x: f32, y: f32) {
+        self.handler.mouse_wheel_event(x, y);
+    }
+
+    fn mouse_button_down_event(&mut self, button: mq::MouseButton, x: f32, y: f32) {
+        self.handler
+            .mouse_button_down_event(MouseButton::from(button), x, y)
+    }
+
+    fn mouse_button_up_event(&mut self, button: mq::MouseButton, x: f32, y: f32) {
+        self.handler
+            .mouse_button_up_event(MouseButton::from(button), x, y);
+    }
+
     fn char_event(&mut self, _character: char, _keymods: mq::KeyMods, _repeat: bool) {}
-    fn key_down_event(&mut self, _keycode: mq::KeyCode, _keymods: mq::KeyMods, _repeat: bool) {}
-    fn key_up_event(&mut self, _keycode: mq::KeyCode, _keymods: mq::KeyMods) {}
+
+    fn key_down_event(&mut self, keycode: mq::KeyCode, keymods: mq::KeyMods, repeat: bool) {
+        self.handler
+            .key_down_event(KeyCode::from(keycode), KeyMods::from(keymods), repeat);
+    }
+
+    fn key_up_event(&mut self, keycode: mq::KeyCode, keymods: mq::KeyMods) {
+        self.handler
+            .key_up_event(KeyCode::from(keycode), KeyMods::from(keymods));
+    }
 
     /// Default implementation emulates mouse clicks
     fn touch_event(&mut self, phase: mq::TouchPhase, _id: u64, x: f32, y: f32) {

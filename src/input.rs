@@ -39,6 +39,282 @@ use {hashbrown::HashMap, std::hash::Hash};
 //
 // Easy way?  Hash map of event -> axis/button bindings.
 
+#[derive(Debug, Copy, Clone, PartialEq, Hash, Eq)]
+#[repr(u32)]
+pub enum KeyCode {
+    Space,
+    Apostrophe,
+    Comma,
+    Minus,
+    Period,
+    Slash,
+    Key0,
+    Key1,
+    Key2,
+    Key3,
+    Key4,
+    Key5,
+    Key6,
+    Key7,
+    Key8,
+    Key9,
+    Semicolon,
+    Equal,
+    A,
+    B,
+    C,
+    D,
+    E,
+    F,
+    G,
+    H,
+    I,
+    J,
+    K,
+    L,
+    M,
+    N,
+    O,
+    P,
+    Q,
+    R,
+    S,
+    T,
+    U,
+    V,
+    W,
+    X,
+    Y,
+    Z,
+    LeftBracket,
+    Backslash,
+    RightBracket,
+    GraveAccent,
+    World1,
+    World2,
+    Escape,
+    Enter,
+    Tab,
+    Backspace,
+    Insert,
+    Delete,
+    Right,
+    Left,
+    Down,
+    Up,
+    PageUp,
+    PageDown,
+    Home,
+    End,
+    CapsLock,
+    ScrollLock,
+    NumLock,
+    PrintScreen,
+    Pause,
+    F1,
+    F2,
+    F3,
+    F4,
+    F5,
+    F6,
+    F7,
+    F8,
+    F9,
+    F10,
+    F11,
+    F12,
+    F13,
+    F14,
+    F15,
+    F16,
+    F17,
+    F18,
+    F19,
+    F20,
+    F21,
+    F22,
+    F23,
+    F24,
+    F25,
+    Kp0,
+    Kp1,
+    Kp2,
+    Kp3,
+    Kp4,
+    Kp5,
+    Kp6,
+    Kp7,
+    Kp8,
+    Kp9,
+    KpDecimal,
+    KpDivide,
+    KpMultiply,
+    KpSubtract,
+    KpAdd,
+    KpEnter,
+    KpEqual,
+    LeftShift,
+    LeftControl,
+    LeftAlt,
+    LeftSuper,
+    RightShift,
+    RightControl,
+    RightAlt,
+    RightSuper,
+    Menu,
+    Unknown,
+}
+
+impl From<miniquad::KeyCode> for KeyCode {
+    fn from(kc: miniquad::KeyCode) -> Self {
+        use miniquad::KeyCode as MqKc;
+        use KeyCode as SlKc;
+
+        match kc {
+            MqKc::Space => SlKc::Space,
+            MqKc::Apostrophe => SlKc::Apostrophe,
+            MqKc::Comma => SlKc::Comma,
+            MqKc::Minus => SlKc::Minus,
+            MqKc::Period => SlKc::Period,
+            MqKc::Slash => SlKc::Slash,
+            MqKc::Key0 => SlKc::Key0,
+            MqKc::Key1 => SlKc::Key1,
+            MqKc::Key2 => SlKc::Key2,
+            MqKc::Key3 => SlKc::Key3,
+            MqKc::Key4 => SlKc::Key4,
+            MqKc::Key5 => SlKc::Key5,
+            MqKc::Key6 => SlKc::Key6,
+            MqKc::Key7 => SlKc::Key7,
+            MqKc::Key8 => SlKc::Key8,
+            MqKc::Key9 => SlKc::Key9,
+            MqKc::Semicolon => SlKc::Semicolon,
+            MqKc::Equal => SlKc::Equal,
+            MqKc::A => SlKc::A,
+            MqKc::B => SlKc::B,
+            MqKc::C => SlKc::C,
+            MqKc::D => SlKc::D,
+            MqKc::E => SlKc::E,
+            MqKc::F => SlKc::F,
+            MqKc::G => SlKc::G,
+            MqKc::H => SlKc::H,
+            MqKc::I => SlKc::I,
+            MqKc::J => SlKc::J,
+            MqKc::K => SlKc::K,
+            MqKc::L => SlKc::L,
+            MqKc::M => SlKc::M,
+            MqKc::N => SlKc::N,
+            MqKc::O => SlKc::O,
+            MqKc::P => SlKc::P,
+            MqKc::Q => SlKc::Q,
+            MqKc::R => SlKc::R,
+            MqKc::S => SlKc::S,
+            MqKc::T => SlKc::T,
+            MqKc::U => SlKc::U,
+            MqKc::V => SlKc::V,
+            MqKc::W => SlKc::W,
+            MqKc::X => SlKc::X,
+            MqKc::Y => SlKc::Y,
+            MqKc::Z => SlKc::Z,
+            MqKc::LeftBracket => SlKc::LeftBracket,
+            MqKc::Backslash => SlKc::Backslash,
+            MqKc::RightBracket => SlKc::RightBracket,
+            MqKc::GraveAccent => SlKc::GraveAccent,
+            MqKc::World1 => SlKc::World1,
+            MqKc::World2 => SlKc::World2,
+            MqKc::Escape => SlKc::Escape,
+            MqKc::Enter => SlKc::Enter,
+            MqKc::Tab => SlKc::Tab,
+            MqKc::Backspace => SlKc::Backspace,
+            MqKc::Insert => SlKc::Insert,
+            MqKc::Delete => SlKc::Delete,
+            MqKc::Right => SlKc::Right,
+            MqKc::Left => SlKc::Left,
+            MqKc::Down => SlKc::Down,
+            MqKc::Up => SlKc::Up,
+            MqKc::PageUp => SlKc::PageUp,
+            MqKc::PageDown => SlKc::PageDown,
+            MqKc::Home => SlKc::Home,
+            MqKc::End => SlKc::End,
+            MqKc::CapsLock => SlKc::CapsLock,
+            MqKc::ScrollLock => SlKc::ScrollLock,
+            MqKc::NumLock => SlKc::NumLock,
+            MqKc::PrintScreen => SlKc::PrintScreen,
+            MqKc::Pause => SlKc::Pause,
+            MqKc::F1 => SlKc::F1,
+            MqKc::F2 => SlKc::F2,
+            MqKc::F3 => SlKc::F3,
+            MqKc::F4 => SlKc::F4,
+            MqKc::F5 => SlKc::F5,
+            MqKc::F6 => SlKc::F6,
+            MqKc::F7 => SlKc::F7,
+            MqKc::F8 => SlKc::F8,
+            MqKc::F9 => SlKc::F9,
+            MqKc::F10 => SlKc::F10,
+            MqKc::F11 => SlKc::F11,
+            MqKc::F12 => SlKc::F12,
+            MqKc::F13 => SlKc::F13,
+            MqKc::F14 => SlKc::F14,
+            MqKc::F15 => SlKc::F15,
+            MqKc::F16 => SlKc::F16,
+            MqKc::F17 => SlKc::F17,
+            MqKc::F18 => SlKc::F18,
+            MqKc::F19 => SlKc::F19,
+            MqKc::F20 => SlKc::F20,
+            MqKc::F21 => SlKc::F21,
+            MqKc::F22 => SlKc::F22,
+            MqKc::F23 => SlKc::F23,
+            MqKc::F24 => SlKc::F24,
+            MqKc::F25 => SlKc::F25,
+            MqKc::Kp0 => SlKc::Kp0,
+            MqKc::Kp1 => SlKc::Kp1,
+            MqKc::Kp2 => SlKc::Kp2,
+            MqKc::Kp3 => SlKc::Kp3,
+            MqKc::Kp4 => SlKc::Kp4,
+            MqKc::Kp5 => SlKc::Kp5,
+            MqKc::Kp6 => SlKc::Kp6,
+            MqKc::Kp7 => SlKc::Kp7,
+            MqKc::Kp8 => SlKc::Kp8,
+            MqKc::Kp9 => SlKc::Kp9,
+            MqKc::KpDecimal => SlKc::KpDecimal,
+            MqKc::KpDivide => SlKc::KpDivide,
+            MqKc::KpMultiply => SlKc::KpMultiply,
+            MqKc::KpSubtract => SlKc::KpSubtract,
+            MqKc::KpAdd => SlKc::KpAdd,
+            MqKc::KpEnter => SlKc::KpEnter,
+            MqKc::KpEqual => SlKc::KpEqual,
+            MqKc::LeftShift => SlKc::LeftShift,
+            MqKc::LeftControl => SlKc::LeftControl,
+            MqKc::LeftAlt => SlKc::LeftAlt,
+            MqKc::LeftSuper => SlKc::LeftSuper,
+            MqKc::RightShift => SlKc::RightShift,
+            MqKc::RightControl => SlKc::RightControl,
+            MqKc::RightAlt => SlKc::RightAlt,
+            MqKc::RightSuper => SlKc::RightSuper,
+            MqKc::Menu => SlKc::Menu,
+            MqKc::Unknown => SlKc::Unknown,
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Default)]
+pub struct KeyMods {
+    pub shift: bool,
+    pub ctrl: bool,
+    pub alt: bool,
+    pub logo: bool,
+}
+
+impl From<miniquad::KeyMods> for KeyMods {
+    fn from(km: miniquad::KeyMods) -> Self {
+        Self {
+            shift: km.shift,
+            ctrl: km.ctrl,
+            alt: km.alt,
+            logo: km.logo,
+        }
+    }
+}
+
 #[derive(Debug, Hash, Eq, PartialEq, Copy, Clone)]
 pub enum MouseButton {
     Left,
@@ -46,9 +322,23 @@ pub enum MouseButton {
     Middle,
 }
 
+impl From<miniquad::MouseButton> for MouseButton {
+    fn from(mq: miniquad::MouseButton) -> Self {
+        use miniquad::MouseButton as MqMb;
+        use MouseButton as SlMb;
+
+        match mq {
+            MqMb::Left => SlMb::Left,
+            MqMb::Right => SlMb::Right,
+            MqMb::Middle => SlMb::Middle,
+            MqMb::Unknown => panic!("AAAAAAAAAAAAAA"),
+        }
+    }
+}
+
 #[derive(Debug, Hash, Eq, PartialEq, Copy, Clone)]
-enum InputType<Keys> {
-    KeyEvent(Keys),
+enum InputType {
+    KeyEvent(KeyCode),
     MouseButtonEvent(MouseButton),
 }
 
@@ -119,21 +409,19 @@ struct ButtonState {
 /// A struct that contains a mapping from physical input events
 /// (currently just `KeyCode`s) to whatever your logical Axis/Button
 /// types are.
-pub struct InputBinding<Keys, Axes, Buttons>
+pub struct InputBinding<Axes, Buttons>
 where
-    Keys: Hash + Eq + Clone,
     Axes: Hash + Eq + Clone,
     Buttons: Hash + Eq + Clone,
 {
     // Once EnumSet is stable it should be used for these
     // instead of BTreeMap. ♥?
     // Binding of keys to input values.
-    bindings: HashMap<InputType<Keys>, InputEffect<Axes, Buttons>>,
+    bindings: HashMap<InputType, InputEffect<Axes, Buttons>>,
 }
 
-impl<Keys, Axes, Buttons> InputBinding<Keys, Axes, Buttons>
+impl<Axes, Buttons> InputBinding<Axes, Buttons>
 where
-    Keys: Hash + Eq + Clone,
     Axes: Hash + Eq + Clone,
     Buttons: Hash + Eq + Clone,
 {
@@ -145,7 +433,7 @@ where
 
     /// Adds a key binding connecting the given keycode to the given
     /// logical axis.
-    pub fn bind_key_to_axis(mut self, keycode: Keys, axis: Axes, positive: bool) -> Self {
+    pub fn bind_key_to_axis(mut self, keycode: KeyCode, axis: Axes, positive: bool) -> Self {
         self.bindings.insert(
             InputType::KeyEvent(keycode),
             InputEffect::Axis(axis.clone(), positive),
@@ -155,7 +443,7 @@ where
 
     /// Adds a key binding connecting the given keycode to the given
     /// logical button.
-    pub fn bind_key_to_button(mut self, keycode: Keys, button: Buttons) -> Self {
+    pub fn bind_key_to_button(mut self, keycode: KeyCode, button: Buttons) -> Self {
         self.bindings.insert(
             InputType::KeyEvent(keycode),
             InputEffect::Button(button.clone()),
@@ -172,7 +460,7 @@ where
     }
 
     /// Takes an physical input type and turns it into a logical input type (keycode -> axis/button).
-    pub fn resolve(&self, keycode: Keys) -> Option<InputEffect<Axes, Buttons>> {
+    pub fn resolve(&self, keycode: KeyCode) -> Option<InputEffect<Axes, Buttons>> {
         self.bindings.get(&InputType::KeyEvent(keycode)).cloned()
     }
 }
@@ -367,7 +655,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ggez::event::*;
 
     #[derive(Hash, Eq, PartialEq, Copy, Clone, Debug)]
     enum Buttons {
@@ -383,13 +670,13 @@ mod tests {
         Vert,
     }
 
-    fn make_input_binding() -> InputBinding<KeyCode, Axes, Buttons> {
-        let ib = InputBinding::<KeyCode, Axes, Buttons>::new()
+    fn make_input_binding() -> InputBinding<Axes, Buttons> {
+        let ib = InputBinding::<Axes, Buttons>::new()
             .bind_key_to_button(KeyCode::Z, Buttons::A)
             .bind_key_to_button(KeyCode::X, Buttons::B)
-            .bind_key_to_button(KeyCode::Return, Buttons::Start)
-            .bind_key_to_button(KeyCode::RShift, Buttons::Select)
-            .bind_key_to_button(KeyCode::LShift, Buttons::Select)
+            .bind_key_to_button(KeyCode::Enter, Buttons::Start)
+            .bind_key_to_button(KeyCode::RightShift, Buttons::Select)
+            .bind_key_to_button(KeyCode::LeftShift, Buttons::Select)
             .bind_key_to_axis(KeyCode::Up, Axes::Vert, true)
             .bind_key_to_axis(KeyCode::Down, Axes::Vert, false)
             .bind_key_to_axis(KeyCode::Left, Axes::Horz, false)
@@ -409,15 +696,15 @@ mod tests {
             Some(InputEffect::Button(Buttons::B))
         );
         assert_eq!(
-            ib.resolve(KeyCode::Return),
+            ib.resolve(KeyCode::Enter),
             Some(InputEffect::Button(Buttons::Start))
         );
         assert_eq!(
-            ib.resolve(KeyCode::RShift),
+            ib.resolve(KeyCode::RightShift),
             Some(InputEffect::Button(Buttons::Select))
         );
         assert_eq!(
-            ib.resolve(KeyCode::LShift),
+            ib.resolve(KeyCode::LeftShift),
             Some(InputEffect::Button(Buttons::Select))
         );
 
@@ -491,7 +778,7 @@ mod tests {
 
     #[test]
     fn test_button_edge_transitions() {
-        let mut im: InputState<Axis, Buttons> = InputState::new();
+        let mut im: InputState<Axes, Buttons> = InputState::new();
 
         // Push a key, confirm it's transitioned.
         assert!(!im.get_button_down(Buttons::A));
