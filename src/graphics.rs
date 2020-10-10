@@ -1,7 +1,7 @@
 use crate::math::*;
 use {
     anyhow::*,
-    derivative::Derivative,
+    derivative::*,
     lyon::{
         math::*,
         tessellation::{self as t, FillOptions, StrokeOptions},
