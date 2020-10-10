@@ -1,9 +1,9 @@
 use {
     anyhow::*,
-    miniquad as mq,
     rand::distributions::uniform::Uniform,
     sludge::{
         components::Transform,
+        conf::Conf,
         ecs::World,
         event::EventHandler,
         graphics::{Context, *},
@@ -205,11 +205,11 @@ fn main() -> Result<()> {
         .chain(std::io::stdout())
         .apply()?;
 
-    sludge::event::run::<MainState>(mq::conf::Conf {
+    sludge::event::run::<MainState>(Conf {
         window_title: "Bullets!".to_string(),
         window_width: 320 * 4,
         window_height: 240 * 4,
-        ..mq::conf::Conf::default()
+        ..Conf::default()
     });
 
     // let (mut ctx, mut event_loop) = ggez::ContextBuilder::new("bullets", "Sean Leffler")

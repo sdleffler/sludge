@@ -1,4 +1,4 @@
-use crate::graphics::Context as GraphicsContext;
+use crate::{conf::Conf, graphics::Context as GraphicsContext};
 use {anyhow::*, miniquad as mq};
 
 pub trait EventHandler: Sized + 'static {
@@ -66,6 +66,13 @@ impl<H: EventHandler> mq::EventHandlerFree for MqHandler<H> {
     fn quit_requested_event(&mut self) {}
 }
 
-pub fn run<T: EventHandler>(conf: mq::conf::Conf) {
-    mq::start(conf, |ctx| mq::UserData::free(MqHandler::<T>::new(ctx)));
+pub fn run<T: EventHandler>(conf: Conf) {
+    let mq_conf = mq::conf::Conf {
+        window_title: conf.window_title,
+        window_width: conf.window_width as i32,
+        window_height: conf.window_height as i32,
+        ..mq::conf::Conf::default()
+    };
+
+    mq::start(mq_conf, |ctx| mq::UserData::free(MqHandler::<T>::new(ctx)));
 }

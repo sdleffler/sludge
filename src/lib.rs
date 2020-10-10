@@ -21,6 +21,7 @@ mod utils;
 pub mod api;
 pub mod chunked_grid;
 pub mod components;
+pub mod conf;
 pub mod dependency_graph;
 pub mod dispatcher;
 pub mod ecs;
