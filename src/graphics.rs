@@ -1,6 +1,7 @@
 use crate::math::*;
 use {
     anyhow::*,
+    derivative::Derivative,
     lyon::{
         math::*,
         tessellation::{self as t, FillOptions, StrokeOptions},
@@ -608,7 +609,10 @@ impl TransformStack {
     }
 }
 
+#[derive(Derivative)]
+#[derivative(Debug)]
 pub struct Graphics {
+    #[derivative(Debug = "ignore")]
     pub mq: mq::Context,
     pub pipeline: mq::Pipeline,
     pub null_texture: Texture,
@@ -774,6 +778,7 @@ impl Graphics {
     }
 }
 
+#[derive(Debug)]
 pub struct Mesh {
     /// The shared reference to the texture, so that it doesn't get dropped and deleted.
     /// The inner data is already in `bindings` so this is really just to keep it from
@@ -790,6 +795,7 @@ impl Mesh {
     }
 }
 
+#[derive(Debug)]
 pub struct MeshBuilder {
     pub buffer: t::geometry_builder::VertexBuffers<Vertex, u16>,
     pub texture: Texture,
@@ -869,53 +875,6 @@ impl MeshBuilder {
         }
         self
     }
-
-    // /// Create a new mesh for an ellipse.
-    // ///
-    // /// For the meaning of the `tolerance` parameter, [see here](https://docs.rs/lyon_geom/0.11.0/lyon_geom/#flattening).
-    // pub fn ellipse<P>(
-    //     &mut self,
-    //     mode: DrawMode,
-    //     point: P,
-    //     radius1: f32,
-    //     radius2: f32,
-    //     tolerance: f32,
-    //     color: Color,
-    // ) -> &mut Self
-    // where
-    //     P: Into<mint::Point2<f32>>,
-    // {
-    //     {
-    //         let buffers = &mut self.buffer;
-    //         let point = point.into();
-    //         let vb = VertexBuilder {
-    //             color: LinearColor::from(color),
-    //         };
-    //         match mode {
-    //             DrawMode::Fill(fill_options) => {
-    //                 let builder = &mut t::BuffersBuilder::new(buffers, vb);
-    //                 let _ = t::basic_shapes::fill_ellipse(
-    //                     t::math::point(point.x, point.y),
-    //                     t::math::vector(radius1, radius2),
-    //                     t::math::Angle { radians: 0.0 },
-    //                     &fill_options.with_tolerance(tolerance),
-    //                     builder,
-    //                 );
-    //             }
-    //             DrawMode::Stroke(options) => {
-    //                 let builder = &mut t::BuffersBuilder::new(buffers, vb);
-    //                 let _ = t::basic_shapes::stroke_ellipse(
-    //                     t::math::point(point.x, point.y),
-    //                     t::math::vector(radius1, radius2),
-    //                     t::math::Angle { radians: 0.0 },
-    //                     &options.with_tolerance(tolerance),
-    //                     builder,
-    //                 );
-    //             }
-    //         };
-    //     }
-    //     self
-    // }
 
     /// Create a new mesh for a closed polygon.
     /// The points given must be in clockwise order,
@@ -1099,12 +1058,14 @@ fn quad_indices() -> [u16; 6] {
 #[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub struct SpriteIdx(Index);
 
+#[derive(Debug)]
 struct SpriteBatchInner {
     instances: Vec<InstanceProperties>,
     capacity: usize,
     bindings: mq::Bindings,
 }
 
+#[derive(Debug)]
 pub struct SpriteBatch {
     sprites: Arena<InstanceParam>,
     inner: RwLock<SpriteBatchInner>,
@@ -1223,6 +1184,7 @@ impl Drawable for SpriteBatch {
     }
 }
 
+#[derive(Debug)]
 pub struct Canvas {
     pub render_pass: RenderPass,
     pub bindings: mq::Bindings,
