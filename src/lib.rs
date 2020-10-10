@@ -42,9 +42,6 @@ pub mod timer;
 pub mod transform;
 pub mod vfs;
 
-#[cfg(feature = "ggez")]
-pub mod ggez;
-
 pub use anyhow;
 pub use nalgebra;
 pub use rlua;

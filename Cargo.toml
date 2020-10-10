@@ -7,7 +7,6 @@ edition = "2018"
 
 [features]
 default = ["miniquad"]
-ggez-backend = ["ggez", "gfx", "gilrs", "winit"]
 
 [dependencies]
 rlua = { git = "https://github.com/sdleffler/rlua" }
@@ -24,8 +23,6 @@ hibitset = "0.6.3"
 hashbrown = { version = "0.9.0", features = ["serde"] }
 atomic_refcell = { git = "https://github.com/sdleffler/atomic_refcell" }
 string_cache = "0.8.0"
-ggez = { git = "https://github.com/sdleffler/ggez", optional = true }
-gfx = { version = "0.18", optional = true }
 petgraph = "0.5.1"
 serde = "1.0.116"
 serde_json = "1.0.57"
@@ -41,7 +38,6 @@ zstd = "0.5"
 thiserror = "1.0.20"
 fragile = "1.0.0"
 gilrs = { version = "0.8.0", optional = true }
-winit = { version = "0.19.3", optional = true }
 image = { version = "0.22", default-features = false, features = ["gif_codec", "jpeg", "ico", "png_codec", "pnm",
 "tga", "tiff", "webp", "bmp", "dxt", ] }
 thunderdome = { git = "https://github.com/sdleffler/thunderdome", branch = "main" }
@@ -62,17 +58,7 @@ ggez = { git = "https://github.com/sdleffler/ggez" }
 rand = "0.7.3"
 
 [[example]]
-name = "bullets-ggez"
-required-features = ["ggez-backend"]
-
-[[example]]
-name = "bullets-miniquad"
-required-features = ["miniquad"]
-
-[[example]]
-name = "templates-ggez"
-required-features = ["ggez-backend"]
-
-[[example]]
 name = "bullets"
-required-features = ["miniquad"]
+
+[[example]]
+name = "templates"
