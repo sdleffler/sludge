@@ -162,7 +162,7 @@ impl ops::Deref for RenderPass {
 
 impl RenderPass {
     pub fn new(
-        ctx: &mut Context,
+        ctx: &mut Graphics,
         color_img: Texture,
         depth_img: impl Into<Option<Texture>>,
     ) -> Self {
@@ -567,7 +567,7 @@ impl TransformStack {
     }
 }
 
-pub struct Context {
+pub struct Graphics {
     pub mq: mq::Context,
     pub pipeline: mq::Pipeline,
     pub null_texture: Texture,
@@ -577,7 +577,7 @@ pub struct Context {
     pub render_passes: Vec<RenderPass>,
 }
 
-impl Context {
+impl Graphics {
     pub fn new(mut mq: mq::Context) -> Result<Self> {
         let shader = mq::Shader::new(
             &mut mq,
@@ -706,7 +706,7 @@ pub struct Mesh {
 }
 
 impl Mesh {
-    pub fn draw(&self, ctx: &mut Context) {
+    pub fn draw(&self, ctx: &mut Graphics) {
         ctx.mq.apply_bindings(&self.bindings);
         ctx.mq.draw(0, self.len, 1);
     }
@@ -912,7 +912,7 @@ impl MeshBuilder {
         self
     }
 
-    pub fn build(&self, ctx: &mut Context) -> Mesh {
+    pub fn build(&self, ctx: &mut Graphics) -> Mesh {
         let vertex_buffer = mq::Buffer::immutable(
             &mut ctx.mq,
             mq::BufferType::VertexBuffer,
@@ -1043,7 +1043,7 @@ impl ops::IndexMut<SpriteIdx> for SpriteBatch {
 }
 
 impl SpriteBatch {
-    pub fn with_capacity(ctx: &mut Context, texture: Texture, capacity: usize) -> Self {
+    pub fn with_capacity(ctx: &mut Graphics, texture: Texture, capacity: usize) -> Self {
         let instances = mq::Buffer::stream(
             &mut ctx.mq,
             mq::BufferType::VertexBuffer,
@@ -1079,7 +1079,7 @@ impl SpriteBatch {
         self.sprites.clear();
     }
 
-    pub fn flush(&mut self, ctx: &mut Context) {
+    pub fn flush(&mut self, ctx: &mut Graphics) {
         if !self.dirty {
             return;
         }
@@ -1105,7 +1105,7 @@ impl SpriteBatch {
         self.dirty = false;
     }
 
-    pub fn draw(&mut self, ctx: &mut Context) {
+    pub fn draw(&mut self, ctx: &mut Graphics) {
         self.flush(ctx);
         ctx.mq.apply_bindings(&self.bindings);
         ctx.mq.draw(0, 6, self.instances.len() as i32);
@@ -1119,7 +1119,7 @@ pub struct Canvas {
 }
 
 impl Canvas {
-    pub fn new(ctx: &mut Context, width: u32, height: u32) -> Self {
+    pub fn new(ctx: &mut Graphics, width: u32, height: u32) -> Self {
         let color_img = Texture::from(mq::Texture::new_render_texture(
             &mut ctx.mq,
             mq::TextureParams {
@@ -1166,7 +1166,7 @@ impl Canvas {
         }
     }
 
-    pub fn draw(&mut self, ctx: &mut Context, instance: InstanceParam) {
+    pub fn draw(&mut self, ctx: &mut Graphics, instance: InstanceParam) {
         self.bindings.vertex_buffers[1].update(&mut ctx.mq, &[instance.to_instance_properties()]);
         ctx.mq.apply_bindings(&self.bindings);
         ctx.mq.draw(0, 6, 1);

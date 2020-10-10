@@ -2,12 +2,7 @@ use {
     anyhow::*,
     miniquad as mq,
     rand::distributions::uniform::Uniform,
-    sludge::{
-        components::Transform,
-        ecs::World,
-        graphics::{Context, *},
-        prelude::*,
-    },
+    sludge::{components::Transform, ecs::World, graphics::*, prelude::*},
 };
 
 #[derive(Debug, SimpleComponent)]
@@ -33,7 +28,7 @@ struct SpriteIndex {
 }
 
 struct MainState {
-    context: Context,
+    context: Graphics,
     space: Space,
     bullet_count: u64,
     batch: SpriteBatch,
@@ -41,7 +36,7 @@ struct MainState {
 }
 
 impl MainState {
-    pub fn new(mut ctx: Context) -> Result<MainState> {
+    pub fn new(mut ctx: Graphics) -> Result<MainState> {
         let mut space = Space::new()?;
 
         space.refresh()?;
@@ -206,7 +201,7 @@ fn main() -> Result<()> {
             window_height: 240 * 4,
             ..mq::conf::Conf::default()
         },
-        |ctx| mq::UserData::free(MainState::new(Context::new(ctx).unwrap()).unwrap()),
+        |ctx| mq::UserData::free(MainState::new(Graphics::new(ctx).unwrap()).unwrap()),
     );
 
     // let (mut ctx, mut event_loop) = ggez::ContextBuilder::new("bullets", "Sean Leffler")

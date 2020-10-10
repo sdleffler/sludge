@@ -2,12 +2,7 @@ use {
     anyhow::*,
     rand::distributions::uniform::Uniform,
     sludge::{
-        components::Transform,
-        conf::Conf,
-        ecs::World,
-        event::EventHandler,
-        graphics::{Context, *},
-        prelude::*,
+        components::Transform, conf::Conf, ecs::World, event::EventHandler, graphics::*, prelude::*,
     },
 };
 
@@ -34,7 +29,7 @@ struct SpriteIndex {
 }
 
 struct MainState {
-    context: Context,
+    gfx: Graphics,
     space: Space,
     bullet_count: u64,
     batch: SpriteBatch,
@@ -42,7 +37,7 @@ struct MainState {
 }
 
 impl MainState {
-    pub fn new(mut ctx: Context) -> Result<MainState> {
+    pub fn new(mut gfx: Graphics) -> Result<MainState> {
         let mut space = Space::new()?;
 
         space.refresh()?;
@@ -52,12 +47,12 @@ impl MainState {
         // let mut canvas = graphics::Canvas::new(ctx, 320, 240, ggez::conf::NumSamples::One)?;
         // canvas.set_filter(graphics::FilterMode::Nearest);
 
-        let null_texture = ctx.null_texture.clone();
-        let batch = SpriteBatch::with_capacity(&mut ctx, null_texture, 4096 * 4);
-        let canvas = Canvas::new(&mut ctx, 320, 240);
+        let null_texture = gfx.null_texture.clone();
+        let batch = SpriteBatch::with_capacity(&mut gfx, null_texture, 4096 * 4);
+        let canvas = Canvas::new(&mut gfx, 320, 240);
 
         Ok(MainState {
-            context: ctx,
+            gfx,
             space,
             bullet_count: 0,
             batch,
@@ -73,7 +68,7 @@ impl MainState {
 }
 
 impl EventHandler for MainState {
-    fn init(ctx: Context) -> Result<Self> {
+    fn init(ctx: Graphics) -> Result<Self> {
         Self::new(ctx)
     }
 
@@ -142,25 +137,24 @@ impl EventHandler for MainState {
     }
 
     fn draw(&mut self) -> Result<()> {
-        self.context
-            .set_projection(Orthographic3::new(0., 320., 0., 240., -1., 1.));
+        let Self {
+            gfx, canvas, batch, ..
+        } = self;
 
-        self.context
-            .begin_pass(&self.canvas.render_pass, PassAction::default());
-        self.context.apply_default_pipeline();
-        self.context.apply_transforms();
-        self.batch.draw(&mut self.context);
-        self.context.end_pass();
+        gfx.set_projection(Orthographic3::new(0., 320., 0., 240., -1., 1.));
 
-        self.context.begin_default_pass(PassAction::default());
-        self.context.apply_default_pipeline();
-        self.context.apply_transforms();
-        self.canvas.draw(
-            &mut self.context,
-            InstanceParam::new().scale(Vector2::new(320., 240.)),
-        );
-        self.context.end_pass();
-        self.context.commit_frame();
+        gfx.begin_pass(&canvas.render_pass, PassAction::default());
+        gfx.apply_default_pipeline();
+        gfx.apply_transforms();
+        batch.draw(gfx);
+        gfx.end_pass();
+
+        gfx.begin_default_pass(PassAction::default());
+        gfx.apply_default_pipeline();
+        gfx.apply_transforms();
+        canvas.draw(gfx, InstanceParam::new().scale(Vector2::new(320., 240.)));
+        gfx.end_pass();
+        gfx.commit_frame();
         // let fps = timer::fps(ctx);
         // let fps_display = graphics::Text::new(format!(
         //     "FPS: {:2.1}, #bullets: {:04}",

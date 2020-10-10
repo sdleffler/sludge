@@ -1,8 +1,8 @@
-use crate::{conf::Conf, graphics::Context as GraphicsContext};
+use crate::{conf::Conf, graphics::Graphics};
 use {anyhow::*, miniquad as mq};
 
 pub trait EventHandler: Sized + 'static {
-    fn init(ctx: GraphicsContext) -> Result<Self>;
+    fn init(ctx: Graphics) -> Result<Self>;
     fn update(&mut self) -> Result<()>;
     fn draw(&mut self) -> Result<()>;
 }
@@ -13,7 +13,7 @@ pub struct MqHandler<H: EventHandler> {
 
 impl<H: EventHandler> MqHandler<H> {
     pub fn new(ctx: mq::Context) -> Self {
-        let context = GraphicsContext::new(ctx).expect("error creating miniquad context");
+        let context = Graphics::new(ctx).expect("error creating miniquad context");
         Self {
             handler: H::init(context).expect("error initializing event handler"),
         }
