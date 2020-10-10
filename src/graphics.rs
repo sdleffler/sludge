@@ -51,6 +51,52 @@ pub mod shader {
 pub use shader::{InstanceProperties, Uniforms, Vertex};
 
 #[derive(Debug)]
+pub struct OwnedBuffer {
+    pub buffer: mq::Buffer,
+}
+
+impl From<mq::Buffer> for OwnedBuffer {
+    fn from(buffer: mq::Buffer) -> Self {
+        Self { buffer }
+    }
+}
+
+impl ops::Deref for OwnedBuffer {
+    type Target = mq::Buffer;
+
+    fn deref(&self) -> &Self::Target {
+        &self.buffer
+    }
+}
+
+impl Drop for OwnedBuffer {
+    fn drop(&mut self) {
+        self.buffer.delete();
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Buffer {
+    pub shared: Arc<OwnedBuffer>,
+}
+
+impl ops::Deref for Buffer {
+    type Target = mq::Buffer;
+
+    fn deref(&self) -> &Self::Target {
+        &self.shared.buffer
+    }
+}
+
+impl From<mq::Buffer> for Buffer {
+    fn from(buffer: mq::Buffer) -> Self {
+        Self {
+            shared: Arc::new(OwnedBuffer::from(buffer)),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct OwnedTexture {
     pub texture: mq::Texture,
 }
@@ -96,6 +142,87 @@ impl From<mq::Texture> for Texture {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct Pipeline {
+    pub mq: mq::Pipeline,
+}
+
+#[derive(Debug, Clone)]
+pub struct RenderPass {
+    pub shared: Arc<mq::RenderPass>,
+}
+
+impl ops::Deref for RenderPass {
+    type Target = mq::RenderPass;
+
+    fn deref(&self) -> &Self::Target {
+        &*self.shared
+    }
+}
+
+impl RenderPass {
+    pub fn new(
+        ctx: &mut Context,
+        color_img: Texture,
+        depth_img: impl Into<Option<Texture>>,
+    ) -> Self {
+        let render_pass =
+            mq::RenderPass::new(&mut ctx.mq, *color_img, depth_img.into().map(|di| *di));
+        let this = Self {
+            shared: Arc::new(render_pass),
+        };
+        ctx.register_render_pass(this.clone());
+        this
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum PassAction {
+    Nothing,
+    Clear {
+        color: Option<LinearColor>,
+        depth: Option<f32>,
+        stencil: Option<i32>,
+    },
+}
+
+impl PassAction {
+    pub fn clear_color(color: Color) -> PassAction {
+        PassAction::Clear {
+            color: Some(color.into()),
+            depth: Some(1.),
+            stencil: None,
+        }
+    }
+}
+
+impl Default for PassAction {
+    fn default() -> PassAction {
+        PassAction::Clear {
+            color: Some(Color::BLACK.into()),
+            depth: Some(1.),
+            stencil: None,
+        }
+    }
+}
+
+impl From<PassAction> for mq::PassAction {
+    fn from(action: PassAction) -> Self {
+        match action {
+            PassAction::Nothing => mq::PassAction::Nothing,
+            PassAction::Clear {
+                color,
+                depth,
+                stencil,
+            } => mq::PassAction::Clear {
+                color: color.map(|c| (c.r, c.g, c.b, c.a)),
+                depth,
+                stencil,
+            },
+        }
+    }
+}
+
 /// A RGBA color in the `sRGB` color space represented as `f32`'s in the range `[0.0-1.0]`
 ///
 /// For convenience, [`WHITE`](constant.WHITE.html) and [`BLACK`](constant.BLACK.html) are provided.
@@ -110,22 +237,6 @@ pub struct Color {
     /// Alpha component
     pub a: f32,
 }
-
-/// White
-pub const WHITE: Color = Color {
-    r: 1.0,
-    g: 1.0,
-    b: 1.0,
-    a: 1.0,
-};
-
-/// Black
-pub const BLACK: Color = Color {
-    r: 0.0,
-    g: 0.0,
-    b: 0.0,
-    a: 1.0,
-};
 
 impl Color {
     pub const WHITE: Color = Color::new(1.0, 1.0, 1.0, 1.0);
@@ -281,6 +392,22 @@ pub struct LinearColor {
     pub b: f32,
     /// Alpha component
     pub a: f32,
+}
+
+impl LinearColor {
+    pub const BLACK: LinearColor = LinearColor {
+        r: 0.,
+        g: 0.,
+        b: 0.,
+        a: 1.,
+    };
+
+    pub const WHITE: LinearColor = LinearColor {
+        r: 1.,
+        g: 1.,
+        b: 1.,
+        a: 1.,
+    };
 }
 
 impl From<Color> for LinearColor {
@@ -447,6 +574,7 @@ pub struct Context {
     pub projection: Matrix4<f32>,
     pub modelview: TransformStack,
     pub quad_bindings: mq::Bindings,
+    pub render_passes: Vec<RenderPass>,
 }
 
 impl Context {
@@ -509,7 +637,21 @@ impl Context {
             projection: Matrix4::identity(),
             modelview: TransformStack::new(),
             quad_bindings,
+            render_passes: Vec::new(),
         })
+    }
+
+    pub(crate) fn register_render_pass(&mut self, pass: RenderPass) {
+        self.render_passes.push(pass);
+    }
+
+    pub(crate) fn expire_render_passes(&mut self) {
+        for pass in self
+            .render_passes
+            .drain_filter(|rp| Arc::strong_count(&rp.shared) == 1)
+        {
+            pass.shared.delete(&mut self.mq);
+        }
     }
 
     pub fn transforms(&mut self) -> &mut TransformStack {
@@ -519,6 +661,38 @@ impl Context {
     pub fn apply_transforms(&mut self) {
         let mvp = self.projection * self.modelview.top();
         self.mq.apply_uniforms(&shader::Uniforms { mvp });
+    }
+
+    pub fn set_projection<M>(&mut self, projection: M)
+    where
+        M: Into<Matrix4<f32>>,
+    {
+        self.projection = projection.into();
+    }
+
+    pub fn apply_default_pipeline(&mut self) {
+        self.mq.apply_pipeline(&self.pipeline);
+    }
+
+    pub fn apply_pipeline(&mut self, pipeline: &Pipeline) {
+        self.mq.apply_pipeline(&pipeline.mq);
+    }
+
+    pub fn commit_frame(&mut self) {
+        self.mq.commit_frame();
+        self.expire_render_passes();
+    }
+
+    pub fn begin_default_pass(&mut self, action: PassAction) {
+        self.mq.begin_default_pass(action.into());
+    }
+
+    pub fn begin_pass(&mut self, pass: &RenderPass, action: PassAction) {
+        self.mq.begin_pass(**pass, mq::PassAction::from(action));
+    }
+
+    pub fn end_pass(&mut self) {
+        self.mq.end_render_pass();
     }
 }
 
@@ -939,14 +1113,14 @@ impl SpriteBatch {
 }
 
 pub struct Canvas {
-    pub render_pass: mq::RenderPass,
+    pub render_pass: RenderPass,
     pub bindings: mq::Bindings,
     pub texture: Texture,
 }
 
 impl Canvas {
     pub fn new(ctx: &mut Context, width: u32, height: u32) -> Self {
-        let color_img = mq::Texture::new_render_texture(
+        let color_img = Texture::from(mq::Texture::new_render_texture(
             &mut ctx.mq,
             mq::TextureParams {
                 width,
@@ -955,8 +1129,8 @@ impl Canvas {
                 filter: mq::FilterMode::Nearest,
                 ..Default::default()
             },
-        );
-        let depth_img = mq::Texture::new_render_texture(
+        ));
+        let depth_img = Texture::from(mq::Texture::new_render_texture(
             &mut ctx.mq,
             mq::TextureParams {
                 width,
@@ -965,9 +1139,9 @@ impl Canvas {
                 filter: mq::FilterMode::Nearest,
                 ..Default::default()
             },
-        );
+        ));
 
-        let render_pass = mq::RenderPass::new(&mut ctx.mq, color_img, depth_img);
+        let render_pass = RenderPass::new(ctx, color_img.clone(), depth_img);
 
         let quad_vertices =
             mq::Buffer::immutable(&mut ctx.mq, mq::BufferType::VertexBuffer, &quad_vertices());
@@ -982,13 +1156,13 @@ impl Canvas {
         let bindings = mq::Bindings {
             vertex_buffers: vec![quad_vertices, instances],
             index_buffer: quad_indices,
-            images: vec![color_img],
+            images: vec![*color_img],
         };
 
         Self {
             render_pass,
             bindings,
-            texture: Texture::from(color_img),
+            texture: color_img,
         }
     }
 

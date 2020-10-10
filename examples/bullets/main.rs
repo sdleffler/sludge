@@ -5,6 +5,7 @@ use {
     sludge::{
         components::Transform,
         ecs::World,
+        event::EventHandler,
         graphics::{Context, *},
         prelude::*,
     },
@@ -71,8 +72,12 @@ impl MainState {
     }
 }
 
-impl mq::EventHandlerFree for MainState {
-    fn update(&mut self) {
+impl EventHandler for MainState {
+    fn init(ctx: Context) -> Result<Self> {
+        Self::new(ctx)
+    }
+
+    fn update(&mut self) -> Result<()> {
         const DT: f32 = 1. / 60.;
         let Self {
             space,
@@ -132,30 +137,30 @@ impl mq::EventHandlerFree for MainState {
         });
 
         space.update().unwrap();
+
+        Ok(())
     }
 
-    fn draw(&mut self) {
+    fn draw(&mut self) -> Result<()> {
         self.context
-            .mq
-            .begin_pass(*self.canvas.render_pass, mq::PassAction::default());
-        self.context.mq.apply_pipeline(&self.context.pipeline);
-        self.context.mq.apply_uniforms(&shader::Uniforms {
-            mvp: *Orthographic3::new(0., 320., 0., 240., 1., -1.).as_matrix(),
-        });
-        self.batch.draw(&mut self.context);
-        self.context.mq.end_render_pass();
+            .set_projection(Orthographic3::new(0., 320., 0., 240., -1., 1.));
 
-        self.context.mq.begin_default_pass(Default::default());
-        self.context.mq.apply_pipeline(&self.context.pipeline);
-        self.context.mq.apply_uniforms(&shader::Uniforms {
-            mvp: *Orthographic3::new(0., 320., 0., 240., 1., -1.).as_matrix(),
-        });
+        self.context
+            .begin_pass(&self.canvas.render_pass, PassAction::default());
+        self.context.apply_default_pipeline();
+        self.context.apply_transforms();
+        self.batch.draw(&mut self.context);
+        self.context.end_pass();
+
+        self.context.begin_default_pass(PassAction::default());
+        self.context.apply_default_pipeline();
+        self.context.apply_transforms();
         self.canvas.draw(
             &mut self.context,
             InstanceParam::new().scale(Vector2::new(320., 240.)),
         );
-        self.context.mq.end_render_pass();
-        self.context.mq.commit_frame();
+        self.context.end_pass();
+        self.context.commit_frame();
         // let fps = timer::fps(ctx);
         // let fps_display = graphics::Text::new(format!(
         //     "FPS: {:2.1}, #bullets: {:04}",
@@ -171,6 +176,7 @@ impl mq::EventHandlerFree for MainState {
         // graphics::clear(ctx, graphics::BLACK);
         // graphics::draw(ctx, &self.canvas, graphics::DrawParam::new())?;
         // graphics::present(ctx)
+        Ok(())
     }
 }
 
@@ -199,15 +205,12 @@ fn main() -> Result<()> {
         .chain(std::io::stdout())
         .apply()?;
 
-    mq::start(
-        mq::conf::Conf {
-            window_title: "Bullets!".to_string(),
-            window_width: 320 * 4,
-            window_height: 240 * 4,
-            ..mq::conf::Conf::default()
-        },
-        |ctx| mq::UserData::free(MainState::new(Context::new(ctx).unwrap()).unwrap()),
-    );
+    sludge::event::run::<MainState>(mq::conf::Conf {
+        window_title: "Bullets!".to_string(),
+        window_width: 320 * 4,
+        window_height: 240 * 4,
+        ..mq::conf::Conf::default()
+    });
 
     // let (mut ctx, mut event_loop) = ggez::ContextBuilder::new("bullets", "Sean Leffler")
     //     .window_setup(ggez::conf::WindowSetup::default().title("Bullets!"))

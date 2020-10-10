@@ -1,4 +1,4 @@
-#![feature(min_const_generics)]
+#![feature(drain_filter)]
 
 use {
     anyhow::*,
@@ -24,6 +24,7 @@ pub mod components;
 pub mod dependency_graph;
 pub mod dispatcher;
 pub mod ecs;
+pub mod event;
 pub mod filesystem;
 pub mod graphics;
 pub mod hierarchy;
