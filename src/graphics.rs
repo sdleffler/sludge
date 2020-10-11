@@ -1,4 +1,7 @@
-use crate::math::*;
+use crate::{
+    math::*,
+    scene_graph::{ObjectBuilder, ObjectId, SceneGraph},
+};
 use {
     anyhow::*,
     derivative::*,
@@ -9,6 +12,7 @@ use {
     miniquad as mq,
     serde::{Deserialize, Serialize},
     std::{
+        io::Read,
         mem, ops,
         sync::{
             atomic::{self, AtomicBool},
@@ -112,11 +116,17 @@ impl From<mq::Buffer> for Buffer {
 #[derive(Debug)]
 pub struct OwnedTexture {
     pub texture: mq::Texture,
+    pub width: u32,
+    pub height: u32,
 }
 
-impl From<mq::Texture> for OwnedTexture {
-    fn from(texture: mq::Texture) -> Self {
-        Self { texture }
+impl OwnedTexture {
+    pub fn from_parts(texture: mq::Texture, width: u32, height: u32) -> Self {
+        Self {
+            texture,
+            width,
+            height,
+        }
     }
 }
 
@@ -125,6 +135,20 @@ impl ops::Deref for OwnedTexture {
 
     fn deref(&self) -> &Self::Target {
         &self.texture
+    }
+}
+
+impl Drawable for OwnedTexture {
+    fn draw(&self, ctx: &mut Graphics, param: InstanceParam) {
+        ctx.quad_bindings.vertex_buffers[1].update(
+            &mut ctx.mq,
+            &[param
+                .scale2(Vector2::new(self.width as f32, self.height as f32))
+                .to_instance_properties()],
+        );
+        ctx.quad_bindings.images[0] = self.texture;
+        ctx.mq.apply_bindings(&ctx.quad_bindings);
+        ctx.mq.draw(0, 6, 1);
     }
 }
 
@@ -139,6 +163,14 @@ pub struct Texture {
     pub shared: Arc<OwnedTexture>,
 }
 
+impl From<OwnedTexture> for Texture {
+    fn from(owned: OwnedTexture) -> Self {
+        Self {
+            shared: Arc::new(owned),
+        }
+    }
+}
+
 impl ops::Deref for Texture {
     type Target = mq::Texture;
 
@@ -147,18 +179,12 @@ impl ops::Deref for Texture {
     }
 }
 
-impl From<mq::Texture> for Texture {
-    fn from(texture: mq::Texture) -> Self {
-        Self {
-            shared: Arc::new(OwnedTexture::from(texture)),
-        }
-    }
-}
-
 impl Texture {
     /// Create a texture from a given buffer of RGBA image data.
     pub fn from_rgba8(ctx: &mut Graphics, width: u16, height: u16, bytes: &[u8]) -> Self {
-        Self::from(mq::Texture::from_rgba8(&mut ctx.mq, width, height, bytes))
+        let tex = mq::Texture::from_rgba8(&mut ctx.mq, width, height, bytes);
+        tex.set_filter(&mut ctx.mq, mq::FilterMode::Nearest);
+        Self::from_parts(tex, width as u32, height as u32)
     }
 
     /// Parse a buffer containing the raw contents of an image file such as a PNG, GIF, etc.
@@ -171,6 +197,23 @@ impl Texture {
             &rgba_image.to_vec(),
         ))
     }
+
+    /// Parse a reader such as a `File` into a texture.
+    pub fn from_reader<R: Read>(ctx: &mut Graphics, reader: &mut R) -> Result<Self> {
+        let mut buf = Vec::new();
+        reader.read_to_end(&mut buf)?;
+        Self::from_memory(ctx, &buf)
+    }
+
+    pub fn from_parts(texture: mq::Texture, width: u32, height: u32) -> Self {
+        Self::from(OwnedTexture::from_parts(texture, width, height))
+    }
+}
+
+impl Drawable for Texture {
+    fn draw(&self, ctx: &mut Graphics, param: InstanceParam) {
+        self.shared.draw(ctx, param);
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -181,6 +224,12 @@ pub struct Pipeline {
 #[derive(Debug, Clone)]
 pub struct RenderPass {
     pub shared: Arc<mq::RenderPass>,
+}
+
+impl AsRef<RenderPass> for RenderPass {
+    fn as_ref(&self) -> &Self {
+        self
+    }
 }
 
 impl ops::Deref for RenderPass {
@@ -230,7 +279,7 @@ impl PassAction {
 impl Default for PassAction {
     fn default() -> PassAction {
         PassAction::Clear {
-            color: Some(Color::BLACK.into()),
+            color: Some(Color::ZEROS.into()),
             depth: Some(1.),
             stencil: None,
         }
@@ -270,6 +319,7 @@ pub struct Color {
 }
 
 impl Color {
+    pub const ZEROS: Color = Color::new(0.0, 0.0, 0.0, 0.0);
     pub const WHITE: Color = Color::new(1.0, 1.0, 1.0, 1.0);
     pub const BLACK: Color = Color::new(0.0, 0.0, 0.0, 1.0);
     pub const RED: Color = Color::new(1.0, 0.0, 0.0, 1.0);
@@ -487,6 +537,90 @@ impl From<LinearColor> for [f32; 4] {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum BlendEquation {
+    Add,
+    Sub,
+    ReverseSub,
+}
+
+impl From<BlendEquation> for mq::Equation {
+    fn from(beq: BlendEquation) -> Self {
+        match beq {
+            BlendEquation::Add => mq::Equation::Add,
+            BlendEquation::Sub => mq::Equation::Subtract,
+            BlendEquation::ReverseSub => mq::Equation::ReverseSubtract,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum BlendFactor {
+    Zero,
+    One,
+    SourceColor,
+    SourceAlpha,
+    DestinationColor,
+    DestinationAlpha,
+    OneMinusSourceColor,
+    OneMinusSourceAlpha,
+    OneMinusDestinationColor,
+    OneMinusDestinationAlpha,
+    SourceAlphaSaturate,
+}
+
+impl From<BlendFactor> for mq::BlendFactor {
+    fn from(bf: BlendFactor) -> Self {
+        use {
+            mq::{BlendFactor as MqBf, BlendValue as MqBv},
+            BlendFactor::*,
+        };
+
+        match bf {
+            Zero => MqBf::Zero,
+            One => MqBf::One,
+            SourceColor => MqBf::Value(MqBv::SourceColor),
+            SourceAlpha => MqBf::Value(MqBv::SourceAlpha),
+            DestinationColor => MqBf::Value(MqBv::DestinationColor),
+            DestinationAlpha => MqBf::Value(MqBv::DestinationAlpha),
+            OneMinusSourceColor => MqBf::OneMinusValue(MqBv::SourceColor),
+            OneMinusSourceAlpha => MqBf::OneMinusValue(MqBv::SourceAlpha),
+            OneMinusDestinationColor => MqBf::OneMinusValue(MqBv::DestinationColor),
+            OneMinusDestinationAlpha => MqBf::OneMinusValue(MqBv::DestinationAlpha),
+            SourceAlphaSaturate => MqBf::SourceAlphaSaturate,
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct BlendMode {
+    eq: BlendEquation,
+    src: BlendFactor,
+    dst: BlendFactor,
+}
+
+impl Default for BlendMode {
+    fn default() -> Self {
+        Self::new(
+            BlendEquation::Add,
+            BlendFactor::SourceAlpha,
+            BlendFactor::OneMinusSourceAlpha,
+        )
+    }
+}
+
+impl BlendMode {
+    pub fn new(eq: BlendEquation, src: BlendFactor, dst: BlendFactor) -> Self {
+        Self { eq, src, dst }
+    }
+}
+
+impl From<BlendMode> for mq::BlendState {
+    fn from(bm: BlendMode) -> Self {
+        mq::BlendState::new(bm.eq.into(), bm.src.into(), bm.dst.into())
+    }
+}
+
 /// Specifies whether a mesh should be drawn
 /// filled or as an outline.
 #[derive(Debug, Copy, Clone)]
@@ -631,7 +765,7 @@ impl Graphics {
             shader::meta(),
         )?;
 
-        let pipeline = mq::Pipeline::new(
+        let pipeline = mq::Pipeline::with_params(
             &mut mq,
             &[
                 mq::BufferLayout::default(),
@@ -649,14 +783,17 @@ impl Graphics {
                 mq::VertexAttribute::with_buffer("a_Color", mq::VertexFormat::Float4, 1),
             ],
             shader,
+            mq::PipelineParams {
+                color_blend: Some(BlendMode::default().into()),
+                ..mq::PipelineParams::default()
+            },
         );
 
-        let null_texture = Texture::from(mq::Texture::from_rgba8(
-            &mut mq,
+        let null_texture = Texture::from_parts(
+            mq::Texture::from_rgba8(&mut mq, 1, 1, &[255, 255, 255, 255]),
             1,
             1,
-            &[255, 255, 255, 255],
-        ));
+        );
 
         let quad_vertices =
             mq::Buffer::immutable(&mut mq, mq::BufferType::VertexBuffer, &quad_vertices());
@@ -724,12 +861,12 @@ impl Graphics {
     }
 
     #[inline]
-    pub fn push_transforms(&mut self, tx: impl Into<Option<Matrix4<f32>>>) {
+    pub fn push_transform(&mut self, tx: impl Into<Option<Matrix4<f32>>>) {
         self.modelview.push(tx);
     }
 
     #[inline]
-    pub fn pop_transforms(&mut self) {
+    pub fn pop_transform(&mut self) {
         self.modelview.pop();
     }
 
@@ -763,8 +900,9 @@ impl Graphics {
     }
 
     #[inline]
-    pub fn begin_pass(&mut self, pass: &RenderPass, action: PassAction) {
-        self.mq.begin_pass(**pass, mq::PassAction::from(action));
+    pub fn begin_pass(&mut self, pass: &impl AsRef<RenderPass>, action: PassAction) {
+        self.mq
+            .begin_pass(**pass.as_ref(), mq::PassAction::from(action));
     }
 
     #[inline]
@@ -773,8 +911,16 @@ impl Graphics {
     }
 
     #[inline]
-    pub fn draw(&mut self, drawable: &impl Drawable, param: impl Into<Option<InstanceParam>>) {
+    pub fn draw<D, P>(&mut self, drawable: &D, param: P)
+    where
+        D: Drawable + ?Sized,
+        P: Into<Option<InstanceParam>>,
+    {
         drawable.draw(self, param.into().unwrap_or_default());
+    }
+
+    pub fn set_blend(&mut self, blend: Option<BlendMode>) {
+        self.mq.set_blend(blend.map(mq::BlendState::from), None);
     }
 }
 
@@ -788,8 +934,9 @@ pub struct Mesh {
     pub len: i32,
 }
 
-impl Mesh {
-    pub fn draw(&self, ctx: &mut Graphics) {
+impl Drawable for Mesh {
+    fn draw(&self, ctx: &mut Graphics, param: InstanceParam) {
+        self.bindings.vertex_buffers[1].update(&mut ctx.mq, &[param.to_instance_properties()]);
         ctx.mq.apply_bindings(&self.bindings);
         ctx.mq.draw(0, self.len, 1);
     }
@@ -949,6 +1096,37 @@ impl MeshBuilder {
         self
     }
 
+    /// Creates a `Mesh` from a raw list of triangles defined from vertices
+    /// and indices.  You may also
+    /// supply an `Image` to use as a texture, if you pass `None`, it will
+    /// just use a pure white texture.
+    ///
+    /// This is the most primitive mesh-creation method, but allows you full
+    /// control over the tesselation and texturing.  It has the same constraints
+    /// as `Mesh::from_raw()`.
+    pub fn raw<V, T>(&mut self, verts: &[V], indices: &[u16], texture: T) -> &mut Self
+    where
+        V: Into<Vertex> + Clone,
+        T: Into<Option<Texture>>,
+    {
+        assert!(self.buffer.vertices.len() + verts.len() < (std::u16::MAX as usize));
+        assert!(self.buffer.indices.len() + indices.len() < (std::u16::MAX as usize));
+        let next_idx = self.buffer.vertices.len() as u16;
+        // Can we remove the clone here?
+        // I can't find a way to, because `into()` consumes its source and
+        // `Borrow` or `AsRef` aren't really right.
+        let vertices = verts.iter().cloned().map(|v: V| -> Vertex { v.into() });
+        let indices = indices.iter().map(|i| (*i) + next_idx);
+        self.buffer.vertices.extend(vertices);
+        self.buffer.indices.extend(indices);
+
+        if let Some(tex) = texture.into() {
+            self.texture = tex;
+        }
+
+        self
+    }
+
     pub fn build(&self, ctx: &mut Graphics) -> Mesh {
         let vertex_buffer = mq::Buffer::immutable(
             &mut ctx.mq,
@@ -962,10 +1140,16 @@ impl MeshBuilder {
             &self.buffer.indices,
         );
 
+        let instance = mq::Buffer::stream(
+            &mut ctx.mq,
+            mq::BufferType::VertexBuffer,
+            mem::size_of::<InstanceProperties>(),
+        );
+
         Mesh {
             texture: self.texture.clone(),
             bindings: mq::Bindings {
-                vertex_buffers: vec![vertex_buffer],
+                vertex_buffers: vec![vertex_buffer, instance],
                 index_buffer,
                 images: vec![*self.texture],
             },
@@ -998,7 +1182,12 @@ impl InstanceParam {
     }
 
     #[inline]
-    pub fn translate(self, v: Vector2<f32>) -> Self {
+    pub fn src(self, src: Box2<f32>) -> Self {
+        Self { src, ..self }
+    }
+
+    #[inline]
+    pub fn translate2(self, v: Vector2<f32>) -> Self {
         Self {
             tx: self.tx * Translation3::new(v.x, v.y, 0.),
             ..self
@@ -1006,7 +1195,7 @@ impl InstanceParam {
     }
 
     #[inline]
-    pub fn scale(self, v: Vector2<f32>) -> Self {
+    pub fn scale2(self, v: Vector2<f32>) -> Self {
         Self {
             tx: self.tx
                 * Transform3::from_matrix_unchecked(Matrix4::from_diagonal(&v.push(1.).push(1.))),
@@ -1017,9 +1206,9 @@ impl InstanceParam {
     #[inline]
     pub fn to_instance_properties(&self) -> InstanceProperties {
         let mins = self.src.mins;
-        let maxs = self.src.mins + self.src.extent;
+        let extent = self.src.extent;
         InstanceProperties {
-            src: Vector4::new(mins.x, mins.y, maxs.x, maxs.y),
+            src: Vector4::new(mins.x, mins.y, extent.x, extent.y),
             tx: *self.tx.matrix(),
             color: LinearColor::from(self.color),
         }
@@ -1070,8 +1259,7 @@ pub struct SpriteBatch {
     sprites: Arena<InstanceParam>,
     inner: RwLock<SpriteBatchInner>,
     dirty: AtomicBool,
-    /// Shared reference to keep the texture alive.
-    _texture: Texture,
+    texture: Texture,
 }
 
 impl ops::Index<SpriteIdx> for SpriteBatch {
@@ -1114,7 +1302,7 @@ impl SpriteBatch {
             }
             .into(),
             dirty: AtomicBool::new(true),
-            _texture: texture,
+            texture: texture,
         }
     }
 
@@ -1144,11 +1332,17 @@ impl SpriteBatch {
         let inner = &mut *self.inner.write().unwrap();
 
         inner.instances.clear();
-        inner.instances.extend(
-            self.sprites
-                .iter()
-                .map(|(_, param)| param.to_instance_properties()),
-        );
+        inner
+            .instances
+            .extend(self.sprites.iter().map(|(_, param)| {
+                param
+                    .scale2(param.src.extent)
+                    .scale2(Vector2::new(
+                        self.texture.width as f32,
+                        self.texture.height as f32,
+                    ))
+                    .to_instance_properties()
+            }));
 
         if inner.instances.len() > inner.capacity {
             inner.capacity = inner.capacity * 2;
@@ -1179,7 +1373,7 @@ impl Drawable for SpriteBatch {
         ctx.mq.apply_bindings(&inner.bindings);
         ctx.apply_transforms();
         ctx.mq.draw(0, 6, inner.instances.len() as i32);
-        ctx.pop_transforms();
+        ctx.pop_transform();
         ctx.apply_transforms();
     }
 }
@@ -1187,67 +1381,93 @@ impl Drawable for SpriteBatch {
 #[derive(Debug)]
 pub struct Canvas {
     pub render_pass: RenderPass,
-    pub bindings: mq::Bindings,
-    pub texture: Texture,
+    pub color_buffer: Texture,
+    pub depth_buffer: Texture,
+}
+
+impl AsRef<RenderPass> for Canvas {
+    fn as_ref(&self) -> &RenderPass {
+        &self.render_pass
+    }
 }
 
 impl Canvas {
     pub fn new(ctx: &mut Graphics, width: u32, height: u32) -> Self {
-        let color_img = Texture::from(mq::Texture::new_render_texture(
-            &mut ctx.mq,
-            mq::TextureParams {
-                width,
-                height,
-                format: mq::TextureFormat::RGBA8,
-                filter: mq::FilterMode::Nearest,
-                ..Default::default()
-            },
-        ));
-        let depth_img = Texture::from(mq::Texture::new_render_texture(
-            &mut ctx.mq,
-            mq::TextureParams {
-                width,
-                height,
-                format: mq::TextureFormat::Depth,
-                filter: mq::FilterMode::Nearest,
-                ..Default::default()
-            },
-        ));
-
-        let render_pass = RenderPass::new(ctx, color_img.clone(), depth_img);
-
-        let quad_vertices =
-            mq::Buffer::immutable(&mut ctx.mq, mq::BufferType::VertexBuffer, &quad_vertices());
-        let quad_indices =
-            mq::Buffer::immutable(&mut ctx.mq, mq::BufferType::IndexBuffer, &quad_indices());
-        let instances = mq::Buffer::stream(
-            &mut ctx.mq,
-            mq::BufferType::VertexBuffer,
-            mem::size_of::<InstanceProperties>(),
+        let color_img = Texture::from_parts(
+            mq::Texture::new_render_texture(
+                &mut ctx.mq,
+                mq::TextureParams {
+                    width,
+                    height,
+                    format: mq::TextureFormat::RGBA8,
+                    filter: mq::FilterMode::Nearest,
+                    ..Default::default()
+                },
+            ),
+            width,
+            height,
         );
 
-        let bindings = mq::Bindings {
-            vertex_buffers: vec![quad_vertices, instances],
-            index_buffer: quad_indices,
-            images: vec![*color_img],
-        };
+        let depth_img = Texture::from_parts(
+            mq::Texture::new_render_texture(
+                &mut ctx.mq,
+                mq::TextureParams {
+                    width,
+                    height,
+                    format: mq::TextureFormat::Depth,
+                    filter: mq::FilterMode::Nearest,
+                    ..Default::default()
+                },
+            ),
+            width,
+            height,
+        );
+
+        let render_pass = RenderPass::new(ctx, color_img.clone(), depth_img.clone());
 
         Self {
             render_pass,
-            bindings,
-            texture: color_img,
+            color_buffer: color_img,
+            depth_buffer: depth_img,
         }
     }
 }
 
 impl Drawable for Canvas {
     fn draw(&self, ctx: &mut Graphics, instance: InstanceParam) {
-        self.bindings.vertex_buffers[1].update(&mut ctx.mq, &[instance.to_instance_properties()]);
-        ctx.mq.apply_bindings(&self.bindings);
-        ctx.mq.draw(0, 6, 1);
+        self.color_buffer.draw(ctx, instance);
     }
 }
 
 pub trait Drawable {
     fn draw(&self, ctx: &mut Graphics, instance: InstanceParam);
+}
+
+#[derive(Debug)]
+pub struct DrawableGraph<T: Drawable> {
+    graph: SceneGraph<T>,
+}
+
+impl<T: Drawable> DrawableGraph<T> {
+    pub fn new() -> Self {
+        Self {
+            graph: SceneGraph::new(),
+        }
+    }
+
+    pub fn insert(&mut self, object: T) -> ObjectBuilder<T> {
+        self.graph.insert(object)
+    }
+
+    pub fn remove(&mut self, object_id: ObjectId) -> Option<T> {
+        self.graph.remove(object_id)
+    }
+}
+
+impl<T: Drawable> Drawable for DrawableGraph<T> {
+    fn draw(&self, ctx: &mut Graphics, instance: InstanceParam) {
+        for drawable in self.graph.sorted() {
+            ctx.draw(drawable, instance);
+        }
+    }
 }

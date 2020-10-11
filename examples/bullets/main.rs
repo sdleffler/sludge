@@ -104,7 +104,7 @@ impl EventHandler for MainState {
                             ..Spatial::new()
                         },
                         SpriteIndex {
-                            idx: batch.insert(InstanceParam::default().translate(pos)),
+                            idx: batch.insert(InstanceParam::default().translate2(pos)),
                         },
                     ));
                     *bullet_count += 1;
@@ -126,7 +126,7 @@ impl EventHandler for MainState {
                     *tx.local_mut() = na::convert(na::Translation3::from(spatial.pos.push(0.)));
                 }
 
-                batch[sprite_index.idx] = InstanceParam::default().translate(spatial.pos);
+                batch[sprite_index.idx] = InstanceParam::default().translate2(spatial.pos);
             }
             //}
         });
@@ -152,7 +152,10 @@ impl EventHandler for MainState {
         gfx.begin_default_pass(PassAction::default());
         gfx.apply_default_pipeline();
         gfx.apply_transforms();
-        gfx.draw(canvas, InstanceParam::new().scale(Vector2::new(320., 240.)));
+        gfx.draw(
+            canvas,
+            InstanceParam::new().scale2(Vector2::new(320., 240.)),
+        );
         gfx.end_pass();
         gfx.commit_frame();
         // let fps = timer::fps(ctx);

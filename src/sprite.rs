@@ -122,6 +122,12 @@ impl ops::Index<FrameId> for SpriteSheet {
 }
 
 impl SpriteSheet {
+    pub fn from_reader<R: Read>(reader: &mut R) -> Result<Self> {
+        let mut buf = String::new();
+        reader.read_to_string(&mut buf)?;
+        Self::from_json(&buf)
+    }
+
     pub fn from_json(s: &str) -> Result<Self> {
         let spritesheet_data = serde_json::from_str::<SpritesheetData>(s)?;
 

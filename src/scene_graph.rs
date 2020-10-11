@@ -1,7 +1,27 @@
 use {
-    std::{mem, ops},
+    std::{
+        mem, ops,
+        sync::{
+            atomic::{self, AtomicBool},
+            RwLock, RwLockReadGuard,
+        },
+    },
     thunderdome::{Arena, Index},
 };
+
+pub struct SceneGraphIter<'a, T> {
+    _outer: RwLockReadGuard<'a, SceneGraphInner>,
+    inner: ::std::slice::Iter<'a, Index>,
+    objects: &'a Arena<Node<T>>,
+}
+
+impl<'a, T> Iterator for SceneGraphIter<'a, T> {
+    type Item = &'a T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next().map(|&index| &self.objects[index].value)
+    }
+}
 
 pub struct ObjectBuilder<'a, T> {
     index: Index,
@@ -51,15 +71,18 @@ struct Node<T> {
 }
 
 #[derive(Debug)]
-pub struct SceneGraph<T> {
-    objects: Arena<Node<T>>,
+struct SceneGraphInner {
     roots: Vec<Index>,
     sorted: Vec<Index>,
+    buf: Vec<Index>,
+    stack: Vec<Index>,
+}
 
-    scratch_buf: Vec<Index>,
-    scratch_stack: Vec<Index>,
-
-    dirty: bool,
+#[derive(Debug)]
+pub struct SceneGraph<T> {
+    objects: Arena<Node<T>>,
+    inner: RwLock<SceneGraphInner>,
+    dirty: AtomicBool,
 }
 
 impl<T> ops::Index<ObjectId> for SceneGraph<T> {
@@ -80,13 +103,15 @@ impl<T> SceneGraph<T> {
     pub fn new() -> Self {
         Self {
             objects: Arena::new(),
-            roots: Vec::new(),
-            sorted: Vec::new(),
+            inner: SceneGraphInner {
+                roots: Vec::new(),
+                sorted: Vec::new(),
 
-            scratch_buf: Vec::new(),
-            scratch_stack: Vec::new(),
-
-            dirty: true,
+                buf: Vec::new(),
+                stack: Vec::new(),
+            }
+            .into(),
+            dirty: AtomicBool::new(true),
         }
     }
 
@@ -98,7 +123,7 @@ impl<T> SceneGraph<T> {
             children: vec![],
         });
 
-        self.dirty = true;
+        *self.dirty.get_mut() = true;
 
         ObjectBuilder { index, graph: self }
     }
@@ -119,20 +144,28 @@ impl<T> SceneGraph<T> {
             parent_node.children.remove(i);
         }
 
-        self.dirty = true;
+        *self.dirty.get_mut() = true;
 
         Some(node.value)
     }
 
-    pub fn sort(&mut self) {
+    pub fn sort(&self) {
         let Self {
             objects,
-            sorted,
-            roots,
-            scratch_buf: buf,
-            scratch_stack: stack,
+            inner,
             dirty,
         } = self;
+
+        let SceneGraphInner {
+            roots,
+            sorted,
+            stack,
+            buf,
+        } = &mut *inner.write().unwrap();
+
+        if !dirty.load(atomic::Ordering::Acquire) {
+            return;
+        }
 
         roots.clear();
         for (index, node) in objects.iter() {
@@ -154,21 +187,31 @@ impl<T> SceneGraph<T> {
             stack.extend(buf.drain(..).rev());
         }
 
-        *dirty = false;
+        dirty.store(false, atomic::Ordering::Release);
     }
 
-    pub fn sorted(&mut self) -> impl Iterator<Item = &T> + '_ {
-        if self.dirty {
+    pub fn sorted(&self) -> SceneGraphIter<T> {
+        if self.dirty.load(atomic::Ordering::Relaxed) {
             self.sort();
         }
 
-        let Self {
-            ref objects,
-            ref sorted,
-            ..
-        } = self;
+        let Self { objects, inner, .. } = self;
+        let sorted = inner.read().unwrap();
+        // Extend the lifetime of the iterator to the lifetime
+        // of the read guard. Safe because we are guaranteed
+        // nothing will move; there are immutable references
+        // to the inner scene graph which are guaranteed to outlive
+        // the iterator and read guard.
+        let iter = unsafe {
+            let inner_ptr = &*sorted as *const SceneGraphInner;
+            (*inner_ptr).sorted.iter()
+        };
 
-        sorted.iter().map(move |&index| &objects[index].value)
+        SceneGraphIter {
+            _outer: sorted,
+            inner: iter,
+            objects,
+        }
     }
 }
 

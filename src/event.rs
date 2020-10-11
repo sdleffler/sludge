@@ -2,6 +2,7 @@ use crate::{
     conf::Conf,
     graphics::Graphics,
     input::{KeyCode, KeyMods, MouseButton},
+    SludgeResultExt,
 };
 use {anyhow::*, miniquad as mq};
 
@@ -24,9 +25,13 @@ pub struct MqHandler<H: EventHandler> {
 
 impl<H: EventHandler> MqHandler<H> {
     pub fn new(ctx: mq::Context) -> Self {
-        let context = Graphics::new(ctx).expect("error creating miniquad context");
+        let context = Graphics::new(ctx)
+            .log_error_err(module_path!())
+            .expect("error creating miniquad context");
         Self {
-            handler: H::init(context).expect("error initializing event handler"),
+            handler: H::init(context)
+                .log_error_err(module_path!())
+                .expect("error initializing event handler"),
         }
     }
 }
