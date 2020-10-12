@@ -1,6 +1,5 @@
 use crate::{
-    ecs::{ScContext, SmartComponent},
-    graphics::{Drawable, Graphics, InstanceParam},
+    graphics::{Drawable, DrawableAny, DrawableId, Graphics, InstanceParam},
     math::*,
 };
 use {
@@ -18,61 +17,15 @@ use {
     thunderdome::{Arena, Index},
 };
 
-/// Shorthand trait for types that are `Drawable` and `Any`, as well as
-/// `Send + Sync`. This is blanket-impl'd and you should never have to implement
-/// it manually.
-pub trait DrawableAny: Drawable + Any + Send + Sync {
-    #[doc(hidden)]
-    fn as_any(&self) -> &dyn Any;
+pub type DrawableNodeId<T> = DrawableId<T, DrawableGraph>;
 
-    #[doc(hidden)]
-    fn as_any_mut(&mut self) -> &mut dyn Any;
-
-    #[doc(hidden)]
-    fn to_box_any(self: Box<Self>) -> Box<dyn Any>;
-
-    #[doc(hidden)]
-    fn as_drawable(&self) -> &dyn Drawable;
-}
-
-impl<T: Drawable + Any + Send + Sync> DrawableAny for T {
-    fn as_any(&self) -> &dyn Any {
-        self as &dyn Any
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self as &mut dyn Any
-    }
-
-    fn to_box_any(self: Box<Self>) -> Box<dyn Any> {
-        self
-    }
-
-    fn as_drawable(&self) -> &dyn Drawable {
-        self as &dyn Drawable
-    }
-}
-
-#[derive(Debug)]
-pub struct DrawableId<T: DrawableAny + ?Sized>(Index, PhantomData<T>);
-
-impl<T: DrawableAny + ?Sized> Copy for DrawableId<T> {}
-impl<T: DrawableAny + ?Sized> Clone for DrawableId<T> {
-    #[inline]
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<'a, T: DrawableAny> SmartComponent<ScContext<'a>> for DrawableId<T> {}
-
-pub struct SceneGraphIter<'a> {
+pub struct DrawableGraphIter<'a> {
     _outer: RwLockReadGuard<'a, SceneGraphInner>,
     inner: ::std::slice::Iter<'a, Index>,
     objects: &'a Arena<Node>,
 }
 
-impl<'a> Iterator for SceneGraphIter<'a> {
+impl<'a> Iterator for DrawableGraphIter<'a> {
     type Item = &'a dyn DrawableAny;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -94,7 +47,7 @@ impl<'a, T: DrawableAny> DrawableNodeBuilder<'a, T> {
         self
     }
 
-    pub fn parent<U: DrawableAny>(&mut self, index: DrawableId<U>) -> &mut Self {
+    pub fn parent<U: DrawableAny>(&mut self, index: DrawableNodeId<U>) -> &mut Self {
         let parent_node = &mut self.graph.objects[index.0];
         if let Err(i) = parent_node.children.binary_search(&self.index) {
             parent_node.children.insert(i, self.index);
@@ -114,8 +67,8 @@ impl<'a, T: DrawableAny> DrawableNodeBuilder<'a, T> {
         self
     }
 
-    pub fn get(&self) -> DrawableId<T> {
-        DrawableId(self.index, PhantomData)
+    pub fn get(&self) -> DrawableNodeId<T> {
+        DrawableId::new(self.index)
     }
 }
 
@@ -142,16 +95,16 @@ pub struct DrawableGraph {
     y_sort: bool,
 }
 
-impl<T: DrawableAny> ops::Index<DrawableId<T>> for DrawableGraph {
+impl<T: DrawableAny> ops::Index<DrawableNodeId<T>> for DrawableGraph {
     type Output = T;
 
-    fn index(&self, i: DrawableId<T>) -> &Self::Output {
+    fn index(&self, i: DrawableNodeId<T>) -> &Self::Output {
         self.objects[i.0].value.as_any().downcast_ref().unwrap()
     }
 }
 
-impl<T: DrawableAny> ops::IndexMut<DrawableId<T>> for DrawableGraph {
-    fn index_mut(&mut self, i: DrawableId<T>) -> &mut Self::Output {
+impl<T: DrawableAny> ops::IndexMut<DrawableNodeId<T>> for DrawableGraph {
+    fn index_mut(&mut self, i: DrawableNodeId<T>) -> &mut Self::Output {
         if self.y_sort {
             *self.dirty.get_mut() = true;
         }
@@ -198,7 +151,7 @@ impl DrawableGraph {
         }
     }
 
-    pub fn remove<T: DrawableAny>(&mut self, object: DrawableId<T>) -> Option<T> {
+    pub fn remove<T: DrawableAny>(&mut self, object: DrawableNodeId<T>) -> Option<T> {
         let node = self.objects.remove(object.0)?;
 
         for child in node.children {
@@ -281,7 +234,7 @@ impl DrawableGraph {
         dirty.store(false, atomic::Ordering::Release);
     }
 
-    pub fn sorted(&self) -> SceneGraphIter {
+    pub fn sorted(&self) -> DrawableGraphIter {
         if self.dirty.load(atomic::Ordering::Relaxed) {
             self.sort();
         }
@@ -298,7 +251,7 @@ impl DrawableGraph {
             (*inner_ptr).sorted.iter()
         };
 
-        SceneGraphIter {
+        DrawableGraphIter {
             _outer: sorted,
             inner: iter,
             objects,

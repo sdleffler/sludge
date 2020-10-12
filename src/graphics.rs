@@ -12,7 +12,12 @@ use {
     miniquad as mq,
     serde::{Deserialize, Serialize},
     std::{
+        any::{self, Any},
+        cmp::Ordering,
+        fmt,
+        hash::{Hash, Hasher},
         io::Read,
+        marker::PhantomData,
         mem, ops,
         sync::{
             atomic::{self, AtomicBool},
@@ -23,6 +28,7 @@ use {
 };
 
 pub mod drawable_graph;
+pub mod sorted_layer;
 
 pub mod shader {
     use super::*;
@@ -62,8 +68,9 @@ pub mod shader {
 }
 
 pub use {
-    drawable_graph::{DrawableAny, DrawableGraph, DrawableId, DrawableNodeBuilder},
+    drawable_graph::{DrawableGraph, DrawableNodeBuilder, DrawableNodeId},
     shader::{InstanceProperties, Uniforms, Vertex},
+    sorted_layer::{SortedLayer, SortedLayerId},
 };
 
 #[derive(Debug)]
@@ -149,6 +156,7 @@ impl Drawable for OwnedTexture {
             &mut ctx.mq,
             &[param
                 .scale2(Vector2::new(self.width as f32, self.height as f32))
+                .scale2(param.src.extent)
                 .to_instance_properties()],
         );
         ctx.quad_bindings.images[0] = self.texture;
@@ -1550,11 +1558,123 @@ impl Drawable for Sprite {
     }
 
     fn aabb(&self) -> AABB<f32> {
-        self.params.transform_aabb(&self.texture.aabb())
+        let texture_aabb = self.texture.aabb();
+        self.params.transform_aabb(&AABB::new(
+            texture_aabb.mins,
+            Point2::new(
+                texture_aabb.maxs.x * self.params.src.extent.x,
+                texture_aabb.maxs.y * self.params.src.extent.y,
+            ),
+        ))
     }
 }
 
 pub trait Drawable: 'static {
     fn draw(&self, ctx: &mut Graphics, instance: InstanceParam);
     fn aabb(&self) -> AABB<f32>;
+}
+
+/// Shorthand trait for types that are `Drawable` and `Any`, as well as
+/// `Send + Sync`. This is blanket-impl'd and you should never have to implement
+/// it manually.
+pub trait DrawableAny: Drawable + Any + Send + Sync {
+    #[doc(hidden)]
+    fn as_any(&self) -> &dyn Any;
+
+    #[doc(hidden)]
+    fn as_any_mut(&mut self) -> &mut dyn Any;
+
+    #[doc(hidden)]
+    fn to_box_any(self: Box<Self>) -> Box<dyn Any>;
+
+    #[doc(hidden)]
+    fn as_drawable(&self) -> &dyn Drawable;
+}
+
+impl<T: Drawable + Any + Send + Sync> DrawableAny for T {
+    fn as_any(&self) -> &dyn Any {
+        self as &dyn Any
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self as &mut dyn Any
+    }
+
+    fn to_box_any(self: Box<Self>) -> Box<dyn Any> {
+        self
+    }
+
+    fn as_drawable(&self) -> &dyn Drawable {
+        self as &dyn Drawable
+    }
+}
+
+impl dyn DrawableAny {
+    #[doc(hidden)]
+    fn downcast<T: Any>(self: Box<Self>) -> Option<T> {
+        Box::<dyn Any>::downcast(self.to_box_any())
+            .map(|boxed| *boxed)
+            .ok()
+    }
+}
+
+pub struct DrawableId<T: DrawableAny + ?Sized, C>(
+    pub(crate) Index,
+    pub(crate) PhantomData<T>,
+    pub(crate) PhantomData<C>,
+);
+
+impl<T: DrawableAny + ?Sized, C> fmt::Debug for DrawableId<T, C> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple(&format!("DrawableId<{}>", any::type_name::<C>()))
+            .field(&self.0)
+            .finish()
+    }
+}
+
+impl<T: DrawableAny + ?Sized, C> Copy for DrawableId<T, C> {}
+impl<T: DrawableAny + ?Sized, C> Clone for DrawableId<T, C> {
+    #[inline]
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T: DrawableAny + ?Sized, C> PartialEq for DrawableId<T, C> {
+    fn eq(&self, rhs: &Self) -> bool {
+        self.0 == rhs.0
+    }
+}
+
+impl<T: DrawableAny + ?Sized, C> Eq for DrawableId<T, C> {}
+
+impl<T: DrawableAny + ?Sized, C> PartialOrd for DrawableId<T, C> {
+    fn partial_cmp(&self, rhs: &Self) -> Option<Ordering> {
+        Some(self.0.cmp(&rhs.0))
+    }
+}
+
+impl<T: DrawableAny + ?Sized, C> Ord for DrawableId<T, C> {
+    fn cmp(&self, rhs: &Self) -> Ordering {
+        self.0.cmp(&rhs.0)
+    }
+}
+
+impl<T: DrawableAny + ?Sized, C> Hash for DrawableId<T, C> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.hash(state);
+    }
+}
+
+impl<'a, T, C> SmartComponent<ScContext<'a>> for DrawableId<T, C>
+where
+    T: DrawableAny,
+    C: Send + Sync + 'static,
+{
+}
+
+impl<T: DrawableAny + ?Sized, C> DrawableId<T, C> {
+    pub(crate) fn new(index: Index) -> Self {
+        Self(index, PhantomData, PhantomData)
+    }
 }
