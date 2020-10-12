@@ -1,6 +1,6 @@
 use crate::{
+    ecs::{ScContext, SmartComponent},
     math::*,
-    scene_graph::{ObjectBuilder, ObjectId, SceneGraph},
 };
 use {
     anyhow::*,
@@ -21,6 +21,8 @@ use {
     },
     thunderdome::{Arena, Index},
 };
+
+pub mod drawable_graph;
 
 pub mod shader {
     use super::*;
@@ -45,7 +47,7 @@ pub mod shader {
     #[derive(Debug, Clone, Copy)]
     #[repr(C)]
     pub struct Vertex {
-        pub pos: Vector2<f32>,
+        pub pos: Vector3<f32>,
         pub uv: Vector2<f32>,
         pub color: LinearColor,
     }
@@ -59,7 +61,10 @@ pub mod shader {
     }
 }
 
-pub use shader::{InstanceProperties, Uniforms, Vertex};
+pub use {
+    drawable_graph::{DrawableAny, DrawableGraph, DrawableId, DrawableNodeBuilder},
+    shader::{InstanceProperties, Uniforms, Vertex},
+};
 
 #[derive(Debug)]
 pub struct OwnedBuffer {
@@ -150,6 +155,13 @@ impl Drawable for OwnedTexture {
         ctx.mq.apply_bindings(&ctx.quad_bindings);
         ctx.mq.draw(0, 6, 1);
     }
+
+    fn aabb(&self) -> AABB<f32> {
+        AABB::new(
+            Point2::origin(),
+            Point2::new(self.width as f32, self.height as f32),
+        )
+    }
 }
 
 impl Drop for OwnedTexture {
@@ -213,6 +225,10 @@ impl Texture {
 impl Drawable for Texture {
     fn draw(&self, ctx: &mut Graphics, param: InstanceParam) {
         self.shared.draw(ctx, param);
+    }
+
+    fn aabb(&self) -> AABB<f32> {
+        self.shared.aabb()
     }
 }
 
@@ -652,7 +668,7 @@ impl t::BasicVertexConstructor<Vertex> for VertexBuilder {
     #[inline]
     fn new_vertex(&mut self, point: Point) -> Vertex {
         Vertex {
-            pos: Vector2::new(point.x, point.y),
+            pos: Vector3::new(point.x, point.y, 0.),
             uv: Vector2::new(point.x, point.y),
             color: self.color,
         }
@@ -663,7 +679,7 @@ impl t::FillVertexConstructor<Vertex> for VertexBuilder {
     #[inline]
     fn new_vertex(&mut self, point: Point, _attributes: t::FillAttributes) -> Vertex {
         Vertex {
-            pos: Vector2::new(point.x, point.y),
+            pos: Vector3::new(point.x, point.y, 0.),
             uv: Vector2::new(point.x, point.y),
             color: self.color,
         }
@@ -674,7 +690,7 @@ impl t::StrokeVertexConstructor<Vertex> for VertexBuilder {
     #[inline]
     fn new_vertex(&mut self, point: Point, _attributes: t::StrokeAttributes) -> Vertex {
         Vertex {
-            pos: Vector2::new(point.x, point.y),
+            pos: Vector3::new(point.x, point.y, 0.),
             uv: Vector2::zeros(),
             color: self.color,
         }
@@ -775,7 +791,7 @@ impl Graphics {
                 },
             ],
             &[
-                mq::VertexAttribute::with_buffer("a_Pos", mq::VertexFormat::Float2, 0),
+                mq::VertexAttribute::with_buffer("a_Pos", mq::VertexFormat::Float3, 0),
                 mq::VertexAttribute::with_buffer("a_Uv", mq::VertexFormat::Float2, 0),
                 mq::VertexAttribute::with_buffer("a_VertColor", mq::VertexFormat::Float4, 0),
                 mq::VertexAttribute::with_buffer("a_Src", mq::VertexFormat::Float4, 1),
@@ -785,6 +801,8 @@ impl Graphics {
             shader,
             mq::PipelineParams {
                 color_blend: Some(BlendMode::default().into()),
+                depth_test: mq::Comparison::LessOrEqual,
+                depth_write: true,
                 ..mq::PipelineParams::default()
             },
         );
@@ -932,6 +950,7 @@ pub struct Mesh {
     pub texture: Texture,
     pub bindings: mq::Bindings,
     pub len: i32,
+    pub aabb: AABB<f32>,
 }
 
 impl Drawable for Mesh {
@@ -939,6 +958,10 @@ impl Drawable for Mesh {
         self.bindings.vertex_buffers[1].update(&mut ctx.mq, &[param.to_instance_properties()]);
         ctx.mq.apply_bindings(&self.bindings);
         ctx.mq.draw(0, self.len, 1);
+    }
+
+    fn aabb(&self) -> AABB<f32> {
+        self.aabb
     }
 }
 
@@ -1146,6 +1169,15 @@ impl MeshBuilder {
             mem::size_of::<InstanceProperties>(),
         );
 
+        let aabb = AABB::from_points(
+            &self
+                .buffer
+                .vertices
+                .iter()
+                .map(|v| Point2::from(v.pos.xy()))
+                .collect::<Vec<_>>(),
+        );
+
         Mesh {
             texture: self.texture.clone(),
             bindings: mq::Bindings {
@@ -1154,6 +1186,7 @@ impl MeshBuilder {
                 images: vec![*self.texture],
             },
             len: self.buffer.indices.len() as i32,
+            aabb,
         }
     }
 }
@@ -1204,6 +1237,14 @@ impl InstanceParam {
     }
 
     #[inline]
+    pub fn translate3(self, v: Vector3<f32>) -> Self {
+        Self {
+            tx: self.tx * Translation3::from(v),
+            ..self
+        }
+    }
+
+    #[inline]
     pub fn to_instance_properties(&self) -> InstanceProperties {
         let mins = self.src.mins;
         let extent = self.src.extent;
@@ -1213,27 +1254,42 @@ impl InstanceParam {
             color: LinearColor::from(self.color),
         }
     }
+
+    #[inline]
+    pub fn transform_aabb(&self, aabb: &AABB<f32>) -> AABB<f32> {
+        let tl = Point3::new(aabb.mins.x, aabb.mins.y, 0.);
+        let tr = Point3::new(aabb.maxs.x, aabb.mins.y, 0.);
+        let br = Point3::new(aabb.maxs.x, aabb.maxs.y, 0.);
+        let bl = Point3::new(aabb.mins.x, aabb.maxs.y, 0.);
+
+        AABB::from_points(&[
+            self.tx.transform_point(&tl).xy(),
+            self.tx.transform_point(&tr).xy(),
+            self.tx.transform_point(&br).xy(),
+            self.tx.transform_point(&bl).xy(),
+        ])
+    }
 }
 
 fn quad_vertices() -> [Vertex; 4] {
     [
         Vertex {
-            pos: Vector2::new(0., 0.),
+            pos: Vector3::new(0., 0., 0.),
             uv: Vector2::new(0., 0.),
             color: Color::WHITE.into(),
         },
         Vertex {
-            pos: Vector2::new(1., 0.),
+            pos: Vector3::new(1., 0., 0.),
             uv: Vector2::new(1., 0.),
             color: Color::WHITE.into(),
         },
         Vertex {
-            pos: Vector2::new(1., 1.),
+            pos: Vector3::new(1., 1., 0.),
             uv: Vector2::new(1., 1.),
             color: Color::WHITE.into(),
         },
         Vertex {
-            pos: Vector2::new(0., 1.),
+            pos: Vector3::new(0., 1., 0.),
             uv: Vector2::new(0., 1.),
             color: Color::WHITE.into(),
         },
@@ -1246,6 +1302,8 @@ fn quad_indices() -> [u16; 6] {
 
 #[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub struct SpriteIdx(Index);
+
+impl<'a> SmartComponent<ScContext<'a>> for SpriteIdx {}
 
 #[derive(Debug)]
 struct SpriteBatchInner {
@@ -1302,7 +1360,7 @@ impl SpriteBatch {
             }
             .into(),
             dirty: AtomicBool::new(true),
-            texture: texture,
+            texture,
         }
     }
 
@@ -1359,6 +1417,11 @@ impl SpriteBatch {
 
         self.dirty.store(false, atomic::Ordering::Relaxed);
     }
+
+    #[inline]
+    pub fn texture(&self) -> &Texture {
+        &self.texture
+    }
 }
 
 /// TODO: FIXME(sleffy) maybe? This implementation ignores the color and src parameters
@@ -1375,6 +1438,20 @@ impl Drawable for SpriteBatch {
         ctx.mq.draw(0, 6, inner.instances.len() as i32);
         ctx.pop_transform();
         ctx.apply_transforms();
+    }
+
+    fn aabb(&self) -> AABB<f32> {
+        let mut initial = AABB::new_invalid();
+        let image_aabb = AABB::new(
+            Point2::origin(),
+            Point2::new(self.texture.width as f32, self.texture.height as f32),
+        );
+
+        for (_, param) in self.sprites.iter() {
+            initial.merge(&param.transform_aabb(&image_aabb));
+        }
+
+        initial
     }
 }
 
@@ -1437,37 +1514,47 @@ impl Drawable for Canvas {
     fn draw(&self, ctx: &mut Graphics, instance: InstanceParam) {
         self.color_buffer.draw(ctx, instance);
     }
-}
 
-pub trait Drawable {
-    fn draw(&self, ctx: &mut Graphics, instance: InstanceParam);
+    fn aabb(&self) -> AABB<f32> {
+        AABB::new(
+            Point2::new(0., 0.),
+            Point2::new(
+                self.color_buffer.width as f32,
+                self.color_buffer.height as f32,
+            ),
+        )
+    }
 }
 
 #[derive(Debug)]
-pub struct DrawableGraph<T: Drawable> {
-    graph: SceneGraph<T>,
+pub struct Sprite {
+    pub params: InstanceParam,
+    pub texture: Texture,
 }
 
-impl<T: Drawable> DrawableGraph<T> {
-    pub fn new() -> Self {
-        Self {
-            graph: SceneGraph::new(),
-        }
-    }
-
-    pub fn insert(&mut self, object: T) -> ObjectBuilder<T> {
-        self.graph.insert(object)
-    }
-
-    pub fn remove(&mut self, object_id: ObjectId) -> Option<T> {
-        self.graph.remove(object_id)
+impl Sprite {
+    pub fn new(texture: Texture, params: InstanceParam) -> Self {
+        Self { params, texture }
     }
 }
 
-impl<T: Drawable> Drawable for DrawableGraph<T> {
+/// FIXME(sleffy): same issue as the SpriteBatch implementation, ignoring
+/// the passed-in src/color params
+impl Drawable for Sprite {
     fn draw(&self, ctx: &mut Graphics, instance: InstanceParam) {
-        for drawable in self.graph.sorted() {
-            ctx.draw(drawable, instance);
-        }
+        let params = InstanceParam {
+            tx: instance.tx * self.params.tx,
+            ..self.params
+        };
+        self.texture.draw(ctx, params);
     }
+
+    fn aabb(&self) -> AABB<f32> {
+        self.params.transform_aabb(&self.texture.aabb())
+    }
+}
+
+pub trait Drawable: 'static {
+    fn draw(&self, ctx: &mut Graphics, instance: InstanceParam);
+    fn aabb(&self) -> AABB<f32>;
 }

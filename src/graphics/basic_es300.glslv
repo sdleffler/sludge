@@ -1,6 +1,6 @@
 #version 300 es
 
-in mediump vec2 a_Pos;
+in mediump vec3 a_Pos;
 in mediump vec2 a_Uv;
 in mediump vec4 a_VertColor;
 
@@ -16,7 +16,7 @@ out mediump vec4 v_Color;
 void main() {
     v_Uv = a_Uv * a_Src.zw + a_Src.xy;
     v_Color = a_Color * a_VertColor;
-    vec4 position = a_Tx * vec4(a_Pos, 0.0, 1.0);
+    vec4 position = a_Tx * vec4(a_Pos, 1.0);
 
     gl_Position = u_MVP * position;
 }
