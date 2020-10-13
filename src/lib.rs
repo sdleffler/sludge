@@ -33,7 +33,6 @@ pub mod input;
 pub mod math;
 pub mod resources;
 pub mod scene;
-pub mod scene_graph;
 pub mod spatial_2d;
 pub mod sprite;
 pub mod systems;

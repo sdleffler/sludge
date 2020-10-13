@@ -20,7 +20,7 @@ use {
 pub type DrawableNodeId<T> = DrawableId<T, DrawableGraph>;
 
 pub struct DrawableGraphIter<'a> {
-    _outer: RwLockReadGuard<'a, SceneGraphInner>,
+    _outer: RwLockReadGuard<'a, DrawableGraphInner>,
     inner: ::std::slice::Iter<'a, Index>,
     objects: &'a Arena<Node>,
 }
@@ -80,7 +80,7 @@ struct Node {
 }
 
 #[derive(Debug)]
-struct SceneGraphInner {
+struct DrawableGraphInner {
     y_cache: HashMap<Index, OrderedFloat<f32>>,
     roots: Vec<Index>,
     sorted: Vec<Index>,
@@ -90,7 +90,7 @@ struct SceneGraphInner {
 
 pub struct DrawableGraph {
     objects: Arena<Node>,
-    inner: RwLock<SceneGraphInner>,
+    inner: RwLock<DrawableGraphInner>,
     dirty: AtomicBool,
     y_sort: bool,
 }
@@ -116,7 +116,7 @@ impl DrawableGraph {
     pub fn new() -> Self {
         Self {
             objects: Arena::new(),
-            inner: SceneGraphInner {
+            inner: DrawableGraphInner {
                 roots: Vec::new(),
                 sorted: Vec::new(),
 
@@ -180,7 +180,7 @@ impl DrawableGraph {
             y_sort,
         } = self;
 
-        let SceneGraphInner {
+        let DrawableGraphInner {
             y_cache,
             roots,
             sorted,
@@ -247,7 +247,7 @@ impl DrawableGraph {
         // to the inner scene graph which are guaranteed to outlive
         // the iterator and read guard.
         let iter = unsafe {
-            let inner_ptr = &*sorted as *const SceneGraphInner;
+            let inner_ptr = &*sorted as *const DrawableGraphInner;
             (*inner_ptr).sorted.iter()
         };
 

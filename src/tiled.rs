@@ -189,6 +189,18 @@ impl<TileProperties> TileSheet<TileProperties> {
         assert!(self.tile_count > 0, "tilesheet has no tiles");
         self.first_global_id + self.tile_count - 1
     }
+
+    pub fn is_tile_animated_by_local_id(&self, local_id: u32) -> bool {
+        self.tile_data
+            .get(&local_id)
+            .map(|data| !data.frames.is_empty())
+            .unwrap_or_default()
+    }
+
+    pub fn is_tile_animated_by_global_id(&self, gid: u32) -> bool {
+        assert!(gid >= self.first_global_id && gid <= self.last_global_id());
+        self.is_tile_animated_by_local_id(gid - self.first_global_id)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
