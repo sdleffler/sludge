@@ -8,6 +8,7 @@ use {
 
 use crate::{
     filesystem::Filesystem,
+    math::*,
     resources::{Inspect, Key, Load, Loaded, Storage},
     tiled::xml_parser::LayerData,
     SharedResources,
@@ -86,8 +87,8 @@ pub struct TileSheetRegion {
     pub global_id: u32,
     pub local_id: u32,
 
-    pub origin: na::Point2<u32>,
-    pub extents: na::Vector2<u32>,
+    pub bounds: Box2<u32>,
+    pub uv: Box2<f32>,
 }
 
 impl<TileProperties> TileSheet<TileProperties> {
@@ -155,24 +156,35 @@ impl<TileProperties> TileSheet<TileProperties> {
         (self.sheet_width, self.sheet_height)
     }
 
-    pub fn iter_regions(&self) -> impl Iterator<Item = TileSheetRegion> + '_ {
+    pub fn get_region_from_local_id(&self, local_id: u32) -> TileSheetRegion {
+        assert!(local_id < self.tile_count, "local id out of bounds");
+
         let origin = na::Point2::origin() + na::Vector2::repeat(self.margin);
-        let extent = na::Vector2::new(self.tile_width, self.tile_height);
-        let stride = na::Vector2::repeat(self.spacing) + extent;
-
+        let extents = na::Vector2::new(self.tile_width, self.tile_height);
+        let stride = na::Vector2::repeat(self.spacing) + extents;
         let columns = (self.sheet_width - self.margin) / (self.tile_width + self.spacing);
+        let coord = na::Vector2::new(local_id % columns, local_id / columns);
+        let corner = origin + stride.component_mul(&coord);
+        let sheet_dims = Vector2::new(self.sheet_width as f32, self.sheet_height as f32);
+        let uv_corner =
+            Point2::from(na::convert::<_, Vector2<f32>>(corner.coords).component_div(&sheet_dims));
+        let uv_extents = na::convert::<_, Vector2<f32>>(extents).component_div(&sheet_dims);
 
-        (0..self.tile_count).map(move |local_id| {
-            let coord = na::Vector2::new(local_id % columns, local_id / columns);
-            let corner = origin + stride.component_mul(&coord);
+        TileSheetRegion {
+            global_id: self.first_global_id + local_id,
+            local_id: local_id,
+            bounds: Box2::from_extents(corner, extents),
+            uv: Box2::from_extents(uv_corner, uv_extents),
+        }
+    }
 
-            TileSheetRegion {
-                global_id: self.first_global_id + local_id,
-                local_id: local_id,
-                origin: corner,
-                extents: extent,
-            }
-        })
+    pub fn get_region_from_global_id(&self, gid: u32) -> TileSheetRegion {
+        assert!(gid >= self.first_global_id && gid <= self.last_global_id());
+        self.get_region_from_local_id(gid - self.first_global_id)
+    }
+
+    pub fn iter_regions(&self) -> impl Iterator<Item = TileSheetRegion> + '_ {
+        (0..self.tile_count).map(move |local_id| self.get_region_from_local_id(local_id))
     }
 
     pub fn iter_tile_data(&self) -> impl Iterator<Item = (u32, &TileData<TileProperties>)> + '_ {

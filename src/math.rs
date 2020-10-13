@@ -62,6 +62,13 @@ impl<N: Numeric> Box2<N> {
         Self { mins, maxs }
     }
 
+    pub fn from_extents(mins: Point2<N>, extents: Vector2<N>) -> Self {
+        Self {
+            mins,
+            maxs: mins + extents,
+        }
+    }
+
     pub fn from_half_extents(center: Point2<N>, half_extents: Vector2<N>) -> Self {
         Self {
             mins: center - half_extents,

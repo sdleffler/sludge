@@ -1,10 +1,5 @@
 use crate::math::*;
-use {
-    hashbrown::HashMap,
-    hibitset::BitSet,
-    num_traits::{FromPrimitive, ToPrimitive},
-    std::{marker::PhantomData, num::NonZeroU32},
-};
+use {hashbrown::HashMap, hibitset::BitSet, std::iter};
 
 pub const DEFAULT_CHUNK_SIZE: u16 = 64;
 
@@ -16,47 +11,32 @@ fn to_chunk_and_subindices(chunk_size: u16, (x, y): (i32, i32)) -> ((i32, i32), 
     (chunk_index, tile_index)
 }
 
-#[derive(Debug, Clone, Copy, Default)]
-struct Element(Option<NonZeroU32>);
-
-impl Element {
-    fn from_u32(i: u32) -> Self {
-        Self(NonZeroU32::new(
-            i.checked_add(1).expect("grid entry out of range!"),
-        ))
-    }
-
-    fn to_u32(self) -> Option<u32> {
-        self.0.map(|nz| nz.get() - 1)
-    }
-}
-
 #[derive(Debug, Clone)]
-pub struct Chunk {
-    elements: Vec<Element>,
+pub struct Chunk<T: Default> {
+    elements: Vec<T>,
 }
 
-impl Chunk {
+impl<T: Default> Chunk<T> {
     fn empty(chunk_size: u16) -> Self {
         Self {
-            elements: vec![Element::default(); chunk_size as usize],
+            elements: iter::repeat_with(T::default)
+                .take(chunk_size as usize)
+                .collect(),
         }
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct ChunkedGrid<T: FromPrimitive + ToPrimitive = u32> {
+pub struct ChunkedGrid<T: Default> {
     chunk_size: u16,
-    chunks: HashMap<(i32, i32), Chunk>,
-    _marker: PhantomData<T>,
+    chunks: HashMap<(i32, i32), Chunk<T>>,
 }
 
-impl<T: FromPrimitive + ToPrimitive> ChunkedGrid<T> {
+impl<T: Default> ChunkedGrid<T> {
     pub fn new() -> Self {
         Self {
             chunk_size: DEFAULT_CHUNK_SIZE,
             chunks: HashMap::new(),
-            _marker: PhantomData,
         }
     }
 
@@ -67,15 +47,21 @@ impl<T: FromPrimitive + ToPrimitive> ChunkedGrid<T> {
         }
     }
 
-    pub fn get(&self, (x, y): (i32, i32)) -> Option<T> {
+    pub fn get(&self, (x, y): (i32, i32)) -> Option<&T> {
         let (chunk_indices, offset) = to_chunk_and_subindices(self.chunk_size, (x, y));
         self.chunks
             .get(&chunk_indices)
-            .and_then(|chunk| chunk.elements[offset].to_u32())
-            .map(|n| T::from_u32(n).unwrap())
+            .map(|chunk| &chunk.elements[offset])
     }
 
-    pub fn set(&mut self, (x, y): (i32, i32), value: &T) {
+    pub fn get_mut(&mut self, (x, y): (i32, i32)) -> Option<&mut T> {
+        let (chunk_indices, offset) = to_chunk_and_subindices(self.chunk_size, (x, y));
+        self.chunks
+            .get_mut(&chunk_indices)
+            .map(|chunk| &mut chunk.elements[offset])
+    }
+
+    pub fn set(&mut self, (x, y): (i32, i32), value: T) {
         // Copy here to appease borrowck on closure.
         let chunk_size = self.chunk_size;
         let (chunk_indices, offset) = to_chunk_and_subindices(chunk_size, (x, y));
@@ -83,11 +69,7 @@ impl<T: FromPrimitive + ToPrimitive> ChunkedGrid<T> {
             .chunks
             .entry(chunk_indices)
             .or_insert_with(|| Chunk::empty(chunk_size));
-        chunk.elements[offset] = Element::from_u32(
-            value
-                .to_u32()
-                .expect("elements of a `ChunkGrid` must be representable as `u32`!"),
-        );
+        chunk.elements[offset] = value;
     }
 }
 
