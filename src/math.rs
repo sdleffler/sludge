@@ -26,22 +26,22 @@ pub use ncollide2d::{
     shape::{Ball, Cuboid, ShapeHandle},
 };
 
-pub trait KitchenSink:
+pub trait Numeric:
     NumAssign + NumAssignRef + NumCast + Scalar + Copy + PartialOrd + SimdPartialOrd + Bounded
 {
 }
-impl<T> KitchenSink for T where
+impl<T> Numeric for T where
     T: NumAssign + NumAssignRef + NumCast + Scalar + Copy + PartialOrd + SimdPartialOrd + Bounded
 {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
-pub struct Box2<N: KitchenSink> {
+pub struct Box2<N: Numeric> {
     pub mins: Point2<N>,
     pub maxs: Point2<N>,
 }
 
-impl<N: KitchenSink + RealField> From<ncollide2d::bounding_volume::AABB<N>> for Box2<N> {
+impl<N: Numeric + RealField> From<ncollide2d::bounding_volume::AABB<N>> for Box2<N> {
     fn from(aabb: ncollide2d::bounding_volume::AABB<N>) -> Self {
         Self {
             mins: aabb.mins,
@@ -50,7 +50,7 @@ impl<N: KitchenSink + RealField> From<ncollide2d::bounding_volume::AABB<N>> for 
     }
 }
 
-impl<N: KitchenSink> Box2<N> {
+impl<N: Numeric> Box2<N> {
     pub fn new(x: N, y: N, w: N, h: N) -> Self {
         Self {
             mins: Point2::new(x, y),
