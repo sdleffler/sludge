@@ -1,5 +1,6 @@
 use {
-    nalgebra::{storage::Storage, Vector, U3},
+    nalgebra::{storage::Storage, SimdPartialOrd, Vector, U3},
+    num_traits::{Bounded, NumAssign, NumAssignRef, NumCast},
     serde::{Deserialize, Serialize},
     std::{
         mem,
@@ -16,62 +17,174 @@ pub use nalgebra::{
     Translation3, Unit, UnitComplex, UnitQuaternion, Vector2, Vector3, Vector4,
 };
 
+pub use num_traits as num;
+
 pub use ncollide2d::{
     self as nc2d,
-    bounding_volume::{self, BoundingVolume, HasBoundingVolume, AABB},
+    bounding_volume::{self, BoundingVolume, HasBoundingVolume},
     query::{self, DefaultTOIDispatcher, Proximity},
     shape::{Ball, Cuboid, ShapeHandle},
 };
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct Box2<T: Scalar> {
-    pub mins: Point2<T>,
-    pub extent: Vector2<T>,
+pub trait KitchenSink:
+    NumAssign + NumAssignRef + NumCast + Scalar + Copy + PartialOrd + SimdPartialOrd + Bounded
+{
+}
+impl<T> KitchenSink for T where
+    T: NumAssign + NumAssignRef + NumCast + Scalar + Copy + PartialOrd + SimdPartialOrd + Bounded
+{
 }
 
-impl<T: Scalar> Box2<T> {
-    pub fn new(x: T, y: T, w: T, h: T) -> Self {
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub struct Box2<N: KitchenSink> {
+    pub mins: Point2<N>,
+    pub maxs: Point2<N>,
+}
+
+impl<N: KitchenSink + RealField> From<ncollide2d::bounding_volume::AABB<N>> for Box2<N> {
+    fn from(aabb: ncollide2d::bounding_volume::AABB<N>) -> Self {
+        Self {
+            mins: aabb.mins,
+            maxs: aabb.maxs,
+        }
+    }
+}
+
+impl<N: KitchenSink> Box2<N> {
+    pub fn new(x: N, y: N, w: N, h: N) -> Self {
         Self {
             mins: Point2::new(x, y),
-            extent: Vector2::new(w, h),
+            maxs: Point2::new(x + w, y + h),
         }
     }
 
-    pub fn center(self) -> Point2<T>
+    pub fn from_corners(mins: Point2<N>, maxs: Point2<N>) -> Self {
+        Self { mins, maxs }
+    }
+
+    pub fn from_half_extents(center: Point2<N>, half_extents: Vector2<N>) -> Self {
+        Self {
+            mins: center - half_extents,
+            maxs: center + half_extents,
+        }
+    }
+
+    pub fn invalid() -> Self {
+        Self {
+            mins: Vector2::repeat(N::max_value()).into(),
+            maxs: Vector2::repeat(N::min_value()).into(),
+        }
+    }
+
+    #[inline]
+    pub fn center(self) -> Point2<N> {
+        self.mins + self.half_extents()
+    }
+
+    #[inline]
+    pub fn to_aabb(self) -> ncollide2d::bounding_volume::AABB<N>
     where
-        T: RealField,
+        N: RealField,
     {
-        self.mins + self.extent / na::convert::<_, T>(2.)
+        ncollide2d::bounding_volume::AABB::new(self.mins, self.maxs)
     }
 
-    pub fn to_aabb(self) -> AABB<T>
+    #[inline]
+    pub fn extents(&self) -> Vector2<N> {
+        self.maxs.coords - self.mins.coords
+    }
+
+    #[inline]
+    pub fn half_extents(&self) -> Vector2<N> {
+        self.extents() / num::cast::<_, N>(2).unwrap()
+    }
+
+    #[inline]
+    pub fn merge(&mut self, other: &Self) {
+        *self = self.merged(other);
+    }
+
+    #[inline]
+    pub fn merged(&self, other: &Self) -> Self {
+        let new_mins = self.mins.coords.inf(&other.mins.coords);
+        let new_maxes = self.mins.coords.sup(&other.maxs.coords);
+        Self {
+            mins: Point2::from(new_mins),
+            maxs: Point2::from(new_maxes),
+        }
+    }
+
+    #[inline]
+    pub fn intersects(&self, other: &Self) -> bool {
+        na::partial_le(&self.mins, &other.maxs) && na::partial_ge(&self.maxs, &other.mins)
+    }
+
+    #[inline]
+    pub fn contains(&self, other: &Self) -> bool {
+        na::partial_le(&self.mins, &other.mins) && na::partial_ge(&self.maxs, &other.maxs)
+    }
+
+    #[inline]
+    pub fn loosen(&mut self, margin: N) {
+        assert!(margin >= na::zero());
+        let margin = Vector2::repeat(margin);
+        self.mins = self.mins - margin;
+        self.maxs = self.maxs + margin;
+    }
+
+    #[inline]
+    pub fn loosened(&self, margin: N) -> Self {
+        assert!(margin >= na::zero());
+        let margin = Vector2::repeat(margin);
+        Self {
+            mins: self.mins - margin,
+            maxs: self.maxs + margin,
+        }
+    }
+
+    #[inline]
+    pub fn tighten(&mut self, margin: N) {
+        assert!(margin >= na::zero());
+        let margin = Vector2::repeat(margin);
+        self.mins = self.mins + margin;
+        self.maxs = self.maxs - margin;
+        assert!(na::partial_le(&self.mins, &self.maxs));
+    }
+
+    #[inline]
+    pub fn tightened(&self, margin: N) -> Self {
+        assert!(margin >= na::zero());
+        let margin = Vector2::repeat(margin);
+        Self {
+            mins: self.mins + margin,
+            maxs: self.maxs - margin,
+        }
+    }
+
+    #[inline]
+    pub fn from_points<'a, I>(pts: I) -> Self
     where
-        T: RealField,
+        I: IntoIterator<Item = &'a Point2<N>>,
     {
-        AABB::new(self.mins, self.mins + self.extent)
-    }
+        let mut iter = pts.into_iter();
 
-    pub fn x(&self) -> T {
-        self.mins.coords.x.clone()
-    }
+        let p0 = iter.next().expect("iterator must be nonempty");
+        let mut mins: Point2<N> = *p0;
+        let mut maxs: Point2<N> = *p0;
 
-    pub fn y(&self) -> T {
-        self.mins.coords.y.clone()
-    }
+        for pt in iter {
+            mins = mins.inf(&pt);
+            maxs = maxs.sup(&pt);
+        }
 
-    pub fn w(&self) -> T {
-        self.extent.x.clone()
-    }
-
-    pub fn h(&self) -> T {
-        self.extent.y.clone()
+        Self { mins, maxs }
     }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct Box3<T: Scalar> {
-    pub origin: Point3<T>,
-    pub extent: Vector3<T>,
+pub struct Box3<N: Scalar> {
+    pub origin: Point3<N>,
+    pub extent: Vector3<N>,
 }
 
 #[rustfmt::skip]
@@ -104,7 +217,7 @@ pub fn smooth_subpixels(position: Point2<f32>, direction: Vector2<f32>) -> Point
 pub mod coords_2d {
     use super::*;
 
-    pub fn to_grid_indices(grid_size: f32, aabb: &AABB<f32>) -> impl Iterator<Item = (i32, i32)> {
+    pub fn to_grid_indices(grid_size: f32, aabb: &Box2<f32>) -> impl Iterator<Item = (i32, i32)> {
         let x_start = (aabb.mins.x / grid_size).floor() as i32;
         let x_end = (aabb.maxs.x / grid_size).ceil() as i32;
         let y_start = (aabb.mins.y / grid_size).floor() as i32;

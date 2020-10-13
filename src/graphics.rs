@@ -156,7 +156,7 @@ impl Drawable for OwnedTexture {
             &mut ctx.mq,
             &[param
                 .scale2(Vector2::new(self.width as f32, self.height as f32))
-                .scale2(param.src.extent)
+                .scale2(param.src.extents())
                 .to_instance_properties()],
         );
         ctx.quad_bindings.images[0] = self.texture;
@@ -164,8 +164,8 @@ impl Drawable for OwnedTexture {
         ctx.mq.draw(0, 6, 1);
     }
 
-    fn aabb(&self) -> AABB<f32> {
-        AABB::new(
+    fn aabb(&self) -> Box2<f32> {
+        Box2::from_corners(
             Point2::origin(),
             Point2::new(self.width as f32, self.height as f32),
         )
@@ -235,7 +235,7 @@ impl Drawable for Texture {
         self.shared.draw(ctx, param);
     }
 
-    fn aabb(&self) -> AABB<f32> {
+    fn aabb(&self) -> Box2<f32> {
         self.shared.aabb()
     }
 }
@@ -958,7 +958,7 @@ pub struct Mesh {
     pub texture: Texture,
     pub bindings: mq::Bindings,
     pub len: i32,
-    pub aabb: AABB<f32>,
+    pub aabb: Box2<f32>,
 }
 
 impl Drawable for Mesh {
@@ -968,7 +968,7 @@ impl Drawable for Mesh {
         ctx.mq.draw(0, self.len, 1);
     }
 
-    fn aabb(&self) -> AABB<f32> {
+    fn aabb(&self) -> Box2<f32> {
         self.aabb
     }
 }
@@ -1109,7 +1109,8 @@ impl MeshBuilder {
     pub fn rectangle(&mut self, mode: DrawMode, bounds: Box2<f32>, color: Color) -> &mut Self {
         {
             let buffers = &mut self.buffer;
-            let rect = t::math::rect(bounds.x(), bounds.y(), bounds.w(), bounds.h());
+            let extents = bounds.extents();
+            let rect = t::math::rect(bounds.mins.x, bounds.mins.y, extents.x, extents.y);
             let vb = VertexBuilder {
                 color: LinearColor::from(color),
             };
@@ -1177,7 +1178,7 @@ impl MeshBuilder {
             mem::size_of::<InstanceProperties>(),
         );
 
-        let aabb = AABB::from_points(
+        let aabb = Box2::from_points(
             &self
                 .buffer
                 .vertices
@@ -1255,22 +1256,22 @@ impl InstanceParam {
     #[inline]
     pub fn to_instance_properties(&self) -> InstanceProperties {
         let mins = self.src.mins;
-        let extent = self.src.extent;
+        let extents = self.src.extents();
         InstanceProperties {
-            src: Vector4::new(mins.x, mins.y, extent.x, extent.y),
+            src: Vector4::new(mins.x, mins.y, extents.x, extents.y),
             tx: *self.tx.matrix(),
             color: LinearColor::from(self.color),
         }
     }
 
     #[inline]
-    pub fn transform_aabb(&self, aabb: &AABB<f32>) -> AABB<f32> {
+    pub fn transform_aabb(&self, aabb: &Box2<f32>) -> Box2<f32> {
         let tl = Point3::new(aabb.mins.x, aabb.mins.y, 0.);
         let tr = Point3::new(aabb.maxs.x, aabb.mins.y, 0.);
         let br = Point3::new(aabb.maxs.x, aabb.maxs.y, 0.);
         let bl = Point3::new(aabb.mins.x, aabb.maxs.y, 0.);
 
-        AABB::from_points(&[
+        Box2::from_points(&[
             self.tx.transform_point(&tl).xy(),
             self.tx.transform_point(&tr).xy(),
             self.tx.transform_point(&br).xy(),
@@ -1402,7 +1403,7 @@ impl SpriteBatch {
             .instances
             .extend(self.sprites.iter().map(|(_, param)| {
                 param
-                    .scale2(param.src.extent)
+                    .scale2(param.src.extents())
                     .scale2(Vector2::new(
                         self.texture.width as f32,
                         self.texture.height as f32,
@@ -1448,9 +1449,9 @@ impl Drawable for SpriteBatch {
         ctx.apply_transforms();
     }
 
-    fn aabb(&self) -> AABB<f32> {
-        let mut initial = AABB::new_invalid();
-        let image_aabb = AABB::new(
+    fn aabb(&self) -> Box2<f32> {
+        let mut initial = Box2::invalid();
+        let image_aabb = Box2::from_corners(
             Point2::origin(),
             Point2::new(self.texture.width as f32, self.texture.height as f32),
         );
@@ -1523,8 +1524,8 @@ impl Drawable for Canvas {
         self.color_buffer.draw(ctx, instance);
     }
 
-    fn aabb(&self) -> AABB<f32> {
-        AABB::new(
+    fn aabb(&self) -> Box2<f32> {
+        Box2::from_corners(
             Point2::new(0., 0.),
             Point2::new(
                 self.color_buffer.width as f32,
@@ -1557,13 +1558,14 @@ impl Drawable for Sprite {
         self.texture.draw(ctx, params);
     }
 
-    fn aabb(&self) -> AABB<f32> {
+    fn aabb(&self) -> Box2<f32> {
         let texture_aabb = self.texture.aabb();
-        self.params.transform_aabb(&AABB::new(
+        let extents = self.params.src.extents();
+        self.params.transform_aabb(&Box2::from_corners(
             texture_aabb.mins,
             Point2::new(
-                texture_aabb.maxs.x * self.params.src.extent.x,
-                texture_aabb.maxs.y * self.params.src.extent.y,
+                texture_aabb.maxs.x * extents.x,
+                texture_aabb.maxs.y * extents.y,
             ),
         ))
     }
@@ -1571,7 +1573,7 @@ impl Drawable for Sprite {
 
 pub trait Drawable: 'static {
     fn draw(&self, ctx: &mut Graphics, instance: InstanceParam);
-    fn aabb(&self) -> AABB<f32>;
+    fn aabb(&self) -> Box2<f32>;
 }
 
 /// Shorthand trait for types that are `Drawable` and `Any`, as well as

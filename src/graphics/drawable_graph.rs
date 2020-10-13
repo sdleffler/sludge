@@ -266,8 +266,8 @@ impl Drawable for DrawableGraph {
         }
     }
 
-    fn aabb(&self) -> AABB<f32> {
-        let mut aabb = AABB::new_invalid();
+    fn aabb(&self) -> Box2<f32> {
+        let mut aabb = Box2::invalid();
         for drawable in self.sorted() {
             aabb.merge(&drawable.aabb());
         }

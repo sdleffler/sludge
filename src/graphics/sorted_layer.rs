@@ -110,8 +110,8 @@ impl Drawable for SortedLayer {
         }
     }
 
-    fn aabb(&self) -> AABB<f32> {
-        let mut aabb = AABB::new_invalid();
+    fn aabb(&self) -> Box2<f32> {
+        let mut aabb = Box2::invalid();
         for drawable in self.objects.iter().map(|(_, obj)| obj.as_drawable()) {
             aabb.merge(&drawable.aabb());
         }

@@ -22,19 +22,19 @@ pub struct BucketIndex(Index);
 
 #[derive(Debug)]
 pub struct Bucket {
-    bounds: AABB<f32>,
+    bounds: Box2<f32>,
     members: Vec<SpatialIndex>,
 }
 
 impl Bucket {
-    fn new(bounds: AABB<f32>) -> Self {
+    fn new(bounds: Box2<f32>) -> Self {
         Self {
             bounds,
             members: Vec::new(),
         }
     }
 
-    pub fn bounds(&self) -> &AABB<f32> {
+    pub fn bounds(&self) -> &Box2<f32> {
         &self.bounds
     }
 
@@ -45,13 +45,13 @@ impl Bucket {
 
 #[derive(Debug)]
 pub struct ObjectEntry<T> {
-    bounds: AABB<f32>,
+    bounds: Box2<f32>,
     buckets: SmallVec<[BucketIndex; 4]>,
     userdata: T,
 }
 
 impl<T> ObjectEntry<T> {
-    pub fn bounds(&self) -> &AABB<f32> {
+    pub fn bounds(&self) -> &Box2<f32> {
         &self.bounds
     }
 
@@ -114,11 +114,11 @@ fn get_or_insert_bucket(
     *spatial_map.entry((i, j)).or_insert_with(|| {
         let mins = Point2::new(i as f32 * bucket_size, j as f32 * bucket_size);
         let maxs = mins + Vector2::repeat(bucket_size);
-        BucketIndex(buckets.insert(Bucket::new(AABB::new(mins, maxs))))
+        BucketIndex(buckets.insert(Bucket::new(Box2::from_corners(mins, maxs))))
     })
 }
 
-fn to_spatial_indices(bucket_size: f32, aabb: AABB<f32>) -> impl Iterator<Item = (i32, i32)> {
+fn to_spatial_indices(bucket_size: f32, aabb: Box2<f32>) -> impl Iterator<Item = (i32, i32)> {
     let x_start = (aabb.mins.x / bucket_size).floor() as i32;
     let x_end = (aabb.maxs.x / bucket_size).ceil() as i32;
     let y_start = (aabb.mins.y / bucket_size).floor() as i32;
@@ -128,7 +128,8 @@ fn to_spatial_indices(bucket_size: f32, aabb: AABB<f32>) -> impl Iterator<Item =
 }
 
 impl<T> HashGrid<T> {
-    pub fn insert(&mut self, aabb: AABB<f32>, userdata: T) -> SpatialIndex {
+    pub fn insert(&mut self, aabb: impl Into<Box2<f32>>, userdata: T) -> SpatialIndex {
+        let aabb = aabb.into();
         let object_id = SpatialIndex(self.objects.insert(ObjectEntry {
             bounds: aabb,
             buckets: SmallVec::new(),
@@ -166,8 +167,9 @@ impl<T> HashGrid<T> {
     /// Update the object's state in the hash grid, removing it from buckets it no
     /// longer inhabits and add it to buckets it newly inhabits. Returns true if
     /// the object has been removed from/added to a new bucket.
-    pub fn update(&mut self, object_id: SpatialIndex, aabb: AABB<f32>) -> bool {
+    pub fn update(&mut self, object_id: SpatialIndex, aabb: impl Into<Box2<f32>>) -> bool {
         let object = &mut self.objects[object_id.0];
+        let aabb = aabb.into();
 
         // TODO: fudge value to avoid recomputing for small movements?
         if aabb == object.bounds {
@@ -210,7 +212,7 @@ impl<T> HashGrid<T> {
         self.buckets.iter().map(|(i, b)| (BucketIndex(i), b))
     }
 
-    pub fn query<'a>(&'a self, aabb: &AABB<f32>) -> impl Iterator<Item = SpatialIndex> + 'a {
+    pub fn query<'a>(&'a self, aabb: &Box2<f32>) -> impl Iterator<Item = SpatialIndex> + 'a {
         to_spatial_indices(self.bucket_size, *aabb)
             .flat_map(move |coords| self.spatial_map.get(&coords).copied().into_iter())
             .flat_map(move |bucket_id| self.buckets[bucket_id.0].members.iter().copied())
@@ -369,7 +371,7 @@ mod tests {
         assert_eq!(
             set_of(to_spatial_indices(
                 64.,
-                AABB::from_half_extents(Point2::new(23., 24.), Vector2::new(8., 8.))
+                Box2::from_half_extents(Point2::new(23., 24.), Vector2::new(8., 8.))
             )),
             set_of(vec![(0, 0)])
         );
@@ -377,7 +379,7 @@ mod tests {
         assert_eq!(
             set_of(to_spatial_indices(
                 64.,
-                AABB::from_half_extents(Point2::new(-2., -3.), Vector2::new(4., 4.))
+                Box2::from_half_extents(Point2::new(-2., -3.), Vector2::new(4., 4.))
             )),
             set_of(vec![(0, 0), (-1, -1), (-1, 0), (0, -1)])
         );
@@ -385,7 +387,7 @@ mod tests {
         assert_eq!(
             set_of(to_spatial_indices(
                 64.,
-                AABB::from_half_extents(Point2::new(35., 35.), Vector2::new(36., 36.))
+                Box2::from_half_extents(Point2::new(35., 35.), Vector2::new(36., 36.))
             )),
             set_of(vec![
                 (0, 0),
@@ -407,7 +409,7 @@ mod tests {
         let mut bucket_count = 0;
 
         let a = spatial_hasher.insert(
-            AABB::from_half_extents(Point2::new(23., 42.), Vector2::new(8., 8.)),
+            Box2::from_half_extents(Point2::new(23., 42.), Vector2::new(8., 8.)),
             "a",
         );
 
@@ -418,7 +420,7 @@ mod tests {
         bucket_count = spatial_hasher.buckets.len();
 
         let b = spatial_hasher.insert(
-            AABB::from_half_extents(Point2::new(-2., -3.), Vector2::new(4., 4.)),
+            Box2::from_half_extents(Point2::new(-2., -3.), Vector2::new(4., 4.)),
             "b",
         );
 
@@ -429,7 +431,7 @@ mod tests {
         bucket_count = spatial_hasher.buckets.len();
 
         let c = spatial_hasher.insert(
-            AABB::from_half_extents(Point2::new(35., 35.), Vector2::new(36., 36.)),
+            Box2::from_half_extents(Point2::new(35., 35.), Vector2::new(36., 36.)),
             "c",
         );
 
@@ -440,7 +442,7 @@ mod tests {
         bucket_count = spatial_hasher.buckets.len();
 
         let d = spatial_hasher.insert(
-            AABB::from_half_extents(Point2::new(84., 20.), Vector2::new(8., 8.)),
+            Box2::from_half_extents(Point2::new(84., 20.), Vector2::new(8., 8.)),
             "d",
         );
 
@@ -450,7 +452,7 @@ mod tests {
         );
 
         assert_eq!(
-            set_of(spatial_hasher.query(&AABB::from_half_extents(
+            set_of(spatial_hasher.query(&Box2::from_half_extents(
                 Point2::new(20., 40.),
                 Vector2::new(8., 8.),
             ))),
@@ -458,7 +460,7 @@ mod tests {
         );
 
         assert_eq!(
-            set_of(spatial_hasher.query(&AABB::from_half_extents(
+            set_of(spatial_hasher.query(&Box2::from_half_extents(
                 Point2::new(-13., 14.),
                 Vector2::new(8., 8.),
             ))),
@@ -466,7 +468,7 @@ mod tests {
         );
 
         assert_eq!(
-            set_of(spatial_hasher.query(&AABB::from_half_extents(
+            set_of(spatial_hasher.query(&Box2::from_half_extents(
                 Point2::new(96., 96.),
                 Vector2::new(8., 8.),
             ))),
@@ -474,7 +476,7 @@ mod tests {
         );
 
         assert_eq!(
-            set_of(spatial_hasher.query(&AABB::from_half_extents(
+            set_of(spatial_hasher.query(&Box2::from_half_extents(
                 Point2::new(96., 32.),
                 Vector2::new(8., 8.),
             ))),
@@ -483,11 +485,11 @@ mod tests {
 
         spatial_hasher.update(
             d,
-            AABB::from_half_extents(Point2::new(45., 20.), Vector2::new(8., 8.)),
+            Box2::from_half_extents(Point2::new(45., 20.), Vector2::new(8., 8.)),
         );
 
         assert_eq!(
-            set_of(spatial_hasher.query(&AABB::from_half_extents(
+            set_of(spatial_hasher.query(&Box2::from_half_extents(
                 Point2::new(96., 32.),
                 Vector2::new(8., 8.),
             ))),

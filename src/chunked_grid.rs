@@ -142,13 +142,13 @@ impl ChunkedBitGrid {
         }
     }
 
-    pub fn query<'a>(&'a self, aabb: &AABB<f32>) -> impl Iterator<Item = (i32, i32)> + 'a {
+    pub fn query<'a>(&'a self, aabb: &Box2<f32>) -> impl Iterator<Item = (i32, i32)> + 'a {
         coords_2d::to_grid_indices(self.scale, aabb).filter(move |&c| self.get(c))
     }
 
-    pub fn bounds_at(&self, (x, y): (i32, i32)) -> AABB<f32> {
+    pub fn bounds_at(&self, (x, y): (i32, i32)) -> Box2<f32> {
         let mins = Point2::new(x as f32 * self.scale, y as f32 * self.scale);
         let maxs = mins + Vector2::repeat(self.scale);
-        AABB::new(mins, maxs)
+        Box2::from_corners(mins, maxs)
     }
 }
