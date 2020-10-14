@@ -803,34 +803,3 @@ impl SharedResources {
         })
     }
 }
-
-// /// Basic logging setup to log to the console with `fern`.
-// fn setup_logging() -> Result<()> {
-//     use fern::colors::{Color, ColoredLevelConfig};
-//     let colors = ColoredLevelConfig::default()
-//         .info(Color::Green)
-//         .debug(Color::BrightMagenta)
-//         .trace(Color::BrightBlue);
-//     // This sets up a `fern` logger and initializes `log`.
-//     fern::Dispatch::new()
-//         // Formats logs
-//         .format(move |out, message, record| {
-//             out.finish(format_args!(
-//                 "[{}][{:<5}][{}] {}",
-//                 chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
-//                 colors.color(record.level()),
-//                 record.target(),
-//                 message
-//             ))
-//         })
-//         .level(log::LevelFilter::Warn)
-//         // Filter out unnecessary stuff
-//         .level_for("sludge", log::LevelFilter::Warn)
-//         // Hooks up console output.
-//         // env var for outputting to a file?
-//         // Haven't needed it yet!
-//         .chain(std::io::stderr())
-//         .apply()?;
-
-//     Ok(())
-// }
