@@ -1,7 +1,6 @@
 use {
     anyhow::*,
     atomic_refcell::{AtomicRef, AtomicRefCell, AtomicRefMut},
-    derivative::*,
     hashbrown::HashMap,
     rlua::prelude::*,
     std::{
@@ -14,240 +13,8 @@ use {
     },
 };
 
-pub struct Fetch<'a, T>(AtomicRef<'a, T>);
-
-impl<'a, T> Clone for Fetch<'a, T> {
-    fn clone(&self) -> Self {
-        Fetch(AtomicRef::clone(&self.0))
-    }
-}
-
-impl<'a, T> ops::Deref for Fetch<'a, T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-pub struct FetchMut<'a, T>(AtomicRefMut<'a, T>);
-
-impl<'a, T> ops::Deref for FetchMut<'a, T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl<'a, T> ops::DerefMut for FetchMut<'a, T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
-// Implementation ripped from the `Box::downcast` method for `Box<dyn Any + 'static + Send>`
-fn downcast_send_sync<T: Any>(
-    this: Box<dyn Any + Send + Sync>,
-) -> Result<Box<T>, Box<dyn Any + Send + Sync>> {
-    <Box<dyn Any>>::downcast(this).map_err(|s| unsafe {
-        // reapply the Send + Sync markers
-        Box::from_raw(Box::into_raw(s) as *mut (dyn Any + Send + Sync))
-    })
-}
-
-#[derive(Default, Derivative)]
-#[derivative(Debug)]
-pub struct Resources {
-    #[derivative(Debug = "ignore")]
-    map: HashMap<TypeId, AtomicRefCell<Box<dyn Any + Send + Sync>>>,
-}
-
-impl Resources {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn insert<T: Any + Send + Sync>(&mut self, resource: T) -> Option<T> {
-        let typeid = TypeId::of::<T>();
-        let wrapped = AtomicRefCell::new(Box::new(resource) as Box<dyn Any + Send + Sync>);
-        let maybe_old = self.map.insert(typeid, wrapped);
-
-        maybe_old.map(|t| *downcast_send_sync(t.into_inner()).unwrap())
-    }
-
-    pub fn has_value<T: Any + Send + Sync>(&self) -> bool {
-        self.map.contains_key(&TypeId::of::<T>())
-    }
-
-    pub fn remove<T: Any + Send + Sync>(&mut self) -> Option<T> {
-        self.map
-            .remove(&TypeId::of::<T>())
-            .map(|t| *downcast_send_sync(t.into_inner()).unwrap())
-    }
-
-    pub fn fetch<T: Any + Send>(&self) -> Fetch<T> {
-        let borrow = self
-            .map
-            .get(&TypeId::of::<T>())
-            .unwrap_or_else(|| panic!("no entry found for `{}`", std::any::type_name::<T>()))
-            .borrow();
-        Fetch(AtomicRef::map(borrow, |boxed| {
-            boxed.downcast_ref().unwrap()
-        }))
-    }
-
-    pub fn fetch_mut<T: Any + Send>(&self) -> FetchMut<T> {
-        let borrow = self
-            .map
-            .get(&TypeId::of::<T>())
-            .unwrap_or_else(|| panic!("no entry found for `{}`", std::any::type_name::<T>()))
-            .borrow_mut();
-        FetchMut(AtomicRefMut::map(borrow, |boxed| {
-            boxed.downcast_mut().unwrap()
-        }))
-    }
-
-    pub fn try_fetch<T: Any + Send>(&self) -> Option<Fetch<T>> {
-        let borrow = self.map.get(&TypeId::of::<T>())?.try_borrow().ok()?;
-        Some(Fetch(AtomicRef::map(borrow, |boxed| {
-            boxed.downcast_ref().unwrap()
-        })))
-    }
-
-    pub fn try_fetch_mut<T: Any + Send>(&self) -> Option<FetchMut<T>> {
-        let borrow = self.map.get(&TypeId::of::<T>())?.try_borrow_mut().ok()?;
-        Some(FetchMut(AtomicRefMut::map(borrow, |boxed| {
-            boxed.downcast_mut().unwrap()
-        })))
-    }
-
-    pub fn get_mut<T: Any + Send>(&mut self) -> Option<&mut T> {
-        Some(
-            self.map
-                .get_mut(&TypeId::of::<T>())?
-                .get_mut()
-                .downcast_mut()
-                .unwrap(),
-        )
-    }
-}
-
-pub struct SharedFetch<'a, T> {
-    _outer: AtomicRef<'a, Resources>,
-    inner: AtomicRef<'a, T>,
-}
-
-impl<'a, T> ops::Deref for SharedFetch<'a, T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
-pub struct SharedFetchMut<'a, T> {
-    _outer: AtomicRef<'a, Resources>,
-    inner: AtomicRefMut<'a, T>,
-}
-
-impl<'a, T> ops::Deref for SharedFetchMut<'a, T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
-impl<'a, T> ops::DerefMut for SharedFetchMut<'a, T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner
-    }
-}
-
-#[derive(Clone)]
-pub struct SharedResources {
-    shared: Pin<Arc<AtomicRefCell<Resources>>>,
-}
-
-impl LuaUserData for SharedResources {}
-
-impl From<Resources> for SharedResources {
-    fn from(resources: Resources) -> Self {
-        Self {
-            shared: Arc::pin(AtomicRefCell::new(resources)),
-        }
-    }
-}
-
-impl SharedResources {
-    pub fn new() -> Self {
-        Self::from(Resources::new())
-    }
-
-    pub fn borrow(&self) -> AtomicRef<Resources> {
-        self.shared.borrow()
-    }
-
-    pub fn borrow_mut(&self) -> AtomicRefMut<Resources> {
-        self.shared.borrow_mut()
-    }
-
-    pub fn fetch<T: Any + Send + Sync>(&self) -> SharedFetch<T> {
-        let outer = self.shared.borrow();
-        let inner = unsafe {
-            let inner_ptr = &*outer as *const Resources;
-            (*inner_ptr).fetch::<T>().0
-        };
-
-        SharedFetch {
-            inner,
-            _outer: outer,
-        }
-    }
-
-    pub fn fetch_mut<T: Any + Send>(&self) -> SharedFetchMut<T> {
-        let outer = self.shared.borrow();
-        let inner = unsafe {
-            let inner_ptr = &*outer as *const Resources;
-            (*inner_ptr).fetch_mut::<T>().0
-        };
-
-        SharedFetchMut {
-            inner,
-            _outer: outer,
-        }
-    }
-
-    pub fn try_fetch<T: Any + Send + Sync>(&self) -> Option<SharedFetch<T>> {
-        let outer = self.shared.borrow();
-        let maybe_inner = unsafe {
-            let inner_ptr = &*outer as *const Resources;
-            (*inner_ptr).try_fetch::<T>().map(|fetch| fetch.0)
-        };
-
-        maybe_inner.map(|inner| SharedFetch {
-            inner,
-            _outer: outer,
-        })
-    }
-
-    pub fn try_fetch_mut<T: Any + Send>(&self) -> Option<SharedFetchMut<T>> {
-        let outer = self.shared.borrow();
-        let maybe_inner = unsafe {
-            let inner_ptr = &*outer as *const Resources;
-            (*inner_ptr).try_fetch_mut::<T>().map(|fetch| fetch.0)
-        };
-
-        maybe_inner.map(|inner| SharedFetchMut {
-            inner,
-            _outer: outer,
-        })
-    }
-}
-
 #[derive(Debug)]
-enum BorrowedResource<'a> {
+enum ResourceEntry<'a> {
     Owned {
         pointer: Box<dyn Any + Send + Sync>,
     },
@@ -262,12 +29,12 @@ enum BorrowedResource<'a> {
 }
 
 #[derive(Debug)]
-pub struct BorrowedRef<'a: 'b, 'b, T: ?Sized> {
-    _borrow: AtomicRef<'b, BorrowedResource<'a>>,
+pub struct Fetch<'a: 'b, 'b, T: ?Sized> {
+    _borrow: AtomicRef<'b, ResourceEntry<'a>>,
     ptr: NonNull<T>,
 }
 
-impl<'a: 'b, 'b, T: ?Sized> Clone for BorrowedRef<'a, 'b, T> {
+impl<'a: 'b, 'b, T: ?Sized> Clone for Fetch<'a, 'b, T> {
     fn clone(&self) -> Self {
         Self {
             _borrow: AtomicRef::clone(&self._borrow),
@@ -276,7 +43,7 @@ impl<'a: 'b, 'b, T: ?Sized> Clone for BorrowedRef<'a, 'b, T> {
     }
 }
 
-impl<'a: 'b, 'b, T: ?Sized> ops::Deref for BorrowedRef<'a, 'b, T> {
+impl<'a: 'b, 'b, T: ?Sized> ops::Deref for Fetch<'a, 'b, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -284,16 +51,16 @@ impl<'a: 'b, 'b, T: ?Sized> ops::Deref for BorrowedRef<'a, 'b, T> {
     }
 }
 
-unsafe impl<'a: 'b, 'b, T: ?Sized> Send for BorrowedRef<'a, 'b, T> where T: Sync {}
-unsafe impl<'a: 'b, 'b, T: ?Sized> Sync for BorrowedRef<'a, 'b, T> where T: Sync {}
+unsafe impl<'a: 'b, 'b, T: ?Sized> Send for Fetch<'a, 'b, T> where T: Sync {}
+unsafe impl<'a: 'b, 'b, T: ?Sized> Sync for Fetch<'a, 'b, T> where T: Sync {}
 
 #[derive(Debug)]
-pub struct BorrowedRefMut<'a: 'b, 'b, T: ?Sized> {
-    _borrow: AtomicRefMut<'b, BorrowedResource<'a>>,
+pub struct FetchMut<'a: 'b, 'b, T: ?Sized> {
+    _borrow: AtomicRefMut<'b, ResourceEntry<'a>>,
     ptr: NonNull<T>,
 }
 
-impl<'a: 'b, 'b, T: ?Sized> ops::Deref for BorrowedRefMut<'a, 'b, T> {
+impl<'a: 'b, 'b, T: ?Sized> ops::Deref for FetchMut<'a, 'b, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -301,21 +68,31 @@ impl<'a: 'b, 'b, T: ?Sized> ops::Deref for BorrowedRefMut<'a, 'b, T> {
     }
 }
 
-impl<'a: 'b, 'b, T: ?Sized> ops::DerefMut for BorrowedRefMut<'a, 'b, T> {
+impl<'a: 'b, 'b, T: ?Sized> ops::DerefMut for FetchMut<'a, 'b, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         unsafe { self.ptr.as_mut() }
     }
 }
 
-unsafe impl<'a: 'b, 'b, T: ?Sized> Send for BorrowedRefMut<'a, 'b, T> where T: Send {}
-unsafe impl<'a: 'b, 'b, T: ?Sized> Sync for BorrowedRefMut<'a, 'b, T> where T: Sync {}
+unsafe impl<'a: 'b, 'b, T: ?Sized> Send for FetchMut<'a, 'b, T> where T: Send {}
+unsafe impl<'a: 'b, 'b, T: ?Sized> Sync for FetchMut<'a, 'b, T> where T: Sync {}
 
-#[derive(Debug)]
-pub struct BorrowedResources<'a> {
-    map: HashMap<TypeId, AtomicRefCell<BorrowedResource<'a>>>,
+// Implementation ripped from the `Box::downcast` method for `Box<dyn Any + 'static + Send>`
+fn downcast_send_sync<T: Any>(
+    this: Box<dyn Any + Send + Sync>,
+) -> Result<Box<T>, Box<dyn Any + Send + Sync>> {
+    <Box<dyn Any>>::downcast(this).map_err(|s| unsafe {
+        // reapply the Send + Sync markers
+        Box::from_raw(Box::into_raw(s) as *mut (dyn Any + Send + Sync))
+    })
 }
 
-impl<'a> BorrowedResources<'a> {
+#[derive(Debug)]
+pub struct Resources<'a> {
+    map: HashMap<TypeId, AtomicRefCell<ResourceEntry<'a>>>,
+}
+
+impl<'a> Resources<'a> {
     pub fn new() -> Self {
         Self {
             map: HashMap::new(),
@@ -330,7 +107,7 @@ impl<'a> BorrowedResources<'a> {
         self.map
             .remove(&TypeId::of::<T>())
             .and_then(|t| match t.into_inner() {
-                BorrowedResource::Owned { pointer } => Some(*downcast_send_sync(pointer).unwrap()),
+                ResourceEntry::Owned { pointer } => Some(*downcast_send_sync(pointer).unwrap()),
                 _ => None,
             })
     }
@@ -338,7 +115,7 @@ impl<'a> BorrowedResources<'a> {
     pub fn insert<T: Any + Send + Sync + 'static>(&mut self, res: T) {
         let type_id = TypeId::of::<T>();
         assert!(!self.map.contains_key(&type_id));
-        let entry = BorrowedResource::Owned {
+        let entry = ResourceEntry::Owned {
             pointer: Box::new(res),
         };
         self.map.insert(type_id, AtomicRefCell::new(entry));
@@ -347,7 +124,7 @@ impl<'a> BorrowedResources<'a> {
     pub fn insert_ref<T: Any + Send + Sync>(&mut self, res: &'a T) {
         let type_id = TypeId::of::<T>();
         assert!(!self.map.contains_key(&type_id));
-        let entry = BorrowedResource::Immutable {
+        let entry = ResourceEntry::Immutable {
             pointer: unsafe {
                 NonNull::new_unchecked(res as &'a (dyn Any + Send + Sync) as *const _ as *mut _)
             },
@@ -359,7 +136,7 @@ impl<'a> BorrowedResources<'a> {
     pub fn insert_mut<T: Any + Send + Sync>(&mut self, res: &'a mut T) {
         let type_id = TypeId::of::<T>();
         assert!(!self.map.contains_key(&type_id));
-        let entry = BorrowedResource::Mutable {
+        let entry = ResourceEntry::Mutable {
             pointer: unsafe {
                 NonNull::new_unchecked(res as &'a mut (dyn Any + Send + Sync) as *mut _)
             },
@@ -368,7 +145,7 @@ impl<'a> BorrowedResources<'a> {
         self.map.insert(type_id, AtomicRefCell::new(entry));
     }
 
-    pub fn fetch<'b, T: Any + Send + Sync>(&'b self) -> BorrowedRef<'a, 'b, T> {
+    pub fn fetch<'b, T: Any + Send + Sync>(&'b self) -> Fetch<'a, 'b, T> {
         let borrow = self
             .map
             .get(&TypeId::of::<T>())
@@ -376,21 +153,21 @@ impl<'a> BorrowedResources<'a> {
             .borrow();
         let ptr = unsafe {
             let any_ref = match &*borrow {
-                BorrowedResource::Owned { pointer } => &**pointer,
-                BorrowedResource::Mutable { pointer, .. }
-                | BorrowedResource::Immutable { pointer, .. } => pointer.as_ref(),
+                ResourceEntry::Owned { pointer } => &**pointer,
+                ResourceEntry::Mutable { pointer, .. }
+                | ResourceEntry::Immutable { pointer, .. } => pointer.as_ref(),
             };
 
             NonNull::new_unchecked(any_ref.downcast_ref::<T>().unwrap() as *const _ as *mut _)
         };
 
-        BorrowedRef {
+        Fetch {
             _borrow: borrow,
             ptr,
         }
     }
 
-    pub fn fetch_mut<'b, T: Any + Send + Sync>(&'b self) -> BorrowedRefMut<'a, 'b, T> {
+    pub fn fetch_mut<'b, T: Any + Send>(&'b self) -> FetchMut<'a, 'b, T> {
         let mut borrow = self
             .map
             .get(&TypeId::of::<T>())
@@ -398,9 +175,9 @@ impl<'a> BorrowedResources<'a> {
             .borrow_mut();
         let ptr = unsafe {
             let any_ref = match &mut *borrow {
-                BorrowedResource::Owned { pointer } => &mut **pointer,
-                BorrowedResource::Mutable { pointer, .. } => pointer.as_mut(),
-                BorrowedResource::Immutable { .. } => {
+                ResourceEntry::Owned { pointer } => &mut **pointer,
+                ResourceEntry::Mutable { pointer, .. } => pointer.as_mut(),
+                ResourceEntry::Immutable { .. } => {
                     panic!("cannot fetch immutably borrowed resource as mutable")
                 }
             };
@@ -408,43 +185,43 @@ impl<'a> BorrowedResources<'a> {
             NonNull::new_unchecked(any_ref.downcast_mut::<T>().unwrap() as *mut _)
         };
 
-        BorrowedRefMut {
+        FetchMut {
             _borrow: borrow,
             ptr,
         }
     }
 
-    pub fn try_fetch<'b, T: Any + Send + Sync>(&'b self) -> Option<BorrowedRef<'a, 'b, T>> {
+    pub fn try_fetch<'b, T: Any + Send + Sync>(&'b self) -> Option<Fetch<'a, 'b, T>> {
         let borrow = self.map.get(&TypeId::of::<T>())?.try_borrow().ok()?;
         let ptr = unsafe {
             let any_ref = match &*borrow {
-                BorrowedResource::Owned { pointer } => &**pointer,
-                BorrowedResource::Mutable { pointer, .. }
-                | BorrowedResource::Immutable { pointer, .. } => pointer.as_ref(),
+                ResourceEntry::Owned { pointer } => &**pointer,
+                ResourceEntry::Mutable { pointer, .. }
+                | ResourceEntry::Immutable { pointer, .. } => pointer.as_ref(),
             };
 
             NonNull::new_unchecked(any_ref.downcast_ref::<T>().unwrap() as *const _ as *mut _)
         };
 
-        Some(BorrowedRef {
+        Some(Fetch {
             _borrow: borrow,
             ptr,
         })
     }
 
-    pub fn try_fetch_mut<'b, T: Any + Send + Sync>(&'b self) -> Option<BorrowedRefMut<'a, 'b, T>> {
+    pub fn try_fetch_mut<'b, T: Any + Send>(&'b self) -> Option<FetchMut<'a, 'b, T>> {
         let mut borrow = self.map.get(&TypeId::of::<T>())?.try_borrow_mut().ok()?;
         let ptr = unsafe {
             let any_ref = match &mut *borrow {
-                BorrowedResource::Owned { pointer } => &mut **pointer,
-                BorrowedResource::Mutable { pointer, .. } => pointer.as_mut(),
-                BorrowedResource::Immutable { .. } => return None,
+                ResourceEntry::Owned { pointer } => &mut **pointer,
+                ResourceEntry::Mutable { pointer, .. } => pointer.as_mut(),
+                ResourceEntry::Immutable { .. } => return None,
             };
 
             NonNull::new_unchecked(any_ref.downcast_mut::<T>().unwrap() as *mut _)
         };
 
-        Some(BorrowedRefMut {
+        Some(FetchMut {
             _borrow: borrow,
             ptr,
         })
@@ -452,8 +229,8 @@ impl<'a> BorrowedResources<'a> {
 
     pub fn get_mut<T: Any + Send + Sync>(&mut self) -> Option<&mut T> {
         match self.map.get_mut(&TypeId::of::<T>())?.get_mut() {
-            BorrowedResource::Owned { pointer } => Some(pointer.downcast_mut().unwrap()),
-            BorrowedResource::Mutable { pointer, .. } => {
+            ResourceEntry::Owned { pointer } => Some(pointer.downcast_mut().unwrap()),
+            ResourceEntry::Mutable { pointer, .. } => {
                 Some(unsafe { pointer.as_mut() }.downcast_mut().unwrap())
             }
             _ => None,
@@ -461,8 +238,121 @@ impl<'a> BorrowedResources<'a> {
     }
 }
 
-unsafe impl<'a> Send for BorrowedResources<'a> {}
-unsafe impl<'a> Sync for BorrowedResources<'a> {}
+unsafe impl<'a> Send for Resources<'a> {}
+unsafe impl<'a> Sync for Resources<'a> {}
+
+pub struct SharedFetch<'a: 'b, 'b, T> {
+    _outer: AtomicRef<'b, Resources<'a>>,
+    inner: Fetch<'a, 'b, T>,
+}
+
+impl<'a: 'b, 'b, T> ops::Deref for SharedFetch<'a, 'b, T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+pub struct SharedFetchMut<'a: 'b, 'b, T> {
+    _outer: AtomicRef<'b, Resources<'a>>,
+    inner: FetchMut<'a, 'b, T>,
+}
+
+impl<'a: 'b, 'b, T> ops::Deref for SharedFetchMut<'a, 'b, T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl<'a: 'b, 'b, T> ops::DerefMut for SharedFetchMut<'a, 'b, T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
+}
+
+#[derive(Clone)]
+pub struct SharedResources<'a> {
+    shared: Pin<Arc<AtomicRefCell<Resources<'a>>>>,
+}
+
+impl<'a> LuaUserData for SharedResources<'a> {}
+
+impl<'a> From<Resources<'a>> for SharedResources<'a> {
+    fn from(resources: Resources<'a>) -> Self {
+        Self {
+            shared: Arc::pin(AtomicRefCell::new(resources)),
+        }
+    }
+}
+
+impl<'a> SharedResources<'a> {
+    pub fn new() -> Self {
+        Self::from(Resources::new())
+    }
+
+    pub fn borrow(&self) -> AtomicRef<Resources<'a>> {
+        self.shared.borrow()
+    }
+
+    pub fn borrow_mut(&self) -> AtomicRefMut<Resources<'a>> {
+        self.shared.borrow_mut()
+    }
+
+    pub fn fetch<T: Any + Send + Sync>(&self) -> SharedFetch<'a, '_, T> {
+        let outer = self.shared.borrow();
+        let inner = unsafe {
+            let inner_ptr = &*outer as *const Resources;
+            (*inner_ptr).fetch::<T>()
+        };
+
+        SharedFetch {
+            inner,
+            _outer: outer,
+        }
+    }
+
+    pub fn fetch_mut<T: Any + Send>(&self) -> SharedFetchMut<'a, '_, T> {
+        let outer = self.shared.borrow();
+        let inner = unsafe {
+            let inner_ptr = &*outer as *const Resources;
+            (*inner_ptr).fetch_mut::<T>()
+        };
+
+        SharedFetchMut {
+            inner,
+            _outer: outer,
+        }
+    }
+
+    pub fn try_fetch<T: Any + Send + Sync>(&self) -> Option<SharedFetch<'a, '_, T>> {
+        let outer = self.shared.try_borrow().ok()?;
+        let inner = unsafe {
+            let inner_ptr = &*outer as *const Resources;
+            (*inner_ptr).try_fetch::<T>()?
+        };
+
+        Some(SharedFetch {
+            inner,
+            _outer: outer,
+        })
+    }
+
+    pub fn try_fetch_mut<T: Any + Send>(&self) -> Option<SharedFetchMut<'a, '_, T>> {
+        let outer = self.shared.try_borrow().ok()?;
+        let inner = unsafe {
+            let inner_ptr = &*outer as *const Resources;
+            (*inner_ptr).try_fetch_mut::<T>()?
+        };
+
+        Some(SharedFetchMut {
+            inner,
+            _outer: outer,
+        })
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -475,7 +365,7 @@ mod tests {
         let c = true;
 
         {
-            let mut borrowed_resources = BorrowedResources::new();
+            let mut borrowed_resources = Resources::new();
             borrowed_resources.insert_mut(&mut a);
             borrowed_resources.insert_mut(&mut b);
             borrowed_resources.insert_ref(&c);

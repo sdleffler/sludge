@@ -468,7 +468,7 @@ impl<LayerProps, TileProps> TiledMap<LayerProps, TileProps> {
 
 impl<C, TileProps> Load<C, Key> for TileSheet<TileProps>
 where
-    Self: for<'a> Inspect<'a, C, &'a SharedResources>,
+    Self: for<'a> Inspect<'a, C, &'a SharedResources<'static>>,
     TileProps: DeserializeOwned + 'static,
 {
     type Error = Error;
@@ -486,7 +486,7 @@ where
 
 impl<C, LayerProps, TileProps> Load<C, Key> for TiledMap<LayerProps, TileProps>
 where
-    Self: for<'a> Inspect<'a, C, &'a SharedResources>,
+    Self: for<'a> Inspect<'a, C, &'a SharedResources<'static>>,
     LayerProps: DeserializeOwned + 'static,
     TileProps: DeserializeOwned + 'static,
 {

@@ -119,11 +119,11 @@ impl<T, E> SludgeResultExt for Result<T, E> {
 const RESOURCES_REGISTRY_KEY: &'static str = "sludge.resources";
 
 pub trait SludgeLuaContextExt {
-    fn resources(self) -> SharedResources;
+    fn resources(self) -> SharedResources<'static>;
 }
 
 impl<'lua> SludgeLuaContextExt for LuaContext<'lua> {
-    fn resources(self) -> SharedResources {
+    fn resources(self) -> SharedResources<'static> {
         self.named_registry_value::<_, SharedResources>(RESOURCES_REGISTRY_KEY)
             .unwrap()
     }
@@ -141,7 +141,7 @@ pub struct Space {
     lua: Lua,
 
     #[derivative(Debug = "ignore")]
-    resources: SharedResources,
+    resources: SharedResources<'static>,
 
     #[derivative(Debug = "ignore")]
     maintainers: DefaultDispatcher,
@@ -206,23 +206,23 @@ impl Space {
         lua.context(|lua| maintainers.update(lua, resources))
     }
 
-    pub fn fetch<T: Any + Send + Sync>(&self) -> SharedFetch<T> {
+    pub fn fetch<T: Any + Send + Sync>(&self) -> SharedFetch<'static, '_, T> {
         self.resources.fetch()
     }
 
-    pub fn fetch_mut<T: Any + Send + Sync>(&self) -> SharedFetchMut<T> {
+    pub fn fetch_mut<T: Any + Send + Sync>(&self) -> SharedFetchMut<'static, '_, T> {
         self.resources.fetch_mut()
     }
 
-    pub fn try_fetch<T: Any + Send + Sync>(&self) -> Option<SharedFetch<T>> {
+    pub fn try_fetch<T: Any + Send + Sync>(&self) -> Option<SharedFetch<'static, '_, T>> {
         self.resources.try_fetch()
     }
 
-    pub fn try_fetch_mut<T: Any + Send + Sync>(&self) -> Option<SharedFetchMut<T>> {
+    pub fn try_fetch_mut<T: Any + Send + Sync>(&self) -> Option<SharedFetchMut<'static, '_, T>> {
         self.resources.try_fetch_mut()
     }
 
-    pub fn resources(&self) -> &SharedResources {
+    pub fn resources(&self) -> &SharedResources<'static> {
         &self.resources
     }
 

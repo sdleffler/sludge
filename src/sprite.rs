@@ -385,7 +385,7 @@ impl<T: Send + Sync + 'static> SpriteSheetManager<T> {
 
 impl<C> Load<C, Key> for SpriteSheet
 where
-    SpriteSheet: for<'a> Inspect<'a, C, &'a mut SharedResources>,
+    SpriteSheet: for<'a> Inspect<'a, C, &'a mut SharedResources<'static>>,
 {
     type Error = Error;
 

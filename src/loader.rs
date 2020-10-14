@@ -13,7 +13,7 @@ pub use warmy::{
     Discovery, Inspect, Load, Loaded, Res, Storage, StoreError, StoreErrorOr, StoreOpt,
 };
 
-pub type Store = warmy::Store<SharedResources, Key>;
+pub type Store = warmy::Store<SharedResources<'static>, Key>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]

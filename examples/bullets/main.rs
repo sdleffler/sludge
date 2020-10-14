@@ -150,10 +150,7 @@ impl EventHandler for MainState {
         gfx.begin_default_pass(PassAction::default());
         gfx.apply_default_pipeline();
         gfx.apply_transforms();
-        gfx.draw(
-            canvas,
-            InstanceParam::new().scale2(Vector2::new(320., 240.)),
-        );
+        gfx.draw(canvas, None);
         gfx.end_pass();
         gfx.commit_frame();
         // let fps = timer::fps(ctx);
