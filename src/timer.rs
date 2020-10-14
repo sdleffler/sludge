@@ -199,7 +199,7 @@ impl TimeContext {
     /// since the last frame.
     ///
     /// This function will return true if the time since the last
-    /// [`update()`](../event/trait.EventHandler.html#tymethod.update)
+    /// [`tick()`](TimeContext::tick)
     /// call has been equal to or greater to the update FPS indicated by
     /// the `target_fps`.  It keeps track of fractional frames, so if you
     /// want 60 fps (16.67 ms/frame) and the game stutters so that there
@@ -212,17 +212,16 @@ impl TimeContext {
     /// in your `update()` callback:
     ///
     /// ```rust
-    /// # use ggez::*;
-    /// # fn update_game_physics() -> GameResult { Ok(()) }
+    /// # use {anyhow::*, sludge::timer::{self, TimeContext}};
+    /// # fn update_game_physics() -> Result<()> { Ok(()) }
     /// # struct State;
-    /// # impl ggez::event::EventHandler for State {
-    /// fn update(&mut self, ctx: &mut Context) -> GameResult {
-    ///     while(timer::check_update_time(ctx, 60)) {
+    /// # impl State {
+    /// fn update(&mut self, ctx: &mut TimeContext) -> Result<()> {
+    ///     while(ctx.check_update_time(60)) {
     ///         update_game_physics()?;
     ///     }
     ///     Ok(())
     /// }
-    /// # fn draw(&mut self, _ctx: &mut Context) -> GameResult { Ok(()) }
     /// # }
     /// ```
     pub fn check_update_time(&mut self, target_fps: u32) -> bool {
