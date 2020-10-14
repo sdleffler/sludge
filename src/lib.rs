@@ -226,7 +226,6 @@ impl Space {
         &self.resources
     }
 
-    /// You shouldn't need this.
     pub fn lua(&self) -> &Lua {
         &self.lua
     }
