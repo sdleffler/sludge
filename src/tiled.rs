@@ -18,10 +18,10 @@ use crate::{
         DrawableGraph, DrawableNodeId, Graphics, InstanceParam, Mesh, Sprite, SpriteBatch,
         SpriteId, Texture,
     },
-    loader::{Inspect, Key, Load, Loaded, Storage},
+    loader::{Key, Load, Loaded, Storage},
     math::*,
     tiled::xml_parser::LayerData,
-    Atom, Resources, SharedResources,
+    Atom, Resources, SharedResources, UnifiedResources,
 };
 
 mod xml_parser;
@@ -467,17 +467,20 @@ impl<LayerProps, TileProps> TiledMap<LayerProps, TileProps> {
     }
 }
 
-impl<C, TileProps> Load<C, Key> for TileSheet<TileProps>
+impl<'a, TileProps> Load<UnifiedResources<'a>, Key> for TileSheet<TileProps>
 where
-    Self: for<'a> Inspect<'a, C, &'a SharedResources<'static>>,
     TileProps: DeserializeOwned + 'static,
 {
     type Error = Error;
 
-    fn load(key: Key, _storage: &mut Storage<C, Key>, ctx: &mut C) -> Result<Loaded<Self, Key>> {
+    fn load(
+        key: Key,
+        _storage: &mut Storage<UnifiedResources, Key>,
+        ctx: &mut UnifiedResources,
+    ) -> Result<Loaded<Self, Key>> {
         match key {
             Key::Path(path) => {
-                let fh = Self::inspect(ctx).fetch_mut::<Filesystem>().open(&path)?;
+                let fh = ctx.fetch_mut::<Filesystem>().open(&path)?;
                 let tiled = xml_parser::parse_tileset(fh, 1)?;
                 Ok(TileSheet::from_tiled(&tiled)?.into())
             } //_ => bail!("can only load from logical"),
@@ -485,21 +488,21 @@ where
     }
 }
 
-impl<C, LayerProps, TileProps> Load<C, Key> for TiledMap<LayerProps, TileProps>
+impl<'a, LayerProps, TileProps> Load<UnifiedResources<'a>, Key> for TiledMap<LayerProps, TileProps>
 where
-    Self: for<'a> Inspect<'a, C, &'a SharedResources<'static>>,
     LayerProps: DeserializeOwned + 'static,
     TileProps: DeserializeOwned + 'static,
 {
     type Error = Error;
 
-    fn load(key: Key, _storage: &mut Storage<C, Key>, ctx: &mut C) -> Result<Loaded<Self, Key>> {
+    fn load(
+        key: Key,
+        _storage: &mut Storage<UnifiedResources, Key>,
+        ctx: &mut UnifiedResources,
+    ) -> Result<Loaded<Self, Key>> {
         match key {
             Key::Path(path) => {
-                let tiled = xml_parser::parse_file(
-                    &mut *Self::inspect(ctx).fetch_mut::<Filesystem>(),
-                    &path,
-                )?;
+                let tiled = xml_parser::parse_file(&mut *ctx.fetch_mut::<Filesystem>(), &path)?;
 
                 let mut deps = vec![];
                 for ts in tiled.tilesets.iter() {

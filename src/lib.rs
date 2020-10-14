@@ -58,7 +58,7 @@ pub mod prelude {
         api::{Accessor, StaticAccessor, StaticTemplate, Template},
         ecs::*,
         math::*,
-        resources::{Resources, SharedResources},
+        resources::{Resources, SharedResources, UnifiedResources},
         Scheduler, SludgeLuaContextExt, SludgeResultExt, Space, System,
     };
 

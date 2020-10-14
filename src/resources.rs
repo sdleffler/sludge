@@ -273,7 +273,7 @@ impl<'a: 'b, 'b, T> ops::DerefMut for SharedFetchMut<'a, 'b, T> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct SharedResources<'a> {
     shared: Pin<Arc<AtomicRefCell<Resources<'a>>>>,
 }
@@ -285,6 +285,12 @@ impl<'a> From<Resources<'a>> for SharedResources<'a> {
         Self {
             shared: Arc::pin(AtomicRefCell::new(resources)),
         }
+    }
+}
+
+impl<'a> Default for SharedResources<'a> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -351,6 +357,36 @@ impl<'a> SharedResources<'a> {
             inner,
             _outer: outer,
         })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct UnifiedResources<'a> {
+    pub local: SharedResources<'a>,
+    pub global: SharedResources<'a>,
+}
+
+impl<'a> UnifiedResources<'a> {
+    pub fn fetch<T: Any + Send + Sync>(&self) -> SharedFetch<'a, '_, T> {
+        self.try_fetch::<T>()
+            .expect("entry not found in local or global resources")
+    }
+
+    pub fn fetch_mut<T: Any + Send>(&self) -> SharedFetchMut<'a, '_, T> {
+        self.try_fetch_mut::<T>()
+            .expect("entry not found in local or global resources")
+    }
+
+    pub fn try_fetch<T: Any + Send + Sync>(&self) -> Option<SharedFetch<'a, '_, T>> {
+        self.local
+            .try_fetch::<T>()
+            .or_else(|| self.global.try_fetch::<T>())
+    }
+
+    pub fn try_fetch_mut<T: Any + Send>(&self) -> Option<SharedFetchMut<'a, '_, T>> {
+        self.local
+            .try_fetch_mut::<T>()
+            .or_else(|| self.global.try_fetch_mut::<T>())
     }
 }
 
