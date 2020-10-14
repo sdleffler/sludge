@@ -2,6 +2,7 @@ use {
     anyhow::*,
     hashbrown::HashMap,
     nalgebra as na,
+    rlua::prelude::*,
     serde::{de::DeserializeOwned, Deserialize, Serialize},
     std::{
         marker::PhantomData,
@@ -20,7 +21,7 @@ use crate::{
     loader::{Inspect, Key, Load, Loaded, Storage},
     math::*,
     tiled::xml_parser::LayerData,
-    Atom, SharedResources,
+    Atom, Resources, SharedResources,
 };
 
 mod xml_parser;
@@ -925,5 +926,51 @@ impl<LayerProps: LayerProperties, TileProps: TileProperties>
         }
 
         world.queue_buffer(cmds);
+    }
+}
+
+pub struct TiledMapManagerSystem<L, T> {
+    sorted_layer_parent: Option<DrawableNodeId<()>>,
+    _marker: PhantomData<(L, T)>,
+}
+
+impl<L, T> TiledMapManagerSystem<L, T> {
+    pub fn new(sorted_layer_parent: Option<DrawableNodeId<()>>) -> Self {
+        Self {
+            sorted_layer_parent,
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<L, T, P> crate::System<P> for TiledMapManagerSystem<L, T>
+where
+    L: LayerProperties,
+    T: TileProperties,
+{
+    fn init(&self, _lua: LuaContext, resources: &mut Resources, _params: &mut P) -> Result<()> {
+        if !resources.has_value::<TiledMapManager<L, T>>() {
+            let map_manager = TiledMapManager::<L, T>::new(
+                resources.get_mut::<World>().expect("no World resource!"),
+                self.sorted_layer_parent,
+            );
+            resources.insert(map_manager);
+        }
+        Ok(())
+    }
+
+    fn update(&self, _lua: LuaContext, resources: &SharedResources, _params: &P) -> Result<()> {
+        let world = resources.fetch::<World>();
+        let mut fs = resources.fetch_mut::<Filesystem>();
+        let mut gfx = resources.fetch_mut::<Graphics>();
+        let mut scene = resources.fetch_mut::<DrawableGraph>();
+
+        // FIXME(sleffy): HAAAAAAAAAAAAAACK!
+        let dt: f32 = 1. / 60.;
+
+        let mut map_manager = resources.fetch_mut::<TiledMapManager<L, T>>();
+        map_manager.update(&*world, &mut *fs, &mut *gfx, &mut *scene, dt);
+
+        Ok(())
     }
 }
