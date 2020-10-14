@@ -470,7 +470,7 @@ impl<LayerProps, TileProps> TiledMap<LayerProps, TileProps> {
 impl<'a, R, TileProps> Load<R, Key> for TileSheet<TileProps>
 where
     R: Resources<'a>,
-    TileProps: DeserializeOwned + 'static,
+    TileProps: DeserializeOwned + Send + Sync + 'static,
 {
     type Error = Error;
 
@@ -488,8 +488,8 @@ where
 impl<'a, R, LayerProps, TileProps> Load<R, Key> for TiledMap<LayerProps, TileProps>
 where
     R: Resources<'a>,
-    LayerProps: DeserializeOwned + 'static,
-    TileProps: DeserializeOwned + 'static,
+    LayerProps: DeserializeOwned + Send + Sync + 'static,
+    TileProps: DeserializeOwned + Send + Sync + 'static,
 {
     type Error = Error;
 
