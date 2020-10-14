@@ -5,7 +5,7 @@ use crate::{
     ecs::World,
     hierarchy::{HierarchyManager, ParentComponent},
     transform::TransformManager,
-    Resources, SharedResources, SludgeResultExt, UnifiedResources,
+    OwnedResources, Resources, SharedResources, SludgeResultExt, UnifiedResources,
 };
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -15,7 +15,7 @@ impl crate::System for WorldEventSystem {
     fn init(
         &self,
         _lua: LuaContext,
-        resources: &mut Resources,
+        resources: &mut OwnedResources,
         _: Option<&SharedResources>,
     ) -> Result<()> {
         if !resources.has_value::<World>() {
@@ -49,7 +49,7 @@ impl<C: ParentComponent> crate::System for HierarchySystem<C> {
     fn init(
         &self,
         _lua: LuaContext,
-        resources: &mut Resources,
+        resources: &mut OwnedResources,
         _: Option<&SharedResources>,
     ) -> Result<()> {
         if !resources.has_value::<HierarchyManager<C>>() {
@@ -86,7 +86,7 @@ impl<C: ParentComponent> crate::System for TransformSystem<C> {
     fn init(
         &self,
         _lua: LuaContext,
-        resources: &mut Resources,
+        resources: &mut OwnedResources,
         _: Option<&SharedResources>,
     ) -> Result<()> {
         if !resources.has_value::<TransformManager<C>>() {

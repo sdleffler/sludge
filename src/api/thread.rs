@@ -1,4 +1,4 @@
-use crate::{Atom, Event, EventName, SchedulerQueueChannel, SludgeLuaContextExt};
+use crate::{Atom, Event, EventName, Resources, SchedulerQueueChannel, SludgeLuaContextExt};
 use {anyhow::*, rlua::prelude::*};
 
 pub fn load<'lua>(lua: LuaContext<'lua>) -> Result<LuaValue<'lua>> {

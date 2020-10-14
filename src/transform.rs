@@ -10,7 +10,7 @@ use crate::{
     ecs::{ComponentEvent, Entity, FlaggedComponent, ScContext, SmartComponent, World},
     hierarchy::{HierarchyEvent, HierarchyManager, ParentComponent},
     math::Transform3,
-    UnifiedResources,
+    Resources,
 };
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -76,7 +76,7 @@ impl<P: ParentComponent> TransformManager<P> {
         }
     }
 
-    pub fn update(&mut self, resources: &UnifiedResources) {
+    pub fn update<'a, R: Resources<'a>>(&mut self, resources: &R) {
         self.modified.clear();
         self.removed.clear();
 
@@ -143,20 +143,20 @@ impl<P: ParentComponent> TransformManager<P> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{components::Parent, math::*};
+    use crate::{components::Parent, math::*, SharedResources};
     use approx::assert_relative_eq;
 
     #[test]
     fn parent_update() {
-        let resources = UnifiedResources::new();
+        let resources = SharedResources::new();
 
         let mut world = World::new();
         let mut hierarchy = HierarchyManager::<Parent>::new(&mut world);
         let transforms = TransformManager::new(&mut world, &mut hierarchy);
 
-        resources.local.borrow_mut().insert(world);
-        resources.local.borrow_mut().insert(hierarchy);
-        resources.local.borrow_mut().insert(transforms);
+        resources.borrow_mut().insert(world);
+        resources.borrow_mut().insert(hierarchy);
+        resources.borrow_mut().insert(transforms);
 
         let e1 = {
             let mut tx = Transform3::identity();

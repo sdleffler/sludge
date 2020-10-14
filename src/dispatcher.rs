@@ -1,5 +1,6 @@
 use crate::{
-    dependency_graph::DependencyGraph, Resources, SharedResources, System, UnifiedResources,
+    dependency_graph::DependencyGraph, OwnedResources, Resources, SharedResources, System,
+    UnifiedResources,
 };
 use {anyhow::*, rlua::prelude::*};
 
@@ -31,7 +32,7 @@ impl<'a> Dispatcher<'a> {
     pub fn refresh<'lua>(
         &mut self,
         lua: LuaContext<'lua>,
-        local_resources: &mut Resources,
+        local_resources: &mut OwnedResources,
         global_resources: Option<&SharedResources>,
     ) -> Result<()> {
         if self.dependency_graph.update()? {

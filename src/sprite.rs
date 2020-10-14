@@ -10,9 +10,9 @@ use {
 use crate::{
     ecs::*,
     filesystem::Filesystem,
-    loader::{Inspect, Key, Load, Loaded, Res, Storage},
+    loader::{Key, Load, Loaded, Res, Storage},
     math::*,
-    SharedResources,
+    Resources,
 };
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -383,16 +383,13 @@ impl<T: Send + Sync + 'static> SpriteSheetManager<T> {
     }
 }
 
-impl<C> Load<C, Key> for SpriteSheet
-where
-    SpriteSheet: for<'a> Inspect<'a, C, &'a mut SharedResources<'static>>,
-{
+impl<'a, R: Resources<'a>> Load<R, Key> for SpriteSheet {
     type Error = Error;
 
-    fn load(key: Key, _storage: &mut Storage<C, Key>, ctx: &mut C) -> Result<Loaded<Self, Key>> {
+    fn load(key: Key, _storage: &mut Storage<R, Key>, ctx: &mut R) -> Result<Loaded<Self, Key>> {
         match key {
             Key::Path(path) => {
-                let mut fh = Self::inspect(ctx).fetch_mut::<Filesystem>().open(&path)?;
+                let mut fh = ctx.fetch_mut::<Filesystem>().open(&path)?;
                 let mut buf = String::new();
                 fh.read_to_string(&mut buf)?;
                 Ok(SpriteSheet::from_json(&buf)?.into())

@@ -58,7 +58,7 @@ pub mod prelude {
         api::{Accessor, StaticAccessor, StaticTemplate, Template},
         ecs::*,
         math::*,
-        resources::{Resources, SharedResources, UnifiedResources},
+        resources::{OwnedResources, Resources, SharedResources, UnifiedResources},
         Scheduler, SludgeLuaContextExt, SludgeResultExt, Space, System,
     };
 
@@ -134,7 +134,7 @@ pub trait System {
     fn init(
         &self,
         lua: LuaContext,
-        local: &mut Resources,
+        local: &mut OwnedResources,
         global: Option<&SharedResources>,
     ) -> Result<()>;
 
@@ -161,7 +161,7 @@ impl Space {
 
     pub fn with_global_resources(global: SharedResources<'static>) -> Result<Self> {
         let lua = Lua::new();
-        let mut local = Resources::new();
+        let mut local = OwnedResources::new();
 
         let (scheduler, queue_handle) = Scheduler::new();
         local.insert(scheduler);

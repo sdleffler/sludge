@@ -88,11 +88,11 @@ fn downcast_send_sync<T: Any>(
 }
 
 #[derive(Debug)]
-pub struct Resources<'a> {
+pub struct OwnedResources<'a> {
     map: HashMap<TypeId, AtomicRefCell<ResourceEntry<'a>>>,
 }
 
-impl<'a> Resources<'a> {
+impl<'a> OwnedResources<'a> {
     pub fn new() -> Self {
         Self {
             map: HashMap::new(),
@@ -238,11 +238,11 @@ impl<'a> Resources<'a> {
     }
 }
 
-unsafe impl<'a> Send for Resources<'a> {}
-unsafe impl<'a> Sync for Resources<'a> {}
+unsafe impl<'a> Send for OwnedResources<'a> {}
+unsafe impl<'a> Sync for OwnedResources<'a> {}
 
 pub struct SharedFetch<'a: 'b, 'b, T> {
-    _outer: AtomicRef<'b, Resources<'a>>,
+    _outer: AtomicRef<'b, OwnedResources<'a>>,
     inner: Fetch<'a, 'b, T>,
 }
 
@@ -255,7 +255,7 @@ impl<'a: 'b, 'b, T> ops::Deref for SharedFetch<'a, 'b, T> {
 }
 
 pub struct SharedFetchMut<'a: 'b, 'b, T> {
-    _outer: AtomicRef<'b, Resources<'a>>,
+    _outer: AtomicRef<'b, OwnedResources<'a>>,
     inner: FetchMut<'a, 'b, T>,
 }
 
@@ -275,13 +275,13 @@ impl<'a: 'b, 'b, T> ops::DerefMut for SharedFetchMut<'a, 'b, T> {
 
 #[derive(Debug, Clone)]
 pub struct SharedResources<'a> {
-    shared: Pin<Arc<AtomicRefCell<Resources<'a>>>>,
+    shared: Pin<Arc<AtomicRefCell<OwnedResources<'a>>>>,
 }
 
 impl<'a> LuaUserData for SharedResources<'a> {}
 
-impl<'a> From<Resources<'a>> for SharedResources<'a> {
-    fn from(resources: Resources<'a>) -> Self {
+impl<'a> From<OwnedResources<'a>> for SharedResources<'a> {
+    fn from(resources: OwnedResources<'a>) -> Self {
         Self {
             shared: Arc::pin(AtomicRefCell::new(resources)),
         }
@@ -296,21 +296,23 @@ impl<'a> Default for SharedResources<'a> {
 
 impl<'a> SharedResources<'a> {
     pub fn new() -> Self {
-        Self::from(Resources::new())
+        Self::from(OwnedResources::new())
     }
+}
 
-    pub fn borrow(&self) -> AtomicRef<Resources<'a>> {
+impl<'a> Resources<'a> for SharedResources<'a> {
+    fn borrow(&self) -> AtomicRef<OwnedResources<'a>> {
         self.shared.borrow()
     }
 
-    pub fn borrow_mut(&self) -> AtomicRefMut<Resources<'a>> {
+    fn borrow_mut(&self) -> AtomicRefMut<OwnedResources<'a>> {
         self.shared.borrow_mut()
     }
 
-    pub fn fetch<T: Any + Send + Sync>(&self) -> SharedFetch<'a, '_, T> {
+    fn fetch<T: Any + Send + Sync>(&self) -> SharedFetch<'a, '_, T> {
         let outer = self.shared.borrow();
         let inner = unsafe {
-            let inner_ptr = &*outer as *const Resources;
+            let inner_ptr = &*outer as *const OwnedResources;
             (*inner_ptr).fetch::<T>()
         };
 
@@ -320,10 +322,10 @@ impl<'a> SharedResources<'a> {
         }
     }
 
-    pub fn fetch_mut<T: Any + Send>(&self) -> SharedFetchMut<'a, '_, T> {
+    fn fetch_mut<T: Any + Send>(&self) -> SharedFetchMut<'a, '_, T> {
         let outer = self.shared.borrow();
         let inner = unsafe {
-            let inner_ptr = &*outer as *const Resources;
+            let inner_ptr = &*outer as *const OwnedResources;
             (*inner_ptr).fetch_mut::<T>()
         };
 
@@ -333,10 +335,10 @@ impl<'a> SharedResources<'a> {
         }
     }
 
-    pub fn try_fetch<T: Any + Send + Sync>(&self) -> Option<SharedFetch<'a, '_, T>> {
+    fn try_fetch<T: Any + Send + Sync>(&self) -> Option<SharedFetch<'a, '_, T>> {
         let outer = self.shared.try_borrow().ok()?;
         let inner = unsafe {
-            let inner_ptr = &*outer as *const Resources;
+            let inner_ptr = &*outer as *const OwnedResources;
             (*inner_ptr).try_fetch::<T>()?
         };
 
@@ -346,10 +348,10 @@ impl<'a> SharedResources<'a> {
         })
     }
 
-    pub fn try_fetch_mut<T: Any + Send>(&self) -> Option<SharedFetchMut<'a, '_, T>> {
+    fn try_fetch_mut<T: Any + Send>(&self) -> Option<SharedFetchMut<'a, '_, T>> {
         let outer = self.shared.try_borrow().ok()?;
         let inner = unsafe {
-            let inner_ptr = &*outer as *const Resources;
+            let inner_ptr = &*outer as *const OwnedResources;
             (*inner_ptr).try_fetch_mut::<T>()?
         };
 
@@ -373,24 +375,34 @@ impl<'a> UnifiedResources<'a> {
             global: SharedResources::new(),
         }
     }
+}
 
-    pub fn fetch<T: Any + Send + Sync>(&self) -> SharedFetch<'a, '_, T> {
+impl<'a> Resources<'a> for UnifiedResources<'a> {
+    fn borrow(&self) -> AtomicRef<OwnedResources<'a>> {
+        self.local.borrow()
+    }
+
+    fn borrow_mut(&self) -> AtomicRefMut<OwnedResources<'a>> {
+        self.local.borrow_mut()
+    }
+
+    fn fetch<T: Any + Send + Sync>(&self) -> SharedFetch<'a, '_, T> {
         self.try_fetch::<T>()
             .expect("entry not found in local or global resources")
     }
 
-    pub fn fetch_mut<T: Any + Send>(&self) -> SharedFetchMut<'a, '_, T> {
+    fn fetch_mut<T: Any + Send>(&self) -> SharedFetchMut<'a, '_, T> {
         self.try_fetch_mut::<T>()
             .expect("entry not found in local or global resources")
     }
 
-    pub fn try_fetch<T: Any + Send + Sync>(&self) -> Option<SharedFetch<'a, '_, T>> {
+    fn try_fetch<T: Any + Send + Sync>(&self) -> Option<SharedFetch<'a, '_, T>> {
         self.local
             .try_fetch::<T>()
             .or_else(|| self.global.try_fetch::<T>())
     }
 
-    pub fn try_fetch_mut<T: Any + Send>(&self) -> Option<SharedFetchMut<'a, '_, T>> {
+    fn try_fetch_mut<T: Any + Send>(&self) -> Option<SharedFetchMut<'a, '_, T>> {
         self.local
             .try_fetch_mut::<T>()
             .or_else(|| self.global.try_fetch_mut::<T>())
@@ -398,6 +410,15 @@ impl<'a> UnifiedResources<'a> {
 }
 
 impl<'a> LuaUserData for UnifiedResources<'a> {}
+
+pub trait Resources<'a> {
+    fn borrow(&self) -> AtomicRef<OwnedResources<'a>>;
+    fn borrow_mut(&self) -> AtomicRefMut<OwnedResources<'a>>;
+    fn fetch<T: Any + Send + Sync>(&self) -> SharedFetch<'a, '_, T>;
+    fn fetch_mut<T: Any + Send>(&self) -> SharedFetchMut<'a, '_, T>;
+    fn try_fetch<T: Any + Send + Sync>(&self) -> Option<SharedFetch<'a, '_, T>>;
+    fn try_fetch_mut<T: Any + Send>(&self) -> Option<SharedFetchMut<'a, '_, T>>;
+}
 
 #[cfg(test)]
 mod tests {
@@ -410,7 +431,7 @@ mod tests {
         let c = true;
 
         {
-            let mut borrowed_resources = Resources::new();
+            let mut borrowed_resources = OwnedResources::new();
             borrowed_resources.insert_mut(&mut a);
             borrowed_resources.insert_mut(&mut b);
             borrowed_resources.insert_ref(&c);

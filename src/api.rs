@@ -1,6 +1,6 @@
 use crate::{
     ecs::{Entity, LightEntity},
-    SludgeLuaContextExt,
+    Resources, SludgeLuaContextExt,
 };
 use {
     anyhow::*,

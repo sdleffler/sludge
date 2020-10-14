@@ -21,7 +21,7 @@ use crate::{
     loader::{Key, Load, Loaded, Storage},
     math::*,
     tiled::xml_parser::LayerData,
-    Atom, Resources, SharedResources, UnifiedResources,
+    Atom, OwnedResources, Resources, SharedResources, UnifiedResources,
 };
 
 mod xml_parser;
@@ -467,17 +467,14 @@ impl<LayerProps, TileProps> TiledMap<LayerProps, TileProps> {
     }
 }
 
-impl<'a, TileProps> Load<UnifiedResources<'a>, Key> for TileSheet<TileProps>
+impl<'a, R, TileProps> Load<R, Key> for TileSheet<TileProps>
 where
+    R: Resources<'a>,
     TileProps: DeserializeOwned + 'static,
 {
     type Error = Error;
 
-    fn load(
-        key: Key,
-        _storage: &mut Storage<UnifiedResources, Key>,
-        ctx: &mut UnifiedResources,
-    ) -> Result<Loaded<Self, Key>> {
+    fn load(key: Key, _storage: &mut Storage<R, Key>, ctx: &mut R) -> Result<Loaded<Self, Key>> {
         match key {
             Key::Path(path) => {
                 let fh = ctx.fetch_mut::<Filesystem>().open(&path)?;
@@ -488,18 +485,15 @@ where
     }
 }
 
-impl<'a, LayerProps, TileProps> Load<UnifiedResources<'a>, Key> for TiledMap<LayerProps, TileProps>
+impl<'a, R, LayerProps, TileProps> Load<R, Key> for TiledMap<LayerProps, TileProps>
 where
+    R: Resources<'a>,
     LayerProps: DeserializeOwned + 'static,
     TileProps: DeserializeOwned + 'static,
 {
     type Error = Error;
 
-    fn load(
-        key: Key,
-        _storage: &mut Storage<UnifiedResources, Key>,
-        ctx: &mut UnifiedResources,
-    ) -> Result<Loaded<Self, Key>> {
+    fn load(key: Key, _storage: &mut Storage<R, Key>, ctx: &mut R) -> Result<Loaded<Self, Key>> {
         match key {
             Key::Path(path) => {
                 let tiled = xml_parser::parse_file(&mut *ctx.fetch_mut::<Filesystem>(), &path)?;
@@ -954,7 +948,7 @@ where
     fn init(
         &self,
         _lua: LuaContext,
-        resources: &mut Resources,
+        resources: &mut OwnedResources,
         _: Option<&SharedResources>,
     ) -> Result<()> {
         if !resources.has_value::<TiledMapManager<L, T>>() {

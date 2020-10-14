@@ -8,7 +8,7 @@ use {
 
 use crate::{
     ecs::{ComponentEvent, Entity, FlaggedComponent, ScContext, World},
-    UnifiedResources,
+    Resources,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -147,7 +147,7 @@ impl<P: ParentComponent> HierarchyManager<P> {
         &self.changed
     }
 
-    pub fn update(&mut self, resources: &UnifiedResources) {
+    pub fn update<'a, R: Resources<'a>>(&mut self, resources: &R) {
         self.inserted.clear();
         self.modified.clear();
         self.removed.clear();

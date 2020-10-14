@@ -252,7 +252,7 @@ impl SpatialHasher {
         &self.grid
     }
 
-    pub fn update(&mut self, resources: &UnifiedResources) {
+    pub fn update<'a, R: Resources<'a>>(&mut self, resources: &R) {
         self.added.clear();
         self.modified.clear();
         self.removed.clear();
@@ -328,7 +328,7 @@ impl System for SpatialHashingSystem {
     fn init(
         &self,
         _lua: LuaContext,
-        resources: &mut Resources,
+        resources: &mut OwnedResources,
         _: Option<&SharedResources>,
     ) -> Result<()> {
         if !resources.has_value::<SpatialHasher>() {
