@@ -9,7 +9,10 @@ use {
     nalgebra as na,
     rlua::prelude::*,
     smallvec::SmallVec,
-    std::{any::Any, cmp::Ordering, collections::BinaryHeap, fmt, iter, ops, pin::Pin, sync::Arc},
+    std::{
+        any::Any, cmp::Ordering, collections::BinaryHeap, fmt, iter, marker::PhantomData, ops,
+        pin::Pin, ptr::NonNull, sync::Arc,
+    },
     string_cache::DefaultAtom,
     thunderdome::{Arena, Index},
 };
@@ -801,5 +804,180 @@ impl SharedResources {
             inner,
             _outer: outer,
         })
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+enum BorrowedResource<'a> {
+    Mutable {
+        pointer: NonNull<dyn Any + Send + Sync>,
+        _marker: PhantomData<&'a mut ()>,
+    },
+    Immutable {
+        pointer: NonNull<dyn Any + Send + Sync>,
+        _marker: PhantomData<&'a ()>,
+    },
+}
+
+#[derive(Debug)]
+pub struct BorrowedRef<'a: 'b, 'b, T: ?Sized> {
+    _borrow: AtomicRef<'b, BorrowedResource<'a>>,
+    ptr: NonNull<T>,
+}
+
+impl<'a: 'b, 'b, T: ?Sized> Clone for BorrowedRef<'a, 'b, T> {
+    fn clone(&self) -> Self {
+        Self {
+            _borrow: AtomicRef::clone(&self._borrow),
+            ptr: self.ptr,
+        }
+    }
+}
+
+impl<'a: 'b, 'b, T: ?Sized> ops::Deref for BorrowedRef<'a, 'b, T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { self.ptr.as_ref() }
+    }
+}
+
+unsafe impl<'a: 'b, 'b, T: ?Sized> Send for BorrowedRef<'a, 'b, T> where T: Sync {}
+unsafe impl<'a: 'b, 'b, T: ?Sized> Sync for BorrowedRef<'a, 'b, T> where T: Sync {}
+
+#[derive(Debug)]
+pub struct BorrowedRefMut<'a: 'b, 'b, T: ?Sized> {
+    _borrow: AtomicRefMut<'b, BorrowedResource<'a>>,
+    ptr: NonNull<T>,
+}
+
+impl<'a: 'b, 'b, T: ?Sized> ops::Deref for BorrowedRefMut<'a, 'b, T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { self.ptr.as_ref() }
+    }
+}
+
+impl<'a: 'b, 'b, T: ?Sized> ops::DerefMut for BorrowedRefMut<'a, 'b, T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe { self.ptr.as_mut() }
+    }
+}
+
+unsafe impl<'a: 'b, 'b, T: ?Sized> Send for BorrowedRefMut<'a, 'b, T> where T: Send {}
+unsafe impl<'a: 'b, 'b, T: ?Sized> Sync for BorrowedRefMut<'a, 'b, T> where T: Sync {}
+
+#[derive(Debug)]
+pub struct BorrowedResources<'a> {
+    values: HashMap<TypeId, AtomicRefCell<BorrowedResource<'a>>>,
+}
+
+impl<'a> BorrowedResources<'a> {
+    pub fn new() -> Self {
+        Self {
+            values: HashMap::new(),
+        }
+    }
+
+    pub fn insert_ref<T: Any + Send + Sync>(&mut self, res: &'a T) {
+        let type_id = TypeId::of::<T>();
+        assert!(!self.values.contains_key(&type_id));
+        let entry = BorrowedResource::Immutable {
+            pointer: unsafe {
+                NonNull::new_unchecked(res as &'a (dyn Any + Send + Sync) as *const _ as *mut _)
+            },
+            _marker: PhantomData,
+        };
+        self.values.insert(type_id, AtomicRefCell::new(entry));
+    }
+
+    pub fn insert_mut<T: Any + Send + Sync>(&mut self, res: &'a mut T) {
+        let type_id = TypeId::of::<T>();
+        assert!(!self.values.contains_key(&type_id));
+        let entry = BorrowedResource::Mutable {
+            pointer: unsafe {
+                NonNull::new_unchecked(res as &'a mut (dyn Any + Send + Sync) as *mut _)
+            },
+            _marker: PhantomData,
+        };
+        self.values.insert(type_id, AtomicRefCell::new(entry));
+    }
+
+    pub fn get<'b, T: Any + Send + Sync>(&'b self) -> Option<BorrowedRef<'a, 'b, T>> {
+        let borrow = self.values.get(&TypeId::of::<T>())?.borrow();
+        let ptr = unsafe {
+            let any_ref = match &*borrow {
+                BorrowedResource::Mutable { pointer, .. }
+                | BorrowedResource::Immutable { pointer, .. } => pointer.as_ref(),
+            };
+
+            NonNull::new_unchecked(any_ref.downcast_ref::<T>()? as *const _ as *mut _)
+        };
+
+        Some(BorrowedRef {
+            _borrow: borrow,
+            ptr,
+        })
+    }
+
+    pub fn get_mut<'b, T: Any + Send + Sync>(&'b self) -> Option<BorrowedRefMut<'a, 'b, T>> {
+        let mut borrow = self.values.get(&TypeId::of::<T>())?.borrow_mut();
+        let ptr = unsafe {
+            let any_ref = match &mut *borrow {
+                BorrowedResource::Mutable { pointer, .. } => pointer.as_mut(),
+                BorrowedResource::Immutable { .. } => return None,
+            };
+
+            NonNull::new_unchecked(any_ref.downcast_mut::<T>()? as *mut _)
+        };
+
+        Some(BorrowedRefMut {
+            _borrow: borrow,
+            ptr,
+        })
+    }
+}
+
+unsafe impl<'a> Send for BorrowedResources<'a> {}
+unsafe impl<'a> Sync for BorrowedResources<'a> {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn borrowed_resources() {
+        let mut a = 5i32;
+        let mut b: &'static str = "hello";
+        let c = true;
+
+        {
+            let mut borrowed_resources = BorrowedResources::new();
+            borrowed_resources.insert_mut(&mut a);
+            borrowed_resources.insert_mut(&mut b);
+            borrowed_resources.insert_ref(&c);
+
+            {
+                assert_eq!(
+                    borrowed_resources.get::<i32>().as_deref().copied(),
+                    Some(5i32)
+                );
+
+                *borrowed_resources
+                    .get_mut::<&'static str>()
+                    .as_deref_mut()
+                    .unwrap() = "world";
+
+                assert_eq!(
+                    borrowed_resources.get::<bool>().as_deref().copied(),
+                    Some(true)
+                );
+            }
+
+            let _ = borrowed_resources;
+        }
+
+        assert_eq!(b, "world");
     }
 }
