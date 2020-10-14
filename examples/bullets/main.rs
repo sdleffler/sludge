@@ -131,7 +131,7 @@ impl EventHandler for MainState {
             //}
         });
 
-        space.maintain(None).unwrap();
+        space.maintain().unwrap();
 
         Ok(())
     }

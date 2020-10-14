@@ -367,6 +367,13 @@ pub struct UnifiedResources<'a> {
 }
 
 impl<'a> UnifiedResources<'a> {
+    pub fn new() -> Self {
+        Self {
+            local: SharedResources::new(),
+            global: SharedResources::new(),
+        }
+    }
+
     pub fn fetch<T: Any + Send + Sync>(&self) -> SharedFetch<'a, '_, T> {
         self.try_fetch::<T>()
             .expect("entry not found in local or global resources")
@@ -389,6 +396,8 @@ impl<'a> UnifiedResources<'a> {
             .or_else(|| self.global.try_fetch_mut::<T>())
     }
 }
+
+impl<'a> LuaUserData for UnifiedResources<'a> {}
 
 #[cfg(test)]
 mod tests {

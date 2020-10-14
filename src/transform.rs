@@ -10,7 +10,7 @@ use crate::{
     ecs::{ComponentEvent, Entity, FlaggedComponent, ScContext, SmartComponent, World},
     hierarchy::{HierarchyEvent, HierarchyManager, ParentComponent},
     math::Transform3,
-    SharedResources,
+    UnifiedResources,
 };
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -76,7 +76,7 @@ impl<P: ParentComponent> TransformManager<P> {
         }
     }
 
-    pub fn update(&mut self, resources: &SharedResources) {
+    pub fn update(&mut self, resources: &UnifiedResources) {
         self.modified.clear();
         self.removed.clear();
 
@@ -148,15 +148,15 @@ mod tests {
 
     #[test]
     fn parent_update() {
-        let resources = crate::SharedResources::new();
+        let resources = UnifiedResources::new();
 
         let mut world = World::new();
         let mut hierarchy = HierarchyManager::<Parent>::new(&mut world);
         let transforms = TransformManager::new(&mut world, &mut hierarchy);
 
-        resources.borrow_mut().insert(world);
-        resources.borrow_mut().insert(hierarchy);
-        resources.borrow_mut().insert(transforms);
+        resources.local.borrow_mut().insert(world);
+        resources.local.borrow_mut().insert(hierarchy);
+        resources.local.borrow_mut().insert(transforms);
 
         let e1 = {
             let mut tx = Transform3::identity();

@@ -1,4 +1,6 @@
-use crate::{dependency_graph::DependencyGraph, Resources, SharedResources, System};
+use crate::{
+    dependency_graph::DependencyGraph, Resources, SharedResources, System, UnifiedResources,
+};
 use {anyhow::*, rlua::prelude::*};
 
 pub struct Dispatcher<'a> {
@@ -45,13 +47,16 @@ impl<'a> Dispatcher<'a> {
     pub fn update<'lua>(
         &mut self,
         lua: LuaContext<'lua>,
-        local_resources: &SharedResources,
-        global_resources: Option<&SharedResources>,
+        resources: &UnifiedResources,
     ) -> Result<()> {
-        self.refresh(lua, &mut *local_resources.borrow_mut(), global_resources)?;
+        self.refresh(
+            lua,
+            &mut *resources.local.borrow_mut(),
+            Some(&resources.global),
+        )?;
 
         for (_, sys) in self.dependency_graph.sorted() {
-            sys.update(lua, local_resources, global_resources)?;
+            sys.update(lua, resources)?;
         }
 
         Ok(())

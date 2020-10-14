@@ -137,12 +137,7 @@ pub trait System {
         global: Option<&SharedResources>,
     ) -> Result<()>;
 
-    fn update(
-        &self,
-        lua: LuaContext,
-        local: &SharedResources,
-        global: Option<&SharedResources>,
-    ) -> Result<()>;
+    fn update(&self, lua: LuaContext, resources: &UnifiedResources) -> Result<()>;
 }
 
 #[derive(Derivative)]
@@ -152,7 +147,7 @@ pub struct Space {
     lua: Lua,
 
     #[derivative(Debug = "ignore")]
-    resources: SharedResources<'static>,
+    resources: UnifiedResources<'static>,
 
     #[derivative(Debug = "ignore")]
     maintainers: Dispatcher<'static>,
@@ -160,18 +155,23 @@ pub struct Space {
 
 impl Space {
     pub fn new() -> Result<Self> {
+        Self::with_global_resources(SharedResources::new())
+    }
+
+    pub fn with_global_resources(global: SharedResources<'static>) -> Result<Self> {
         let lua = Lua::new();
-        let mut resources = Resources::new();
+        let mut local = Resources::new();
 
         let (scheduler, queue_handle) = Scheduler::new();
-        resources.insert(scheduler);
-        resources.insert(queue_handle);
-        resources.insert(Registry::new()?);
+        local.insert(scheduler);
+        local.insert(queue_handle);
+        local.insert(Registry::new()?);
 
-        let shared_resources = SharedResources::from(resources);
+        let local = SharedResources::from(local);
+        let resources = UnifiedResources { local, global };
 
         lua.context(|lua_ctx| -> Result<_> {
-            lua_ctx.set_named_registry_value(RESOURCES_REGISTRY_KEY, shared_resources.clone())?;
+            lua_ctx.set_named_registry_value(RESOURCES_REGISTRY_KEY, resources.clone())?;
             crate::api::load(lua_ctx)?;
 
             Ok(())
@@ -179,7 +179,7 @@ impl Space {
 
         let mut this = Self {
             lua,
-            resources: shared_resources,
+            resources,
             maintainers: Dispatcher::new(),
         };
 
@@ -195,7 +195,7 @@ impl Space {
             &["WorldEvent", "Hierarchy"],
         )?;
 
-        this.maintain(None)?;
+        this.maintain()?;
 
         Ok(this)
     }
@@ -207,14 +207,14 @@ impl Space {
         self.maintainers.register(system, name, deps)
     }
 
-    pub fn maintain(&mut self, global_resources: Option<&SharedResources>) -> Result<()> {
+    pub fn maintain(&mut self) -> Result<()> {
         let Self {
             lua,
             maintainers,
             resources,
         } = self;
 
-        lua.context(|lua| maintainers.update(lua, resources, global_resources))
+        lua.context(|lua| maintainers.update(lua, resources))
     }
 
     pub fn fetch<T: Any + Send + Sync>(&self) -> SharedFetch<'static, '_, T> {
@@ -233,7 +233,7 @@ impl Space {
         self.resources.try_fetch_mut()
     }
 
-    pub fn resources(&self) -> &SharedResources<'static> {
+    pub fn resources(&self) -> &UnifiedResources<'static> {
         &self.resources
     }
 

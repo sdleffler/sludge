@@ -5,7 +5,7 @@ use crate::{
     ecs::World,
     hierarchy::{HierarchyManager, ParentComponent},
     transform::TransformManager,
-    Resources, SharedResources, SludgeResultExt,
+    Resources, SharedResources, SludgeResultExt, UnifiedResources,
 };
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -24,12 +24,7 @@ impl crate::System for WorldEventSystem {
         Ok(())
     }
 
-    fn update(
-        &self,
-        _lua: LuaContext,
-        resources: &SharedResources,
-        _: Option<&SharedResources>,
-    ) -> Result<()> {
+    fn update(&self, _lua: LuaContext, resources: &UnifiedResources) -> Result<()> {
         let _ = resources
             .fetch_mut::<World>()
             .flush_queue()
@@ -69,12 +64,7 @@ impl<C: ParentComponent> crate::System for HierarchySystem<C> {
         Ok(())
     }
 
-    fn update(
-        &self,
-        _lua: LuaContext,
-        resources: &SharedResources,
-        _: Option<&SharedResources>,
-    ) -> Result<()> {
+    fn update(&self, _lua: LuaContext, resources: &UnifiedResources) -> Result<()> {
         let hierarchy = &mut *resources.fetch_mut::<HierarchyManager<C>>();
         hierarchy.update(resources);
 
@@ -114,12 +104,7 @@ impl<C: ParentComponent> crate::System for TransformSystem<C> {
         Ok(())
     }
 
-    fn update(
-        &self,
-        _lua: LuaContext,
-        resources: &SharedResources,
-        _: Option<&SharedResources>,
-    ) -> Result<()> {
+    fn update(&self, _lua: LuaContext, resources: &UnifiedResources) -> Result<()> {
         let transforms = &mut *resources.fetch_mut::<TransformManager<C>>();
         transforms.update(resources);
 
