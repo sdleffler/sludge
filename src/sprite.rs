@@ -10,8 +10,8 @@ use {
 use crate::{
     ecs::*,
     filesystem::Filesystem,
+    loader::{Inspect, Key, Load, Loaded, Res, Storage},
     math::*,
-    resources::{Inspect, Key, Load, Loaded, Res, Storage},
     SharedResources,
 };
 
