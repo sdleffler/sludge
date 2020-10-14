@@ -66,7 +66,9 @@ impl MainState {
 }
 
 impl EventHandler for MainState {
-    fn init(ctx: Graphics) -> Result<Self> {
+    type Args = ();
+
+    fn init(ctx: Graphics, _: ()) -> Result<Self> {
         Self::new(ctx)
     }
 
@@ -197,12 +199,15 @@ fn main() -> Result<()> {
         .chain(std::io::stdout())
         .apply()?;
 
-    sludge::event::run::<MainState>(Conf {
-        window_title: "Bullets!".to_string(),
-        window_width: 320 * 4,
-        window_height: 240 * 4,
-        ..Conf::default()
-    });
+    sludge::event::run::<MainState>(
+        Conf {
+            window_title: "Bullets!".to_string(),
+            window_width: 320 * 4,
+            window_height: 240 * 4,
+            ..Conf::default()
+        },
+        (),
+    );
 
     // let (mut ctx, mut event_loop) = ggez::ContextBuilder::new("bullets", "Sean Leffler")
     //     .window_setup(ggez::conf::WindowSetup::default().title("Bullets!"))

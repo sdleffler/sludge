@@ -7,7 +7,9 @@ use crate::{
 use {anyhow::*, miniquad as mq};
 
 pub trait EventHandler: Sized + 'static {
-    fn init(ctx: Graphics) -> Result<Self>;
+    type Args;
+
+    fn init(ctx: Graphics, args: Self::Args) -> Result<Self>;
     fn update(&mut self) -> Result<()>;
     fn draw(&mut self) -> Result<()>;
 
@@ -24,12 +26,12 @@ pub struct MqHandler<H: EventHandler> {
 }
 
 impl<H: EventHandler> MqHandler<H> {
-    pub fn new(ctx: mq::Context) -> Self {
+    pub fn new(ctx: mq::Context, args: H::Args) -> Self {
         let context = Graphics::new(ctx)
             .log_error_err(module_path!())
             .expect("error creating miniquad context");
         Self {
-            handler: H::init(context)
+            handler: H::init(context, args)
                 .log_error_err(module_path!())
                 .expect("error initializing event handler"),
         }
@@ -105,7 +107,7 @@ impl<H: EventHandler> mq::EventHandlerFree for MqHandler<H> {
     fn quit_requested_event(&mut self) {}
 }
 
-pub fn run<T: EventHandler>(conf: Conf) {
+pub fn run<T: EventHandler>(conf: Conf, args: T::Args) {
     let mq_conf = mq::conf::Conf {
         window_title: conf.window_title,
         window_width: conf.window_width as i32,
@@ -113,5 +115,7 @@ pub fn run<T: EventHandler>(conf: Conf) {
         ..mq::conf::Conf::default()
     };
 
-    mq::start(mq_conf, |ctx| mq::UserData::free(MqHandler::<T>::new(ctx)));
+    mq::start(mq_conf, |ctx| {
+        mq::UserData::free(MqHandler::<T>::new(ctx, args))
+    });
 }
