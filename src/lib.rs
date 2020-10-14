@@ -73,7 +73,7 @@ pub use {
     std::any::TypeId,
 };
 
-use crate::{api::Registry, dispatcher::Dispatcher};
+use crate::{api::Registry, dispatcher::DefaultDispatcher};
 
 pub trait SludgeResultExt: Sized {
     type Ok;
@@ -128,9 +128,9 @@ impl<'lua> SludgeLuaContextExt for LuaContext<'lua> {
     }
 }
 
-pub trait System: 'static {
-    fn init(&self, lua: LuaContext, resources: &mut Resources) -> Result<()>;
-    fn update(&self, lua: LuaContext, resources: &SharedResources) -> Result<()>;
+pub trait System<P> {
+    fn init(&self, lua: LuaContext, resources: &mut Resources, params: &mut P) -> Result<()>;
+    fn update(&self, lua: LuaContext, resources: &SharedResources, params: &P) -> Result<()>;
 }
 
 #[derive(Derivative)]
@@ -143,7 +143,7 @@ pub struct Space {
     resources: SharedResources,
 
     #[derivative(Debug = "ignore")]
-    dispatcher: Dispatcher,
+    maintainers: DefaultDispatcher,
 }
 
 impl Space {
@@ -168,48 +168,41 @@ impl Space {
         let mut this = Self {
             lua,
             resources: shared_resources,
-            dispatcher: Dispatcher::new(),
+            maintainers: DefaultDispatcher::new(),
         };
 
-        this.register(crate::systems::WorldEventSystem, "WorldEvent", &[])?;
-        this.register(
+        this.register_maintainer(crate::systems::WorldEventSystem, "WorldEvent", &[])?;
+        this.register_maintainer(
             crate::systems::DefaultHierarchySystem::new(),
             "Hierarchy",
             &["WorldEvent"],
         )?;
-        this.register(
+        this.register_maintainer(
             crate::systems::DefaultTransformSystem::new(),
             "Transform",
             &["WorldEvent", "Hierarchy"],
         )?;
 
-        this.refresh()?;
+        this.maintain()?;
 
         Ok(this)
     }
 
-    pub fn register<S: System>(&mut self, system: S, name: &str, deps: &[&str]) -> Result<()> {
-        self.dispatcher.register(system, name, deps)
+    pub fn register_maintainer<S>(&mut self, system: S, name: &str, deps: &[&str]) -> Result<()>
+    where
+        S: System<()> + 'static,
+    {
+        self.maintainers.register(system, name, deps)
     }
 
-    pub fn refresh(&mut self) -> Result<()> {
+    pub fn maintain(&mut self) -> Result<()> {
         let Self {
             lua,
-            dispatcher,
+            maintainers,
             resources,
         } = self;
 
-        lua.context(|lua| dispatcher.refresh(lua, &mut *resources.borrow_mut()))
-    }
-
-    pub fn update(&mut self) -> Result<()> {
-        let Self {
-            lua,
-            dispatcher,
-            resources,
-        } = self;
-
-        lua.context(|lua| dispatcher.update(lua, resources))
+        lua.context(|lua| maintainers.update(lua, resources))
     }
 
     pub fn fetch<T: Any + Send + Sync>(&self) -> SharedFetch<T> {

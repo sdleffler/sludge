@@ -324,8 +324,8 @@ impl SpatialHasher {
 
 pub struct SpatialHashingSystem;
 
-impl System for SpatialHashingSystem {
-    fn init(&self, _lua: LuaContext, resources: &mut Resources) -> Result<()> {
+impl<P> System<P> for SpatialHashingSystem {
+    fn init(&self, _lua: LuaContext, resources: &mut Resources, _params: &mut P) -> Result<()> {
         if !resources.has_value::<SpatialHasher>() {
             let spatial_hasher = SpatialHasher::new(64., &mut *resources.fetch_mut::<World>());
             resources.insert(spatial_hasher);
@@ -349,7 +349,7 @@ impl System for SpatialHashingSystem {
         Ok(())
     }
 
-    fn update(&self, _lua: LuaContext, resources: &SharedResources) -> Result<()> {
+    fn update(&self, _lua: LuaContext, resources: &SharedResources, _params: &P) -> Result<()> {
         let mut spatial_hasher = resources.fetch_mut::<SpatialHasher>();
         spatial_hasher.update(resources);
 

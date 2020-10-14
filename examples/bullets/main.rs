@@ -38,9 +38,7 @@ struct MainState {
 
 impl MainState {
     pub fn new(mut gfx: Graphics) -> Result<MainState> {
-        let mut space = Space::new()?;
-
-        space.refresh()?;
+        let space = Space::new()?;
 
         // graphics::set_screen_coordinates(ctx, graphics::Rect::new(0., 0., 320., 240.))?;
 
@@ -131,7 +129,7 @@ impl EventHandler for MainState {
             //}
         });
 
-        space.update().unwrap();
+        space.maintain().unwrap();
 
         Ok(())
     }

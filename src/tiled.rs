@@ -927,5 +927,3 @@ impl<LayerProps: LayerProperties, TileProps: TileProperties>
         world.queue_buffer(cmds);
     }
 }
-
-pub struct TiledMapTemplate;
