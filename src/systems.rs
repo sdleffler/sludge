@@ -11,15 +11,25 @@ use crate::{
 #[derive(Debug, Clone, Copy, Default)]
 pub struct WorldEventSystem;
 
-impl<P> crate::System<P> for WorldEventSystem {
-    fn init(&self, _lua: LuaContext, resources: &mut Resources, _params: &mut P) -> Result<()> {
+impl crate::System for WorldEventSystem {
+    fn init(
+        &self,
+        _lua: LuaContext,
+        resources: &mut Resources,
+        _: Option<&SharedResources>,
+    ) -> Result<()> {
         if !resources.has_value::<World>() {
             resources.insert(World::new());
         }
         Ok(())
     }
 
-    fn update(&self, _lua: LuaContext, resources: &SharedResources, _params: &P) -> Result<()> {
+    fn update(
+        &self,
+        _lua: LuaContext,
+        resources: &SharedResources,
+        _: Option<&SharedResources>,
+    ) -> Result<()> {
         let _ = resources
             .fetch_mut::<World>()
             .flush_queue()
@@ -40,8 +50,13 @@ impl<C: ParentComponent> HierarchySystem<C> {
     }
 }
 
-impl<P, C: ParentComponent> crate::System<P> for HierarchySystem<C> {
-    fn init(&self, _lua: LuaContext, resources: &mut Resources, _params: &mut P) -> Result<()> {
+impl<C: ParentComponent> crate::System for HierarchySystem<C> {
+    fn init(
+        &self,
+        _lua: LuaContext,
+        resources: &mut Resources,
+        _: Option<&SharedResources>,
+    ) -> Result<()> {
         if !resources.has_value::<HierarchyManager<C>>() {
             let hierarchy = {
                 let world = resources
@@ -54,7 +69,12 @@ impl<P, C: ParentComponent> crate::System<P> for HierarchySystem<C> {
         Ok(())
     }
 
-    fn update(&self, _lua: LuaContext, resources: &SharedResources, _params: &P) -> Result<()> {
+    fn update(
+        &self,
+        _lua: LuaContext,
+        resources: &SharedResources,
+        _: Option<&SharedResources>,
+    ) -> Result<()> {
         let hierarchy = &mut *resources.fetch_mut::<HierarchyManager<C>>();
         hierarchy.update(resources);
 
@@ -72,8 +92,13 @@ impl<C: ParentComponent> TransformSystem<C> {
     }
 }
 
-impl<P, C: ParentComponent> crate::System<P> for TransformSystem<C> {
-    fn init(&self, _lua: LuaContext, resources: &mut Resources, _params: &mut P) -> Result<()> {
+impl<C: ParentComponent> crate::System for TransformSystem<C> {
+    fn init(
+        &self,
+        _lua: LuaContext,
+        resources: &mut Resources,
+        _: Option<&SharedResources>,
+    ) -> Result<()> {
         if !resources.has_value::<TransformManager<C>>() {
             let transform_graph = {
                 let world = &mut *resources
@@ -89,7 +114,12 @@ impl<P, C: ParentComponent> crate::System<P> for TransformSystem<C> {
         Ok(())
     }
 
-    fn update(&self, _lua: LuaContext, resources: &SharedResources, _params: &P) -> Result<()> {
+    fn update(
+        &self,
+        _lua: LuaContext,
+        resources: &SharedResources,
+        _: Option<&SharedResources>,
+    ) -> Result<()> {
         let transforms = &mut *resources.fetch_mut::<TransformManager<C>>();
         transforms.update(resources);
 

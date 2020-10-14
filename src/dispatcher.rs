@@ -1,13 +1,11 @@
 use crate::{dependency_graph::DependencyGraph, Resources, SharedResources, System};
 use {anyhow::*, rlua::prelude::*};
 
-pub type DefaultDispatcher = Dispatcher<'static, ()>;
-
-pub struct Dispatcher<'a, P: 'a> {
-    dependency_graph: DependencyGraph<Box<dyn System<P> + 'a>>,
+pub struct Dispatcher<'a> {
+    dependency_graph: DependencyGraph<Box<dyn System + 'a>>,
 }
 
-impl<'a, P: 'a> Dispatcher<'a, P> {
+impl<'a> Dispatcher<'a> {
     pub fn new() -> Self {
         Self {
             dependency_graph: DependencyGraph::new(),
@@ -16,7 +14,7 @@ impl<'a, P: 'a> Dispatcher<'a, P> {
 
     pub fn register<S>(&mut self, system: S, name: &str, deps: &[&str]) -> Result<()>
     where
-        S: System<P> + 'a,
+        S: System + 'a,
     {
         ensure!(
             self.dependency_graph
@@ -28,15 +26,15 @@ impl<'a, P: 'a> Dispatcher<'a, P> {
         Ok(())
     }
 
-    pub fn refresh_with<'lua>(
+    pub fn refresh<'lua>(
         &mut self,
         lua: LuaContext<'lua>,
-        resources: &mut Resources,
-        params: &mut P,
+        local_resources: &mut Resources,
+        global_resources: Option<&SharedResources>,
     ) -> Result<()> {
         if self.dependency_graph.update()? {
             for (name, sys) in self.dependency_graph.sorted() {
-                sys.init(lua, resources, params)?;
+                sys.init(lua, local_resources, global_resources)?;
                 log::info!("initialized system `{}`", name);
             }
         }
@@ -44,36 +42,18 @@ impl<'a, P: 'a> Dispatcher<'a, P> {
         Ok(())
     }
 
-    pub fn update_with<'lua>(
-        &mut self,
-        lua: LuaContext<'lua>,
-        resources: &SharedResources,
-        params: &mut P,
-    ) -> Result<()> {
-        self.refresh_with(lua, &mut *resources.borrow_mut(), params)?;
-
-        for (_, sys) in self.dependency_graph.sorted() {
-            sys.update(lua, resources, params)?;
-        }
-
-        Ok(())
-    }
-}
-
-impl DefaultDispatcher {
-    pub fn refresh<'lua>(
-        &mut self,
-        lua: LuaContext<'lua>,
-        resources: &mut Resources,
-    ) -> Result<()> {
-        self.refresh_with(lua, resources, &mut ())
-    }
-
     pub fn update<'lua>(
         &mut self,
         lua: LuaContext<'lua>,
-        resources: &SharedResources,
+        local_resources: &SharedResources,
+        global_resources: Option<&SharedResources>,
     ) -> Result<()> {
-        self.update_with(lua, resources, &mut ())
+        self.refresh(lua, &mut *local_resources.borrow_mut(), global_resources)?;
+
+        for (_, sys) in self.dependency_graph.sorted() {
+            sys.update(lua, local_resources, global_resources)?;
+        }
+
+        Ok(())
     }
 }

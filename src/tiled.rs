@@ -943,12 +943,17 @@ impl<L, T> TiledMapManagerSystem<L, T> {
     }
 }
 
-impl<L, T, P> crate::System<P> for TiledMapManagerSystem<L, T>
+impl<L, T> crate::System for TiledMapManagerSystem<L, T>
 where
     L: LayerProperties,
     T: TileProperties,
 {
-    fn init(&self, _lua: LuaContext, resources: &mut Resources, _params: &mut P) -> Result<()> {
+    fn init(
+        &self,
+        _lua: LuaContext,
+        resources: &mut Resources,
+        _: Option<&SharedResources>,
+    ) -> Result<()> {
         if !resources.has_value::<TiledMapManager<L, T>>() {
             let map_manager = TiledMapManager::<L, T>::new(
                 resources.get_mut::<World>().expect("no World resource!"),
@@ -959,16 +964,24 @@ where
         Ok(())
     }
 
-    fn update(&self, _lua: LuaContext, resources: &SharedResources, _params: &P) -> Result<()> {
-        let world = resources.fetch::<World>();
-        let mut fs = resources.fetch_mut::<Filesystem>();
-        let mut gfx = resources.fetch_mut::<Graphics>();
-        let mut scene = resources.fetch_mut::<DrawableGraph>();
+    fn update(
+        &self,
+        _lua: LuaContext,
+        local: &SharedResources,
+        maybe_global: Option<&SharedResources>,
+    ) -> Result<()> {
+        let global = maybe_global
+            .expect("TiledMapManager needs `Graphics` and `Filesystem` global resources!");
+
+        let world = local.fetch::<World>();
+        let mut fs = global.fetch_mut::<Filesystem>();
+        let mut gfx = global.fetch_mut::<Graphics>();
+        let mut scene = local.fetch_mut::<DrawableGraph>();
 
         // FIXME(sleffy): HAAAAAAAAAAAAAACK!
         let dt: f32 = 1. / 60.;
 
-        let mut map_manager = resources.fetch_mut::<TiledMapManager<L, T>>();
+        let mut map_manager = local.fetch_mut::<TiledMapManager<L, T>>();
         map_manager.update(&*world, &mut *fs, &mut *gfx, &mut *scene, dt);
 
         Ok(())
