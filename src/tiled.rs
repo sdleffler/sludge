@@ -439,6 +439,10 @@ impl<LayerProps, TileProps> TiledMap<LayerProps, TileProps> {
         })
     }
 
+    pub fn source(&self) -> &Path {
+        &self.source
+    }
+
     pub fn dimensions(&self) -> (u32, u32) {
         (self.width, self.height)
     }
