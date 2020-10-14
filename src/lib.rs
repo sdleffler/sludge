@@ -119,12 +119,13 @@ impl<T, E> SludgeResultExt for Result<T, E> {
 const RESOURCES_REGISTRY_KEY: &'static str = "sludge.resources";
 
 pub trait SludgeLuaContextExt {
-    fn resources(self) -> SharedResources<'static>;
+    fn resources(self) -> UnifiedResources<'static>;
 }
 
 impl<'lua> SludgeLuaContextExt for LuaContext<'lua> {
-    fn resources(self) -> SharedResources<'static> {
-        self.named_registry_value::<_, SharedResources>(RESOURCES_REGISTRY_KEY)
+    fn resources(self) -> UnifiedResources<'static> {
+        self.named_registry_value::<_, UnifiedResources>(RESOURCES_REGISTRY_KEY)
+            .with_context(|| anyhow!("error while extracing resources from Lua registry"))
             .unwrap()
     }
 }
