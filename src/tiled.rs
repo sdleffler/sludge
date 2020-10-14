@@ -359,6 +359,85 @@ pub struct TiledMap<LayerProps = ron::Value, TileProps = ron::Value> {
 impl<'a, L: Component, T: Component> SmartComponent<ScContext<'a>> for TiledMap<L, T> {}
 
 impl<LayerProps, TileProps> TiledMap<LayerProps, TileProps> {
+    pub fn from_tiled(path: &Path, tiled: &xml_parser::Map) -> Result<Self>
+    where
+        LayerProps: DeserializeOwned,
+        TileProps: DeserializeOwned,
+    {
+        let tile_sheets = tiled
+            .tilesets
+            .iter()
+            .map(|ts| TileSheet::from_tiled(ts))
+            .collect::<Result<_>>()?;
+
+        let mut layers = tiled
+            .layers
+            .iter()
+            .map(|layer| {
+                let mut chunks = HashMap::new();
+
+                match &layer.tiles {
+                    LayerData::Finite(data) => {
+                        chunks.insert(
+                            (0, 0),
+                            Chunk {
+                                x: 0,
+                                y: 0,
+                                w: tiled.width,
+                                h: tiled.height,
+                                data: data.iter().flatten().map(|lt| lt.gid).collect(),
+                            },
+                        );
+                    }
+                    LayerData::Infinite(tiled_chunks) => {
+                        for (&(x, y), tiled_chunk) in tiled_chunks.iter() {
+                            chunks.insert(
+                                (x, y),
+                                Chunk {
+                                    x: tiled_chunk.x,
+                                    y: tiled_chunk.y,
+                                    w: tiled_chunk.width,
+                                    h: tiled_chunk.height,
+                                    data: tiled_chunk
+                                        .tiles
+                                        .iter()
+                                        .flatten()
+                                        .map(|lt| lt.gid)
+                                        .collect(),
+                                },
+                            );
+                        }
+                    }
+                }
+
+                Ok((
+                    layer.layer_index,
+                    Layer::TileLayer(TileLayer {
+                        name: Some(layer.name.clone()),
+                        visible: layer.visible,
+                        opacity: layer.opacity,
+                        chunks,
+                        properties: deserialize_properties(&layer.properties)?,
+                    }),
+                ))
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        layers.sort_by_key(|&(i, _)| i);
+        Ok(TiledMap {
+            source: path.to_owned(),
+
+            width: tiled.width,
+            height: tiled.height,
+
+            tile_width: tiled.tile_width,
+            tile_height: tiled.tile_height,
+
+            tile_sheets,
+            layers: layers.into_iter().map(|(_, v)| v).collect(),
+        })
+    }
+
     pub fn dimensions(&self) -> (u32, u32) {
         (self.width, self.height)
     }
@@ -422,85 +501,13 @@ where
                 )?;
 
                 let mut deps = vec![];
-                let tile_sheets = tiled
-                    .tilesets
-                    .iter()
-                    .map(|ts| {
-                        if let Some(src) = ts.source.as_ref() {
-                            deps.push(Key::from_path(Path::new(src)));
-                        }
-                        Ok(TileSheet::from_tiled(ts)?)
-                    })
-                    .collect::<Result<_>>()?;
+                for ts in tiled.tilesets.iter() {
+                    if let Some(src) = ts.source.as_ref() {
+                        deps.push(Key::from_path(Path::new(src)));
+                    }
+                }
 
-                let mut layers = tiled
-                    .layers
-                    .iter()
-                    .map(|layer| {
-                        let mut chunks = HashMap::new();
-
-                        match &layer.tiles {
-                            LayerData::Finite(data) => {
-                                chunks.insert(
-                                    (0, 0),
-                                    Chunk {
-                                        x: 0,
-                                        y: 0,
-                                        w: tiled.width,
-                                        h: tiled.height,
-                                        data: data.iter().flatten().map(|lt| lt.gid).collect(),
-                                    },
-                                );
-                            }
-                            LayerData::Infinite(tiled_chunks) => {
-                                for (&(x, y), tiled_chunk) in tiled_chunks.iter() {
-                                    chunks.insert(
-                                        (x, y),
-                                        Chunk {
-                                            x: tiled_chunk.x,
-                                            y: tiled_chunk.y,
-                                            w: tiled_chunk.width,
-                                            h: tiled_chunk.height,
-                                            data: tiled_chunk
-                                                .tiles
-                                                .iter()
-                                                .flatten()
-                                                .map(|lt| lt.gid)
-                                                .collect(),
-                                        },
-                                    );
-                                }
-                            }
-                        }
-
-                        Ok((
-                            layer.layer_index,
-                            Layer::TileLayer(TileLayer {
-                                name: Some(layer.name.clone()),
-                                visible: layer.visible,
-                                opacity: layer.opacity,
-                                chunks,
-                                properties: deserialize_properties(&layer.properties)?,
-                            }),
-                        ))
-                    })
-                    .collect::<Result<Vec<_>>>()?;
-
-                layers.sort_by_key(|&(i, _)| i);
-                let map = TiledMap {
-                    source: path,
-
-                    width: tiled.width,
-                    height: tiled.height,
-
-                    tile_width: tiled.tile_width,
-                    tile_height: tiled.tile_height,
-
-                    tile_sheets,
-                    layers: layers.into_iter().map(|(_, v)| v).collect(),
-                };
-
-                Ok(Loaded::with_deps(map, deps))
+                Ok(Loaded::with_deps(Self::from_tiled(&path, &tiled)?, deps))
             } //_ => bail!("can only load from path"),
         }
     }
@@ -920,3 +927,5 @@ impl<LayerProps: LayerProperties, TileProps: TileProperties>
         world.queue_buffer(cmds);
     }
 }
+
+pub struct TiledMapTemplate;
