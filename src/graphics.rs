@@ -1266,17 +1266,7 @@ impl InstanceParam {
 
     #[inline]
     pub fn transform_aabb(&self, aabb: &Box2<f32>) -> Box2<f32> {
-        let tl = Point3::new(aabb.mins.x, aabb.mins.y, 0.);
-        let tr = Point3::new(aabb.maxs.x, aabb.mins.y, 0.);
-        let br = Point3::new(aabb.maxs.x, aabb.maxs.y, 0.);
-        let bl = Point3::new(aabb.mins.x, aabb.maxs.y, 0.);
-
-        Box2::from_points(&[
-            self.tx.transform_point(&tl).xy(),
-            self.tx.transform_point(&tr).xy(),
-            self.tx.transform_point(&br).xy(),
-            self.tx.transform_point(&bl).xy(),
-        ])
+        aabb.transformed_by(self.tx.matrix())
     }
 }
 
@@ -1319,6 +1309,7 @@ struct SpriteBatchInner {
     instances: Vec<InstanceProperties>,
     capacity: usize,
     bindings: mq::Bindings,
+    aabb: Option<Box2<f32>>,
 }
 
 #[derive(Debug)]
@@ -1342,6 +1333,7 @@ impl ops::IndexMut<SpriteId> for SpriteBatch {
     #[inline]
     fn index_mut(&mut self, index: SpriteId) -> &mut Self::Output {
         self.dirty = AtomicBool::new(true);
+        self.inner.get_mut().unwrap().aabb = None;
         &mut self.sprites[index.0]
     }
 }
@@ -1366,6 +1358,7 @@ impl SpriteBatch {
                 instances: Vec::new(),
                 capacity,
                 bindings,
+                aabb: Some(Box2::invalid()),
             }
             .into(),
             dirty: AtomicBool::new(true),
@@ -1376,18 +1369,24 @@ impl SpriteBatch {
     #[inline]
     pub fn insert(&mut self, param: InstanceParam) -> SpriteId {
         *self.dirty.get_mut() = true;
+        let inner = self.inner.get_mut().unwrap();
+        if let Some(aabb) = inner.aabb.as_mut() {
+            aabb.merge(&self.texture.aabb().transformed_by(param.tx.matrix()));
+        }
         SpriteId(self.sprites.insert(param))
     }
 
     #[inline]
     pub fn remove(&mut self, index: SpriteId) {
         *self.dirty.get_mut() = true;
+        self.inner.get_mut().unwrap().aabb = None;
         self.sprites.remove(index.0);
     }
 
     #[inline]
     pub fn clear(&mut self) {
         *self.dirty.get_mut() = true;
+        self.inner.get_mut().unwrap().aabb = None;
         self.sprites.clear();
     }
 
@@ -1453,15 +1452,17 @@ impl Drawable for SpriteBatch {
     }
 
     fn aabb(&self) -> Box2<f32> {
-        let mut initial = Box2::invalid();
-        let image_aabb = Box2::from_corners(
-            Point2::origin(),
-            Point2::new(self.texture.width as f32, self.texture.height as f32),
-        );
+        if let Some(aabb) = self.inner.read().unwrap().aabb {
+            return aabb;
+        }
 
+        let mut inner = self.inner.write().unwrap();
+        let mut initial = Box2::invalid();
+        let image_aabb = self.texture.aabb();
         for (_, param) in self.sprites.iter() {
             initial.merge(&param.transform_aabb(&image_aabb));
         }
+        inner.aabb = Some(initial);
 
         initial
     }

@@ -84,12 +84,17 @@ impl<N: Numeric> Box2<N> {
     }
 
     #[inline]
-    pub fn center(self) -> Point2<N> {
+    pub fn is_valid(&self) -> bool {
+        na::partial_le(&self.mins, &self.maxs)
+    }
+
+    #[inline]
+    pub fn center(&self) -> Point2<N> {
         self.mins + self.half_extents()
     }
 
     #[inline]
-    pub fn to_aabb(self) -> ncollide2d::bounding_volume::AABB<N>
+    pub fn to_aabb(&self) -> ncollide2d::bounding_volume::AABB<N>
     where
         N: RealField,
     {
@@ -185,6 +190,24 @@ impl<N: Numeric> Box2<N> {
         }
 
         Self { mins, maxs }
+    }
+
+    #[inline]
+    pub fn transformed_by(&self, tx: &Matrix4<N>) -> Self
+    where
+        N: RealField,
+    {
+        let tl = Point3::new(self.mins.x, self.mins.y, N::zero());
+        let tr = Point3::new(self.maxs.x, self.mins.y, N::zero());
+        let br = Point3::new(self.maxs.x, self.maxs.y, N::zero());
+        let bl = Point3::new(self.mins.x, self.maxs.y, N::zero());
+
+        Self::from_points(&[
+            tx.transform_point(&tl).xy(),
+            tx.transform_point(&tr).xy(),
+            tx.transform_point(&br).xy(),
+            tx.transform_point(&bl).xy(),
+        ])
     }
 }
 
