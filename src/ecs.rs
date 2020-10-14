@@ -3,7 +3,7 @@ use {
     hashbrown::HashMap,
     hibitset::*,
     rlua::prelude::*,
-    shrev::{EventChannel, EventIterator, ReaderId},
+    shrev::{EventChannel, EventIterator},
     std::{
         any::{Any, TypeId},
         fmt,
@@ -16,6 +16,8 @@ pub use hecs::{
     Bundle, Component, ComponentError, DynamicBundle, Entity, EntityBuilder, EntityRef,
     NoSuchEntity, Query, QueryBorrow, QueryOne, Ref, RefMut, SmartComponent,
 };
+
+pub use shrev::ReaderId;
 
 #[doc(hidden)]
 pub type ScContext<'a> = &'a HashMap<TypeId, EventEmitter>;
@@ -87,10 +89,12 @@ impl CommandBuffer {
         }
     }
 
+    #[inline]
     fn get_or_make_builder(&mut self) -> EntityBuilder {
         self.pool.pop().unwrap_or_default()
     }
 
+    #[inline]
     pub fn spawn(&mut self, bundle: impl DynamicBundle) -> &mut Self {
         let mut eb = self.get_or_make_builder();
         eb.add_bundle(bundle);
@@ -98,6 +102,7 @@ impl CommandBuffer {
         self
     }
 
+    #[inline]
     pub fn insert(&mut self, entity: Entity, bundle: impl DynamicBundle) -> &mut Self {
         let mut eb = self.get_or_make_builder();
         eb.add_bundle(bundle);
@@ -105,6 +110,12 @@ impl CommandBuffer {
         self
     }
 
+    #[inline]
+    pub fn insert_one<T: Component>(&mut self, entity: Entity, component: T) -> &mut Self {
+        self.insert(entity, (component,))
+    }
+
+    #[inline]
     pub fn remove<T: Bundle>(&mut self, entity: Entity) -> &mut Self {
         fn do_remove<T: Bundle>(
             channels: &mut HashMap<TypeId, EventEmitter>,
@@ -119,9 +130,15 @@ impl CommandBuffer {
         self
     }
 
+    #[inline]
     pub fn despawn(&mut self, entity: Entity) -> &mut Self {
         self.cmds.push(Command::Despawn(entity));
         self
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.cmds.is_empty()
     }
 }
 
@@ -306,6 +323,10 @@ impl World {
         self.ecs.contains(entity)
     }
 
+    pub fn reserve_entity(&self) -> Entity {
+        self.ecs.reserve_entity()
+    }
+
     pub fn query<'w, Q>(&'w self) -> QueryBorrow<'w, Q, ScContext<'w>>
     where
         Q: Query<'w, ScContext<'w>>,
@@ -472,7 +493,17 @@ impl World {
     pub fn flush_queue(&mut self) -> Result<()> {
         let mut pool = self.buffers.lock().unwrap();
         let mut errors = Vec::new();
-        for mut buffer in self.queued.lock().unwrap().drain(..) {
+        let mut queued = self.queued.lock().unwrap();
+
+        let nonempty_count = queued.iter().filter(|buf| !buf.is_empty()).count();
+        if nonempty_count > 0 {
+            log::info!(
+                "flushing {} nonempty queued command buffers",
+                nonempty_count,
+            );
+        }
+
+        for mut buffer in queued.drain(..) {
             for cmd in buffer.cmds.drain(..) {
                 let res = match cmd {
                     Command::Spawn(mut bundle) => {

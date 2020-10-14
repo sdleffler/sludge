@@ -13,11 +13,11 @@ pub type SortedLayerId<T> = DrawableId<T, SortedLayer>;
 pub struct SortedLayerIter<'a> {
     _outer: RwLockReadGuard<'a, Vec<Index>>,
     inner: ::std::slice::Iter<'a, Index>,
-    objects: &'a Arena<Box<dyn DrawableAny>>,
+    objects: &'a Arena<Box<dyn AnyDrawable>>,
 }
 
 impl<'a> Iterator for SortedLayerIter<'a> {
-    type Item = &'a dyn DrawableAny;
+    type Item = &'a dyn AnyDrawable;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.inner.next().map(|&index| self.objects[index].as_ref())
@@ -25,11 +25,11 @@ impl<'a> Iterator for SortedLayerIter<'a> {
 }
 
 pub struct SortedLayer {
-    objects: Arena<Box<dyn DrawableAny>>,
+    objects: Arena<Box<dyn AnyDrawable>>,
     sorted: RwLock<Vec<Index>>,
 }
 
-impl<T: DrawableAny> ops::Index<SortedLayerId<T>> for SortedLayer {
+impl<T: AnyDrawable> ops::Index<SortedLayerId<T>> for SortedLayer {
     type Output = T;
 
     fn index(&self, id: SortedLayerId<T>) -> &Self::Output {
@@ -37,7 +37,7 @@ impl<T: DrawableAny> ops::Index<SortedLayerId<T>> for SortedLayer {
     }
 }
 
-impl<T: DrawableAny> ops::IndexMut<SortedLayerId<T>> for SortedLayer {
+impl<T: AnyDrawable> ops::IndexMut<SortedLayerId<T>> for SortedLayer {
     fn index_mut(&mut self, id: SortedLayerId<T>) -> &mut Self::Output {
         self.objects[id.0].as_any_mut().downcast_mut().unwrap()
     }
@@ -51,19 +51,19 @@ impl SortedLayer {
         }
     }
 
-    pub fn insert<T: DrawableAny>(&mut self, drawable: T) -> SortedLayerId<T> {
+    pub fn insert<T: AnyDrawable>(&mut self, drawable: T) -> SortedLayerId<T> {
         let index = self.objects.insert(Box::new(drawable));
         self.sorted.get_mut().unwrap().push(index);
         DrawableId::new(index)
     }
 
-    pub fn remove<T: DrawableAny>(&mut self, id: SortedLayerId<T>) -> Option<T> {
+    pub fn remove<T: AnyDrawable>(&mut self, id: SortedLayerId<T>) -> Option<T> {
         self.objects
             .remove(id.0)
-            .and_then(<dyn DrawableAny>::downcast)
+            .and_then(<dyn AnyDrawable>::downcast)
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &dyn DrawableAny> + '_ {
+    pub fn iter(&self) -> impl Iterator<Item = &dyn AnyDrawable> + '_ {
         self.objects.iter().map(|(_, boxed)| boxed.as_ref())
     }
 

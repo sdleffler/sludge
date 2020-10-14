@@ -8,7 +8,7 @@ use {
 use crate::{
     components::Parent,
     ecs::{ComponentEvent, Entity, FlaggedComponent, ScContext, SmartComponent, World},
-    hierarchy::{Hierarchy, HierarchyEvent, ParentComponent},
+    hierarchy::{HierarchyEvent, HierarchyManager, ParentComponent},
     math::Transform3,
     SharedResources,
 };
@@ -50,7 +50,7 @@ inventory::submit! {
     FlaggedComponent::of::<Transform>()
 }
 
-pub struct TransformGraph<P: ParentComponent = Parent> {
+pub struct TransformManager<P: ParentComponent = Parent> {
     hierarchy_events: ReaderId<HierarchyEvent>,
     transform_events: ReaderId<ComponentEvent>,
 
@@ -60,8 +60,8 @@ pub struct TransformGraph<P: ParentComponent = Parent> {
     _marker: PhantomData<P>,
 }
 
-impl<P: ParentComponent> TransformGraph<P> {
-    pub fn new(world: &mut World, hierarchy: &mut Hierarchy<P>) -> Self {
+impl<P: ParentComponent> TransformManager<P> {
+    pub fn new(world: &mut World, hierarchy: &mut HierarchyManager<P>) -> Self {
         let transform_events = world.track::<Transform>();
         let hierarchy_events = hierarchy.track();
 
@@ -81,7 +81,7 @@ impl<P: ParentComponent> TransformGraph<P> {
         self.removed.clear();
 
         let world = &*resources.fetch::<World>();
-        let hierarchy = &*resources.fetch::<Hierarchy<P>>();
+        let hierarchy = &*resources.fetch::<HierarchyManager<P>>();
 
         for event in hierarchy.changed().read(&mut self.hierarchy_events) {
             match event {
@@ -151,8 +151,8 @@ mod tests {
         let resources = crate::SharedResources::new();
 
         let mut world = World::new();
-        let mut hierarchy = Hierarchy::<Parent>::new(&mut world);
-        let transforms = TransformGraph::new(&mut world, &mut hierarchy);
+        let mut hierarchy = HierarchyManager::<Parent>::new(&mut world);
+        let transforms = TransformManager::new(&mut world, &mut hierarchy);
 
         resources.borrow_mut().insert(world);
         resources.borrow_mut().insert(hierarchy);
@@ -166,9 +166,9 @@ mod tests {
         };
 
         resources
-            .fetch_mut::<Hierarchy<Parent>>()
+            .fetch_mut::<HierarchyManager<Parent>>()
             .update(&resources);
-        resources.fetch_mut::<TransformGraph>().update(&resources);
+        resources.fetch_mut::<TransformManager>().update(&resources);
 
         let e2 = {
             let mut tx = Transform3::identity();
@@ -179,9 +179,9 @@ mod tests {
         };
 
         resources
-            .fetch_mut::<Hierarchy<Parent>>()
+            .fetch_mut::<HierarchyManager<Parent>>()
             .update(&resources);
-        resources.fetch_mut::<TransformGraph>().update(&resources);
+        resources.fetch_mut::<TransformManager>().update(&resources);
 
         let tx2 = *resources.fetch::<World>().get::<Transform>(e2).unwrap();
 
@@ -193,9 +193,9 @@ mod tests {
         resources.fetch_mut::<World>().despawn(e1).unwrap();
 
         resources
-            .fetch_mut::<Hierarchy<Parent>>()
+            .fetch_mut::<HierarchyManager<Parent>>()
             .update(&resources);
-        resources.fetch_mut::<TransformGraph>().update(&resources);
+        resources.fetch_mut::<TransformManager>().update(&resources);
 
         let tx2 = *resources.fetch::<World>().get::<Transform>(e2).unwrap();
 

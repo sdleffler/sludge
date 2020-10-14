@@ -1,5 +1,5 @@
 use crate::{
-    graphics::{Drawable, DrawableAny, DrawableId, Graphics, InstanceParam},
+    graphics::{AnyDrawable, Drawable, DrawableId, Graphics, InstanceParam},
     math::*,
 };
 use {
@@ -26,7 +26,7 @@ pub struct DrawableGraphIter<'a> {
 }
 
 impl<'a> Iterator for DrawableGraphIter<'a> {
-    type Item = &'a dyn DrawableAny;
+    type Item = &'a dyn AnyDrawable;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.inner
@@ -35,25 +35,30 @@ impl<'a> Iterator for DrawableGraphIter<'a> {
     }
 }
 
-pub struct DrawableNodeBuilder<'a, T: DrawableAny> {
+pub struct DrawableNodeBuilder<'a, T: AnyDrawable> {
     index: Index,
     graph: &'a mut DrawableGraph,
     marker: PhantomData<&'a mut T>,
 }
 
-impl<'a, T: DrawableAny> DrawableNodeBuilder<'a, T> {
+impl<'a, T: AnyDrawable> DrawableNodeBuilder<'a, T> {
     pub fn layer(&mut self, layer: i32) -> &mut Self {
         self.graph.objects[self.index].layer = layer;
         self
     }
 
-    pub fn parent<U: DrawableAny>(&mut self, index: DrawableNodeId<U>) -> &mut Self {
-        let parent_node = &mut self.graph.objects[index.0];
-        if let Err(i) = parent_node.children.binary_search(&self.index) {
-            parent_node.children.insert(i, self.index);
+    pub fn parent<U: AnyDrawable>(&mut self, index: Option<DrawableNodeId<U>>) -> &mut Self {
+        if let Some(parent_idx) = index {
+            let parent_node = &mut self.graph.objects[parent_idx.0];
+            if let Err(i) = parent_node.children.binary_search(&self.index) {
+                parent_node.children.insert(i, self.index);
+            }
         }
 
-        let old_parent = mem::replace(&mut self.graph.objects[self.index].parent, Some(index.0));
+        let old_parent = mem::replace(
+            &mut self.graph.objects[self.index].parent,
+            index.map(|i| i.0),
+        );
 
         if let Some(old_parent_id) = old_parent {
             let old_parent_node = &mut self.graph.objects[old_parent_id];
@@ -67,14 +72,20 @@ impl<'a, T: DrawableAny> DrawableNodeBuilder<'a, T> {
         self
     }
 
+    pub fn y_sort(&mut self, enabled: bool) -> &mut Self {
+        self.graph.objects[self.index].y_sorted = enabled;
+        self
+    }
+
     pub fn get(&self) -> DrawableNodeId<T> {
         DrawableId::new(self.index)
     }
 }
 
 struct Node {
-    value: Box<dyn DrawableAny>,
+    value: Box<dyn AnyDrawable>,
     layer: i32,
+    y_sorted: bool,
     parent: Option<Index>,
     children: Vec<Index>,
 }
@@ -92,10 +103,9 @@ pub struct DrawableGraph {
     objects: Arena<Node>,
     inner: RwLock<DrawableGraphInner>,
     dirty: AtomicBool,
-    y_sort: bool,
 }
 
-impl<T: DrawableAny> ops::Index<DrawableNodeId<T>> for DrawableGraph {
+impl<T: AnyDrawable> ops::Index<DrawableNodeId<T>> for DrawableGraph {
     type Output = T;
 
     fn index(&self, i: DrawableNodeId<T>) -> &Self::Output {
@@ -103,9 +113,9 @@ impl<T: DrawableAny> ops::Index<DrawableNodeId<T>> for DrawableGraph {
     }
 }
 
-impl<T: DrawableAny> ops::IndexMut<DrawableNodeId<T>> for DrawableGraph {
+impl<T: AnyDrawable> ops::IndexMut<DrawableNodeId<T>> for DrawableGraph {
     fn index_mut(&mut self, i: DrawableNodeId<T>) -> &mut Self::Output {
-        if self.y_sort {
+        if matches!(self.objects[i.0].parent, Some(j) if self.objects[j].y_sorted) {
             *self.dirty.get_mut() = true;
         }
         self.objects[i.0].value.as_any_mut().downcast_mut().unwrap()
@@ -126,18 +136,14 @@ impl DrawableGraph {
             }
             .into(),
             dirty: AtomicBool::new(true),
-            y_sort: false,
         }
     }
 
-    pub fn set_y_sort_enabled(&mut self, enabled: bool) {
-        self.y_sort = enabled;
-    }
-
-    pub fn insert<T: DrawableAny>(&mut self, value: T) -> DrawableNodeBuilder<T> {
+    pub fn insert<T: AnyDrawable>(&mut self, value: T) -> DrawableNodeBuilder<T> {
         let index = self.objects.insert(Node {
             value: Box::new(value),
             layer: 0,
+            y_sorted: false,
             parent: None,
             children: vec![],
         });
@@ -151,7 +157,7 @@ impl DrawableGraph {
         }
     }
 
-    pub fn remove<T: DrawableAny>(&mut self, object: DrawableNodeId<T>) -> Option<T> {
+    pub fn remove<T: AnyDrawable>(&mut self, object: DrawableNodeId<T>) -> Option<T> {
         let node = self.objects.remove(object.0)?;
 
         for child in node.children {
@@ -172,12 +178,21 @@ impl DrawableGraph {
         Some(*Box::<dyn Any>::downcast(node.value.to_box_any()).unwrap())
     }
 
+    pub fn children<T: AnyDrawable>(
+        &self,
+        object: DrawableNodeId<T>,
+    ) -> impl Iterator<Item = (DrawableNodeId<dyn AnyDrawable>, &dyn AnyDrawable)> + '_ {
+        self.objects[object.0]
+            .children
+            .iter()
+            .map(move |&index| (DrawableId::new(index), &*self.objects[index].value))
+    }
+
     pub fn sort(&self) {
         let Self {
             objects,
             inner,
             dirty,
-            y_sort,
         } = self;
 
         let DrawableGraphInner {
@@ -208,10 +223,12 @@ impl DrawableGraph {
         while let Some(index) = stack.pop() {
             sorted.push(index);
             buf.clear();
-            buf.extend_from_slice(&objects[index].children);
 
-            if *y_sort {
-                buf.sort_by(|&a, &b| {
+            let object = &objects[index];
+            buf.extend_from_slice(&object.children);
+
+            if object.y_sorted {
+                buf.sort_unstable_by(|&a, &b| {
                     let (obj_a, obj_b) = (&objects[a], &objects[b]);
                     obj_a.layer.cmp(&obj_b.layer).then_with(|| {
                         let a_y = *y_cache.entry(a).or_insert_with(|| {

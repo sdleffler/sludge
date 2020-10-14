@@ -25,7 +25,7 @@ impl Spatial {
 
 #[derive(SimpleComponent)]
 struct SpriteIndex {
-    idx: SpriteIdx,
+    idx: SpriteId,
 }
 
 struct MainState {

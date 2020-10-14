@@ -8,7 +8,7 @@ use {
     std::{
         collections::HashMap,
         io::{BufReader, Read},
-        path::Path,
+        path::{Path, PathBuf},
         str::FromStr,
     },
     thiserror::*,
@@ -257,7 +257,7 @@ impl Map {
                 Ok(())
             },
             "imagelayer" => |attrs| {
-                image_layers.push(ImageLayer::new(parser, attrs, layer_index)?);
+                image_layers.push(ImageLayer::new(parser, attrs, layer_index, map_path)?);
                 layer_index += 1;
                 Ok(())
             },
@@ -331,7 +331,7 @@ pub struct Tileset {
     /// The GID of the first tile stored
     pub first_gid: u32,
     pub name: String,
-    pub source: Option<String>,
+    pub source: Option<PathBuf>,
     pub tile_width: u32,
     pub tile_height: u32,
     pub spacing: u32,
@@ -351,13 +351,14 @@ impl Tileset {
         attrs: Vec<OwnedAttribute>,
         map_path: Option<&Path>,
     ) -> Result<Tileset, Error> {
-        Tileset::new_internal(parser, &attrs)
+        Tileset::new_internal(parser, &attrs, map_path)
             .or_else(|_| Tileset::new_reference(fs, &attrs, map_path))
     }
 
     fn new_internal<R: Read>(
         parser: &mut EventReader<R>,
         attrs: &Vec<OwnedAttribute>,
+        map_path: Option<&Path>,
     ) -> Result<Tileset, Error> {
         let ((spacing, margin, tilecount), (first_gid, name, width, height)) = get_attrs!(
            attrs,
@@ -380,7 +381,7 @@ impl Tileset {
         let mut properties = HashMap::new();
         parse_tag!(parser, "tileset", {
             "image" => |attrs| {
-                images.push(Image::new(parser, attrs)?);
+                images.push(Image::new(parser, attrs, map_path)?);
                 Ok(())
             },
             "properties" => |_| {
@@ -388,7 +389,7 @@ impl Tileset {
                 Ok(())
             },
             "tile" => |attrs| {
-                tiles.push(Tile::new(parser, attrs)?);
+                tiles.push(Tile::new(parser, attrs, map_path)?);
                 Ok(())
             },
         });
@@ -430,13 +431,13 @@ impl Tileset {
                 tileset_path
             ))
         })?;
-        Tileset::new_external(file, first_gid, Some(source))
+        Tileset::new_external(file, first_gid, Some(&tileset_path))
     }
 
     fn new_external<R: Read>(
         file: R,
         first_gid: u32,
-        source: Option<String>,
+        source: Option<&Path>,
     ) -> Result<Tileset, Error> {
         let mut tileset_parser = EventReader::new(file);
         loop {
@@ -468,7 +469,7 @@ impl Tileset {
 
     fn parse_external_tileset<R: Read>(
         first_gid: u32,
-        source: Option<String>,
+        source: Option<&Path>,
         parser: &mut EventReader<R>,
         attrs: &Vec<OwnedAttribute>,
     ) -> Result<Tileset, Error> {
@@ -492,11 +493,11 @@ impl Tileset {
         let mut properties = HashMap::new();
         parse_tag!(parser, "tileset", {
             "image" => |attrs| {
-                images.push(Image::new(parser, attrs)?);
+                images.push(Image::new(parser, attrs, source)?);
                 Ok(())
             },
             "tile" => |attrs| {
-                tiles.push(Tile::new(parser, attrs)?);
+                tiles.push(Tile::new(parser, attrs, source)?);
                 Ok(())
             },
             "properties" => |_| {
@@ -508,7 +509,7 @@ impl Tileset {
         Ok(Tileset {
             first_gid: first_gid,
             name: name,
-            source,
+            source: source.map(Path::to_owned),
             tile_width: width,
             tile_height: height,
             spacing: spacing.unwrap_or(0),
@@ -536,6 +537,7 @@ impl Tile {
     fn new<R: Read>(
         parser: &mut EventReader<R>,
         attrs: Vec<OwnedAttribute>,
+        map_path: Option<&Path>,
     ) -> Result<Tile, Error> {
         let ((tile_type, probability), id) = get_attrs!(
             attrs,
@@ -555,7 +557,7 @@ impl Tile {
         let mut animation = None;
         parse_tag!(parser, "tile", {
             "image" => |attrs| {
-                images.push(Image::new(parser, attrs)?);
+                images.push(Image::new(parser, attrs, map_path)?);
                 Ok(())
             },
             "properties" => |_| {
@@ -586,7 +588,7 @@ impl Tile {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Image {
     /// The filepath of the image
-    pub source: String,
+    pub source: PathBuf,
     pub width: i32,
     pub height: i32,
     pub transparent_colour: Option<Colour>,
@@ -596,6 +598,7 @@ impl Image {
     fn new<R: Read>(
         parser: &mut EventReader<R>,
         attrs: Vec<OwnedAttribute>,
+        tileset_path: Option<&Path>,
     ) -> Result<Image, Error> {
         let (c, (s, w, h)) = get_attrs!(
             attrs,
@@ -612,7 +615,9 @@ impl Image {
 
         parse_tag!(parser, "image", { "" => |_| Ok(()) });
         Ok(Image {
-            source: s,
+            source: tileset_path
+                .map(|p| p.with_file_name(&s))
+                .unwrap_or_else(|| PathBuf::from(s)),
             width: w,
             height: h,
             transparent_colour: c,
@@ -773,6 +778,7 @@ impl ImageLayer {
         parser: &mut EventReader<R>,
         attrs: Vec<OwnedAttribute>,
         layer_index: u32,
+        map_path: Option<&Path>,
     ) -> Result<ImageLayer, Error> {
         let ((o, v, ox, oy), n) = get_attrs!(
             attrs,
@@ -790,7 +796,7 @@ impl ImageLayer {
         let mut image: Option<Image> = None;
         parse_tag!(parser, "imagelayer", {
             "image" => |attrs| {
-                image = Some(Image::new(parser, attrs)?);
+                image = Some(Image::new(parser, attrs, map_path)?);
                 Ok(())
             },
             "properties" => |_| {

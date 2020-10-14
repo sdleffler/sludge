@@ -1310,9 +1310,9 @@ fn quad_indices() -> [u16; 6] {
 }
 
 #[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
-pub struct SpriteIdx(Index);
+pub struct SpriteId(Index);
 
-impl<'a> SmartComponent<ScContext<'a>> for SpriteIdx {}
+impl<'a> SmartComponent<ScContext<'a>> for SpriteId {}
 
 #[derive(Debug)]
 struct SpriteBatchInner {
@@ -1329,18 +1329,18 @@ pub struct SpriteBatch {
     texture: Texture,
 }
 
-impl ops::Index<SpriteIdx> for SpriteBatch {
+impl ops::Index<SpriteId> for SpriteBatch {
     type Output = InstanceParam;
 
     #[inline]
-    fn index(&self, index: SpriteIdx) -> &Self::Output {
+    fn index(&self, index: SpriteId) -> &Self::Output {
         &self.sprites[index.0]
     }
 }
 
-impl ops::IndexMut<SpriteIdx> for SpriteBatch {
+impl ops::IndexMut<SpriteId> for SpriteBatch {
     #[inline]
-    fn index_mut(&mut self, index: SpriteIdx) -> &mut Self::Output {
+    fn index_mut(&mut self, index: SpriteId) -> &mut Self::Output {
         self.dirty = AtomicBool::new(true);
         &mut self.sprites[index.0]
     }
@@ -1374,13 +1374,13 @@ impl SpriteBatch {
     }
 
     #[inline]
-    pub fn insert(&mut self, param: InstanceParam) -> SpriteIdx {
+    pub fn insert(&mut self, param: InstanceParam) -> SpriteId {
         *self.dirty.get_mut() = true;
-        SpriteIdx(self.sprites.insert(param))
+        SpriteId(self.sprites.insert(param))
     }
 
     #[inline]
-    pub fn remove(&mut self, index: SpriteIdx) {
+    pub fn remove(&mut self, index: SpriteId) {
         *self.dirty.get_mut() = true;
         self.sprites.remove(index.0);
     }
@@ -1412,14 +1412,17 @@ impl SpriteBatch {
             }));
 
         if inner.instances.len() > inner.capacity {
-            inner.capacity = inner.capacity * 2;
+            let new_capacity = inner.instances.len().checked_next_power_of_two().unwrap();
             let new_buffer = mq::Buffer::stream(
                 &mut ctx.mq,
                 mq::BufferType::VertexBuffer,
-                inner.capacity * mem::size_of::<InstanceProperties>(),
+                new_capacity * mem::size_of::<InstanceProperties>(),
             );
+
             let old_buffer = mem::replace(&mut inner.bindings.vertex_buffers[1], new_buffer);
             old_buffer.delete();
+
+            inner.capacity = new_capacity;
         }
 
         inner.bindings.vertex_buffers[1].update(&mut ctx.mq, &inner.instances);
@@ -1576,10 +1579,17 @@ pub trait Drawable: 'static {
     fn aabb(&self) -> Box2<f32>;
 }
 
+impl Drawable for () {
+    fn draw(&self, _ctx: &mut Graphics, _instance: InstanceParam) {}
+    fn aabb(&self) -> Box2<f32> {
+        Box2::invalid()
+    }
+}
+
 /// Shorthand trait for types that are `Drawable` and `Any`, as well as
 /// `Send + Sync`. This is blanket-impl'd and you should never have to implement
 /// it manually.
-pub trait DrawableAny: Drawable + Any + Send + Sync {
+pub trait AnyDrawable: Drawable + Any + Send + Sync {
     #[doc(hidden)]
     fn as_any(&self) -> &dyn Any;
 
@@ -1593,7 +1603,7 @@ pub trait DrawableAny: Drawable + Any + Send + Sync {
     fn as_drawable(&self) -> &dyn Drawable;
 }
 
-impl<T: Drawable + Any + Send + Sync> DrawableAny for T {
+impl<T: Drawable + Any + Send + Sync> AnyDrawable for T {
     fn as_any(&self) -> &dyn Any {
         self as &dyn Any
     }
@@ -1611,7 +1621,7 @@ impl<T: Drawable + Any + Send + Sync> DrawableAny for T {
     }
 }
 
-impl dyn DrawableAny {
+impl dyn AnyDrawable {
     #[doc(hidden)]
     fn downcast<T: Any>(self: Box<Self>) -> Option<T> {
         Box::<dyn Any>::downcast(self.to_box_any())
@@ -1620,13 +1630,13 @@ impl dyn DrawableAny {
     }
 }
 
-pub struct DrawableId<T: DrawableAny + ?Sized, C>(
+pub struct DrawableId<T: AnyDrawable + ?Sized, C>(
     pub(crate) Index,
-    pub(crate) PhantomData<T>,
+    pub(crate) PhantomData<&'static T>,
     pub(crate) PhantomData<C>,
 );
 
-impl<T: DrawableAny + ?Sized, C> fmt::Debug for DrawableId<T, C> {
+impl<T: AnyDrawable + ?Sized, C> fmt::Debug for DrawableId<T, C> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_tuple(&format!("DrawableId<{}>", any::type_name::<C>()))
             .field(&self.0)
@@ -1634,35 +1644,35 @@ impl<T: DrawableAny + ?Sized, C> fmt::Debug for DrawableId<T, C> {
     }
 }
 
-impl<T: DrawableAny + ?Sized, C> Copy for DrawableId<T, C> {}
-impl<T: DrawableAny + ?Sized, C> Clone for DrawableId<T, C> {
+impl<T: AnyDrawable + ?Sized, C> Copy for DrawableId<T, C> {}
+impl<T: AnyDrawable + ?Sized, C> Clone for DrawableId<T, C> {
     #[inline]
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<T: DrawableAny + ?Sized, C> PartialEq for DrawableId<T, C> {
+impl<T: AnyDrawable + ?Sized, C> PartialEq for DrawableId<T, C> {
     fn eq(&self, rhs: &Self) -> bool {
         self.0 == rhs.0
     }
 }
 
-impl<T: DrawableAny + ?Sized, C> Eq for DrawableId<T, C> {}
+impl<T: AnyDrawable + ?Sized, C> Eq for DrawableId<T, C> {}
 
-impl<T: DrawableAny + ?Sized, C> PartialOrd for DrawableId<T, C> {
+impl<T: AnyDrawable + ?Sized, C> PartialOrd for DrawableId<T, C> {
     fn partial_cmp(&self, rhs: &Self) -> Option<Ordering> {
         Some(self.0.cmp(&rhs.0))
     }
 }
 
-impl<T: DrawableAny + ?Sized, C> Ord for DrawableId<T, C> {
+impl<T: AnyDrawable + ?Sized, C> Ord for DrawableId<T, C> {
     fn cmp(&self, rhs: &Self) -> Ordering {
         self.0.cmp(&rhs.0)
     }
 }
 
-impl<T: DrawableAny + ?Sized, C> Hash for DrawableId<T, C> {
+impl<T: AnyDrawable + ?Sized, C> Hash for DrawableId<T, C> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.0.hash(state);
     }
@@ -1670,12 +1680,12 @@ impl<T: DrawableAny + ?Sized, C> Hash for DrawableId<T, C> {
 
 impl<'a, T, C> SmartComponent<ScContext<'a>> for DrawableId<T, C>
 where
-    T: DrawableAny,
+    T: AnyDrawable,
     C: Send + Sync + 'static,
 {
 }
 
-impl<T: DrawableAny + ?Sized, C> DrawableId<T, C> {
+impl<T: AnyDrawable + ?Sized, C> DrawableId<T, C> {
     pub(crate) fn new(index: Index) -> Self {
         Self(index, PhantomData, PhantomData)
     }

@@ -48,7 +48,7 @@ pub enum HierarchyEvent {
     Removed(Entity),
 }
 
-pub struct Hierarchy<P: ParentComponent> {
+pub struct HierarchyManager<P: ParentComponent> {
     sorted: Vec<Entity>,
     entities: HashMap<u32, usize>,
 
@@ -68,7 +68,7 @@ pub struct Hierarchy<P: ParentComponent> {
     _marker: PhantomData<P>,
 }
 
-impl<P: ParentComponent> Hierarchy<P> {
+impl<P: ParentComponent> HierarchyManager<P> {
     pub fn new(world: &mut World) -> Self {
         let events = world.track::<P>();
         Self {
@@ -371,12 +371,12 @@ impl<P: ParentComponent> Hierarchy<P> {
 pub struct SubHierarchyIterator<'a, P: ParentComponent> {
     current_index: usize,
     end_index: usize,
-    hierarchy: &'a Hierarchy<P>,
+    hierarchy: &'a HierarchyManager<P>,
     entities: BitSet,
 }
 
 impl<'a, P: ParentComponent> SubHierarchyIterator<'a, P> {
-    fn new(hierarchy: &'a Hierarchy<P>, root: Entity) -> Self {
+    fn new(hierarchy: &'a HierarchyManager<P>, root: Entity) -> Self {
         let max = hierarchy.sorted.len();
         let root_index = hierarchy
             .children
