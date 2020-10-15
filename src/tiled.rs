@@ -19,8 +19,8 @@ use crate::{
         DrawableGraph, DrawableNodeId, Graphics, InstanceParam, Mesh, Sprite, SpriteBatch,
         SpriteId, Texture,
     },
-    loader::{Key, Load, Loaded, Storage},
     math::*,
+    resource_cache::{Key, Load, Loaded, Storage},
     tiled::xml_parser::LayerData,
     Atom, OwnedResources, Resources, SharedResources, UnifiedResources,
 };
