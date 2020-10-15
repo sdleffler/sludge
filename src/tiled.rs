@@ -785,14 +785,18 @@ impl<TileProps: TileProperties> TiledLayerManager<TileProps> {
                 }
             }
         }
+
+        for (_, batch) in batches {
+            self.batches.push(batch);
+        }
     }
 
     pub fn clear(&self, scene: &mut DrawableGraph, cmds: &mut CommandBuffer) {
-        for &entity in self.animations.values() {
+        for &entity in &self.owned_entities {
             cmds.despawn(entity);
         }
 
-        for &entity in &self.owned_entities {
+        for &entity in self.animations.values() {
             cmds.despawn(entity);
         }
 
@@ -892,9 +896,10 @@ impl<LayerProps: LayerProperties, TileProps: TileProperties>
             .query::<(&DrawableNodeId<Sprite>, &mut TileAnimationState)>()
             .iter()
         {
-            let animation = world
-                .get::<TileAnimation<TileProps>>(animation_state.animation)
-                .unwrap();
+            let animation = match world.get::<TileAnimation<TileProps>>(animation_state.animation) {
+                Ok(animation) => animation,
+                _ => continue,
+            };
 
             animation_state.remaining -= dt * 1_000.;
             if animation_state.remaining < 0. {
@@ -914,9 +919,10 @@ impl<LayerProps: LayerProperties, TileProps: TileProperties>
             )>()
             .iter()
         {
-            let animation = world
-                .get::<TileAnimation<TileProps>>(animation_state.animation)
-                .unwrap();
+            let animation = match world.get::<TileAnimation<TileProps>>(animation_state.animation) {
+                Ok(animation) => animation,
+                _ => continue,
+            };
 
             animation_state.remaining -= dt * 1_000.;
             if animation_state.remaining < 0. {
