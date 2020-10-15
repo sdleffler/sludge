@@ -1,5 +1,9 @@
 use crate::math::*;
-use {hashbrown::HashMap, hibitset::BitSet, std::iter};
+use {
+    hashbrown::{hash_map::Entry, HashMap},
+    hibitset::{BitSet, BitSetLike},
+    std::{iter, ops},
+};
 
 pub const DEFAULT_CHUNK_SIZE: u16 = 64;
 
@@ -9,6 +13,22 @@ fn to_chunk_and_subindices(chunk_size: u16, (x, y): (i32, i32)) -> ((i32, i32), 
     let (lx, ly) = (x.rem_euclid(chunk_size), y.rem_euclid(chunk_size));
     let tile_index = (lx + ly * chunk_size) as usize;
     (chunk_index, tile_index)
+}
+
+fn from_chunk_and_subindices(
+    chunk_size: u16,
+    (chunk_x, chunk_y): (i32, i32),
+    subindex: u32,
+) -> (i32, i32) {
+    let (sub_x, sub_y) = (
+        (subindex as i32).rem_euclid(chunk_size as i32),
+        (subindex as i32).div_euclid(chunk_size as i32),
+    );
+
+    (
+        chunk_x * (chunk_size as i32) + sub_x,
+        chunk_y * (chunk_size as i32) + sub_y,
+    )
 }
 
 #[derive(Debug, Clone)]
@@ -100,6 +120,19 @@ impl ChunkedBitGrid {
         }
     }
 
+    /// Clear the bitgrid without losing any allocated chunk
+    /// memory.
+    pub fn clear(&mut self) {
+        for chunk in self.chunks.values_mut() {
+            chunk.clear();
+        }
+    }
+
+    /// Remove any empty allocated chunks.
+    pub fn sweep_chunks(&mut self) {
+        self.chunks.retain(|_, chunk| !chunk.is_empty());
+    }
+
     pub fn get(&self, (x, y): (i32, i32)) -> bool {
         let (chunk_indices, offset) = to_chunk_and_subindices(self.chunk_size, (x, y));
         self.chunks
@@ -132,5 +165,30 @@ impl ChunkedBitGrid {
         let mins = Point2::new(x as f32 * self.scale, y as f32 * self.scale);
         let maxs = mins + Vector2::repeat(self.scale);
         Box2::from_corners(mins, maxs)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (i32, i32)> + '_ {
+        let chunk_size = self.chunk_size;
+        self.chunks.iter().flat_map(move |(&chunk_coords, chunk)| {
+            chunk
+                .iter()
+                .map(move |subindex| from_chunk_and_subindices(chunk_size, chunk_coords, subindex))
+        })
+    }
+}
+
+impl<'a> ops::BitOrAssign<&'a ChunkedBitGrid> for ChunkedBitGrid {
+    fn bitor_assign(&mut self, other: &'a ChunkedBitGrid) {
+        assert_eq!(self.chunk_size, other.chunk_size);
+        for (&coord, other_chunk) in other.chunks.iter() {
+            match self.chunks.entry(coord) {
+                Entry::Occupied(mut chunk) => {
+                    *chunk.get_mut() |= other_chunk;
+                }
+                Entry::Vacant(empty) => {
+                    empty.insert(other_chunk.clone());
+                }
+            }
+        }
     }
 }

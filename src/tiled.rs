@@ -12,6 +12,7 @@ use {
 };
 
 use crate::{
+    chunked_grid::ChunkedBitGrid,
     ecs::*,
     filesystem::Filesystem,
     graphics::{
@@ -810,7 +811,7 @@ impl<TileProps: TileProperties> TiledLayerManager<TileProps> {
 }
 
 #[derive(Debug)]
-pub struct TiledMapManager<LayerProps: LayerProperties, TileProps: TileProperties> {
+pub struct TiledMapRenderManager<LayerProps: LayerProperties, TileProps: TileProperties> {
     sorted_layer_parent: Option<DrawableNodeId<()>>,
     render_objects: HashMap<Entity, TiledLayerManager<TileProps>>,
     component_events: ReaderId<ComponentEvent>,
@@ -818,7 +819,7 @@ pub struct TiledMapManager<LayerProps: LayerProperties, TileProps: TilePropertie
 }
 
 impl<LayerProps: LayerProperties, TileProps: TileProperties>
-    TiledMapManager<LayerProps, TileProps>
+    TiledMapRenderManager<LayerProps, TileProps>
 {
     pub fn new(world: &mut World, sorted_layer_parent: Option<DrawableNodeId<()>>) -> Self {
         let component_events = world.track::<TiledMap<LayerProps, TileProps>>();
@@ -930,12 +931,12 @@ impl<LayerProps: LayerProperties, TileProps: TileProperties>
     }
 }
 
-pub struct TiledMapManagerSystem<L, T> {
+pub struct TiledMapRenderManagerSystem<L, T> {
     sorted_layer_parent: Option<DrawableNodeId<()>>,
     _marker: PhantomData<(L, T)>,
 }
 
-impl<L, T> TiledMapManagerSystem<L, T> {
+impl<L, T> TiledMapRenderManagerSystem<L, T> {
     pub fn new(sorted_layer_parent: Option<DrawableNodeId<()>>) -> Self {
         Self {
             sorted_layer_parent,
@@ -944,7 +945,7 @@ impl<L, T> TiledMapManagerSystem<L, T> {
     }
 }
 
-impl<L, T> crate::System for TiledMapManagerSystem<L, T>
+impl<L, T> crate::System for TiledMapRenderManagerSystem<L, T>
 where
     L: LayerProperties,
     T: TileProperties,
@@ -955,8 +956,8 @@ where
         resources: &mut OwnedResources,
         _: Option<&SharedResources>,
     ) -> Result<()> {
-        if !resources.has_value::<TiledMapManager<L, T>>() {
-            let map_manager = TiledMapManager::<L, T>::new(
+        if !resources.has_value::<TiledMapRenderManager<L, T>>() {
+            let map_manager = TiledMapRenderManager::<L, T>::new(
                 resources.get_mut::<World>().expect("no World resource!"),
                 self.sorted_layer_parent,
             );
@@ -974,9 +975,168 @@ where
         // FIXME(sleffy): HAAAAAAAAAAAAAACK!
         let dt: f32 = 1. / 60.;
 
-        let mut map_manager = resources.fetch_mut::<TiledMapManager<L, T>>();
+        let mut map_manager = resources.fetch_mut::<TiledMapRenderManager<L, T>>();
         map_manager.update(&*world, &mut *fs, &mut *gfx, &mut *scene, dt);
 
+        Ok(())
+    }
+}
+
+pub struct TiledMapBitGrid {
+    pub map_entity: Entity,
+    pub bit_grid: ChunkedBitGrid,
+}
+
+impl TiledMapBitGrid {
+    pub fn from_tiled_map<L, T>(map_entity: Entity, tiled_map: &TiledMap<L, T>) -> Self
+    where
+        L: LayerProperties,
+        T: TileProperties,
+    {
+        let mut bit_grid = ChunkedBitGrid::new(16.);
+
+        for (layer_index, layer) in tiled_map.layers().iter().enumerate() {
+            let tile_layer = match layer {
+                Layer::TileLayer(tile_layer) if tile_layer.properties.is_solid() => tile_layer,
+                _ => continue,
+            };
+
+            log::info!(
+                "layer {} is solid, loading chunk collision data",
+                layer_index
+            );
+
+            for (chunk_index, chunk) in tile_layer.chunks() {
+                log::info!(
+                    "loading collision data for layer {} chunk {:?}",
+                    layer_index,
+                    chunk_index
+                );
+
+                for (coords, tile) in chunk.tiles() {
+                    let tile_is_solid = tiled_map
+                        .get_tile_data_for_gid(tile)
+                        .map(|td| td.properties.is_solid())
+                        .unwrap_or_default();
+
+                    if tile_is_solid {
+                        bit_grid.set(coords, true);
+                    }
+                }
+            }
+        }
+
+        Self {
+            map_entity,
+            bit_grid,
+        }
+    }
+}
+
+pub struct TiledMapAggregateBitGrid<L: LayerProperties, T: TileProperties> {
+    maps: Vec<TiledMapBitGrid>,
+    aggregate: ChunkedBitGrid,
+    component_events: ReaderId<ComponentEvent>,
+    _marker: PhantomData<(L, T)>,
+}
+
+impl<L: LayerProperties, T: TileProperties> TiledMapAggregateBitGrid<L, T> {
+    pub fn new(world: &mut World, scale: f32) -> Self {
+        let component_events = world.track::<TiledMap<L, T>>();
+        Self {
+            maps: Vec::new(),
+            aggregate: ChunkedBitGrid::new(scale),
+            component_events,
+            _marker: PhantomData,
+        }
+    }
+
+    pub fn aggregate(&self) -> &ChunkedBitGrid {
+        &self.aggregate
+    }
+
+    // FIXME(sleffy): modifications/removals currently traverse unmodified
+    // chunks. This could be more efficient.
+    ///
+    /// Pull component events for `TiledMap<L, T>` components, calculate bit grids
+    /// from solid tiles on the resulting set of maps, and aggregate those.
+    pub fn update(&mut self, world: &World) {
+        for &event in world.poll::<TiledMap<L, T>>(&mut self.component_events) {
+            match event {
+                ComponentEvent::Inserted(entity) => {
+                    let map = world.get::<TiledMap<L, T>>(entity).unwrap();
+                    let grid = TiledMapBitGrid::from_tiled_map(entity, &*map);
+                    self.aggregate |= &grid.bit_grid;
+                    self.maps.push(grid);
+                }
+                ComponentEvent::Modified(entity) => {
+                    let map = world.get::<TiledMap<L, T>>(entity).unwrap();
+                    let collider = self
+                        .maps
+                        .iter_mut()
+                        .find(|map| map.map_entity == entity)
+                        .unwrap();
+                    *collider = TiledMapBitGrid::from_tiled_map(entity, &*map);
+
+                    self.aggregate.clear();
+                    for map in self.maps.iter() {
+                        self.aggregate |= &map.bit_grid;
+                    }
+                    self.aggregate.sweep_chunks();
+                }
+                ComponentEvent::Removed(entity) => {
+                    self.maps.retain(|map| map.map_entity != entity);
+
+                    self.aggregate.clear();
+                    for map in self.maps.iter() {
+                        self.aggregate |= &map.bit_grid;
+                    }
+                    self.aggregate.sweep_chunks();
+                }
+            }
+        }
+    }
+}
+
+pub struct TiledMapBitGridSystem<L, T> {
+    scale: f32,
+    _marker: PhantomData<(L, T)>,
+}
+
+impl<L, T> TiledMapBitGridSystem<L, T> {
+    pub fn new(scale: f32) -> Self {
+        Self {
+            scale,
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<L, T> crate::System for TiledMapBitGridSystem<L, T>
+where
+    L: LayerProperties,
+    T: TileProperties,
+{
+    fn init(
+        &self,
+        _lua: LuaContext,
+        resources: &mut OwnedResources,
+        _: Option<&SharedResources>,
+    ) -> Result<()> {
+        if !resources.has_value::<TiledMapAggregateBitGrid<L, T>>() {
+            let bit_grid = TiledMapAggregateBitGrid::<L, T>::new(
+                resources.get_mut::<World>().expect("no World resource!"),
+                self.scale,
+            );
+            resources.insert(bit_grid);
+        }
+        Ok(())
+    }
+
+    fn update(&self, _lua: LuaContext, resources: &UnifiedResources) -> Result<()> {
+        let world = resources.fetch::<World>();
+        let mut grid = resources.fetch_mut::<TiledMapAggregateBitGrid<L, T>>();
+        grid.update(&*world);
         Ok(())
     }
 }
