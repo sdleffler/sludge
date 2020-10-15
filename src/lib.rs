@@ -241,6 +241,11 @@ impl Space {
     pub fn lua(&self) -> &Lua {
         &self.lua
     }
+
+    pub fn dispatch(&self, dispatcher: &mut Dispatcher) -> Result<()> {
+        self.lua
+            .context(|lua| dispatcher.update(lua, &self.resources))
+    }
 }
 
 #[derive(Debug, Derivative)]
