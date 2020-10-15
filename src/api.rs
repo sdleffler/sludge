@@ -1,5 +1,5 @@
 use crate::{
-    ecs::{Entity, LightEntity},
+    ecs::{Entity, LightEntity, World},
     Resources, SludgeLuaContextExt,
 };
 use {
@@ -293,6 +293,24 @@ pub fn sludge_to_accessor<'lua>(
 inventory::submit! {
     Module::parse("sludge.to_accessor", |lua| {
         Ok(LuaValue::Function(lua.create_function(sludge_to_accessor)?))
+    })
+}
+
+pub fn despawn<'lua>(
+    lua: LuaContext<'lua>,
+    entity: LightEntity,
+) -> LuaResult<Result<bool, String>> {
+    Ok(lua
+        .resources()
+        .fetch_mut::<World>()
+        .despawn(entity.into())
+        .map(|_| true)
+        .map_err(|err| err.to_string()))
+}
+
+inventory::submit! {
+    Module::parse("sludge.despawn", |lua| {
+        Ok(LuaValue::Function(lua.create_function(despawn)?))
     })
 }
 
