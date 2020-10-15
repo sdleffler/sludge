@@ -83,7 +83,7 @@ impl Tag {
             }
             Direction::Forward => Ok(FrameId(current + 1)),
             Direction::Reverse => Ok(FrameId(current - 1)),
-            Direction::Pingpong => unimplemented!("pingpong is broken!"),
+            Direction::Pingpong => todo!("pingpong is broken!"),
         }
     }
 }
