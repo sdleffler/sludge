@@ -491,9 +491,9 @@ impl World {
     }
 
     pub fn flush_queue(&mut self) -> Result<()> {
-        let mut pool = self.buffers.lock().unwrap();
+        let pool = self.buffers.get_mut().unwrap();
         let mut errors = Vec::new();
-        let mut queued = self.queued.lock().unwrap();
+        let queued = self.queued.get_mut().unwrap();
 
         let nonempty_count = queued.iter().filter(|buf| !buf.is_empty()).count();
         if nonempty_count > 0 {
