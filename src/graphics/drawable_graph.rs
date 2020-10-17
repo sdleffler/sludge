@@ -1,14 +1,12 @@
 use crate::{
-    ecs::{ComponentEvent, Entity, FlaggedComponent, ScContext, SmartComponent, World},
     graphics::{AnyDrawable, Drawable, DrawableId, ErasedDrawableId, Graphics, InstanceParam},
     math::*,
 };
 use {
     hashbrown::HashMap,
     ordered_float::OrderedFloat,
-    shrev::ReaderId,
     std::{
-        any::{Any, TypeId},
+        any::Any,
         marker::PhantomData,
         mem, ops,
         sync::{
