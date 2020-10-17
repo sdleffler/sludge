@@ -4,11 +4,10 @@ use {
     hashbrown::HashMap,
     serde::{Deserialize, Serialize},
     std::{io::Read, ops},
-    thunderdome::{Arena, Index},
 };
 
 use crate::{
-    assets::{Asset, Cache, Cached, Key, Loaded},
+    assets::{Asset, Cache, Key, Loaded},
     ecs::*,
     filesystem::Filesystem,
     math::*,
@@ -266,123 +265,10 @@ pub struct SpriteTag {
     pub should_loop: bool,
 }
 
-/// Component referring to a loaded `SpriteSheet` in a `SpriteSheetManager`.
-#[derive(Debug, Clone, Copy)]
-pub struct SpriteSheetId(Index);
-
 impl<'a> SmartComponent<ScContext<'a>> for SpriteName {}
 impl<'a> SmartComponent<ScContext<'a>> for SpriteFrame {}
 impl<'a> SmartComponent<ScContext<'a>> for SpriteTag {}
-impl<'a> SmartComponent<ScContext<'a>> for SpriteSheetId {}
 impl<'a> SmartComponent<ScContext<'a>> for SpriteSheet {}
-
-#[derive(Debug)]
-pub struct SpriteSheetEntry<T: Send + Sync + 'static> {
-    pub sheet: Cached<SpriteSheet>,
-    pub userdata: T,
-}
-
-/// A resource for managing sprite sheets and optionally a corresponding sprite batch.
-///
-/// The type parameter of `SpriteSheetManager<T>` is bundled along with the `SpriteSheet`
-/// passed into `insert`, and can be retrieved from the `SpriteSheetEntry` as the `userdata`
-/// field.
-///
-/// `T` can be used as an index, or to hold a `ggez::graphics::spritebatch::SpriteBatch`...
-/// or whatever. It can be `()`, too. It doesn't matter, it's just there for convenience.
-///
-/// Spritesheets can be named or anonymous; if named, then it's easy to retrieve the corresponding
-/// `SpriteSheetId` through `SpriteSheetManager::get_id`.
-#[derive(Debug)]
-pub struct SpriteSheetManager<T: Send + Sync + 'static> {
-    sheets: Arena<SpriteSheetEntry<T>>,
-    ids: HashMap<String, Index>,
-}
-
-impl<T: Send + Sync + 'static> Default for SpriteSheetManager<T> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<T: Send + Sync + 'static> SpriteSheetManager<T> {
-    pub fn new() -> Self {
-        Self {
-            sheets: Arena::new(),
-            ids: HashMap::new(),
-        }
-    }
-
-    /// Insert a sprite sheet with associated userdata, optionally providing a string name
-    /// to be associated with the returned id.
-    pub fn insert(
-        &mut self,
-        maybe_name: Option<&str>,
-        sheet: Cached<SpriteSheet>,
-        userdata: T,
-    ) -> Result<SpriteSheetId> {
-        let idx = self.sheets.insert(SpriteSheetEntry { sheet, userdata });
-        if let Some(name) = maybe_name {
-            ensure!(
-                self.ids.insert(name.to_owned(), idx).is_none(),
-                "spritesheet `{}` already exists!",
-                name
-            );
-        }
-        Ok(SpriteSheetId(idx))
-    }
-
-    /// Immutably borrow a sprite sheet entry along with its associated userdata. Returns
-    /// `None` if the id is invalid.
-    pub fn get(&self, SpriteSheetId(id): SpriteSheetId) -> Option<&SpriteSheetEntry<T>> {
-        self.sheets.get(id)
-    }
-
-    /// Mutably borrow a sprite sheet entry along with its associated userdata.  Returns
-    /// `None` if the id is invalid.
-    pub fn get_mut(
-        &mut self,
-        SpriteSheetId(id): SpriteSheetId,
-    ) -> Option<&mut SpriteSheetEntry<T>> {
-        self.sheets.get_mut(id)
-    }
-
-    /// Attempt to look up the `SpriteSheetId` corresponding to the given string name.
-    pub fn get_id(&mut self, s: &str) -> Option<SpriteSheetId> {
-        self.ids.get(s).copied().map(SpriteSheetId)
-    }
-
-    /// Update all entities which have a `SpriteFrame`, `SpriteTag`, and `SpriteSheetId`,
-    /// and update their animation state (stored in `SpriteTag`) appropriately.
-    ///
-    /// TODO: it should be possible, if we want, to flag accesses to `SpriteFrame` and with
-    /// the current implementation then we can track when `SpriteFrame` is modified due to
-    /// the animation advancing a frame. This is likely a very minor optimization though.
-    pub fn update_animations(&mut self, world: &World, dt: f32) -> Result<()> {
-        for (_e, (mut frame, mut tag, sheet_id)) in world
-            .query::<(&mut SpriteFrame, &mut SpriteTag, &SpriteSheetId)>()
-            .iter()
-        {
-            let entry = match self.get_mut(*sheet_id) {
-                Some(entry) => entry,
-                None => bail!("spritesheet not found for index {:?}", *sheet_id),
-            };
-
-            if let Some((new_tag, maybe_new_frame)) = entry
-                .sheet
-                .load()
-                .update_animation_inner(dt, &*tag, &*frame)
-            {
-                *tag = new_tag;
-                if let Some(new_frame) = maybe_new_frame {
-                    *frame = new_frame;
-                }
-            }
-        }
-
-        Ok(())
-    }
-}
 
 impl Asset for SpriteSheet {
     fn load<'a, R: Resources<'a>>(
