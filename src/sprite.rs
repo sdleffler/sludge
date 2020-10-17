@@ -8,10 +8,10 @@ use {
 };
 
 use crate::{
+    assets::{Asset, Cache, Cached, Key, Loaded},
     ecs::*,
     filesystem::Filesystem,
     math::*,
-    resource_cache::{Key, Load, Loaded, Res, Storage},
     Resources,
 };
 
@@ -274,10 +274,11 @@ impl<'a> SmartComponent<ScContext<'a>> for SpriteName {}
 impl<'a> SmartComponent<ScContext<'a>> for SpriteFrame {}
 impl<'a> SmartComponent<ScContext<'a>> for SpriteTag {}
 impl<'a> SmartComponent<ScContext<'a>> for SpriteSheetId {}
+impl<'a> SmartComponent<ScContext<'a>> for SpriteSheet {}
 
 #[derive(Debug)]
 pub struct SpriteSheetEntry<T: Send + Sync + 'static> {
-    pub sheet: Res<SpriteSheet>,
+    pub sheet: Cached<SpriteSheet>,
     pub userdata: T,
 }
 
@@ -317,7 +318,7 @@ impl<T: Send + Sync + 'static> SpriteSheetManager<T> {
     pub fn insert(
         &mut self,
         maybe_name: Option<&str>,
-        sheet: Res<SpriteSheet>,
+        sheet: Cached<SpriteSheet>,
         userdata: T,
     ) -> Result<SpriteSheetId> {
         let idx = self.sheets.insert(SpriteSheetEntry { sheet, userdata });
@@ -357,19 +358,19 @@ impl<T: Send + Sync + 'static> SpriteSheetManager<T> {
     /// TODO: it should be possible, if we want, to flag accesses to `SpriteFrame` and with
     /// the current implementation then we can track when `SpriteFrame` is modified due to
     /// the animation advancing a frame. This is likely a very minor optimization though.
-    pub fn update_animations(&self, world: &World, dt: f32) -> Result<()> {
+    pub fn update_animations(&mut self, world: &World, dt: f32) -> Result<()> {
         for (_e, (mut frame, mut tag, sheet_id)) in world
             .query::<(&mut SpriteFrame, &mut SpriteTag, &SpriteSheetId)>()
             .iter()
         {
-            let entry = match self.get(*sheet_id) {
+            let entry = match self.get_mut(*sheet_id) {
                 Some(entry) => entry,
                 None => bail!("spritesheet not found for index {:?}", *sheet_id),
             };
 
             if let Some((new_tag, maybe_new_frame)) = entry
                 .sheet
-                .borrow()
+                .load()
                 .update_animation_inner(dt, &*tag, &*frame)
             {
                 *tag = new_tag;
@@ -383,13 +384,15 @@ impl<T: Send + Sync + 'static> SpriteSheetManager<T> {
     }
 }
 
-impl<'a, R: Resources<'a>> Load<R, Key> for SpriteSheet {
-    type Error = Error;
-
-    fn load(key: Key, _storage: &mut Storage<R, Key>, ctx: &mut R) -> Result<Loaded<Self, Key>> {
+impl Asset for SpriteSheet {
+    fn load<'a, R: Resources<'a>>(
+        key: &Key,
+        _cache: &Cache<'a, R>,
+        resources: &R,
+    ) -> Result<Loaded<Self>> {
         match key {
             Key::Path(path) => {
-                let mut fh = ctx.fetch_mut::<Filesystem>().open(&path)?;
+                let mut fh = resources.fetch_mut::<Filesystem>().open(&path)?;
                 let mut buf = String::new();
                 fh.read_to_string(&mut buf)?;
                 Ok(SpriteSheet::from_json(&buf)?.into())

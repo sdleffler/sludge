@@ -39,12 +39,6 @@ struct MainState {
 impl MainState {
     pub fn new(mut gfx: Graphics) -> Result<MainState> {
         let space = Space::new()?;
-
-        // graphics::set_screen_coordinates(ctx, graphics::Rect::new(0., 0., 320., 240.))?;
-
-        // let mut canvas = graphics::Canvas::new(ctx, 320, 240, ggez::conf::NumSamples::One)?;
-        // canvas.set_filter(graphics::FilterMode::Nearest);
-
         let null_texture = gfx.null_texture.clone();
         let batch = SpriteBatch::with_capacity(&mut gfx, null_texture, 4096 * 4);
         let canvas = Canvas::new(&mut gfx, 320, 240);
@@ -55,12 +49,6 @@ impl MainState {
             bullet_count: 0,
             batch,
             canvas,
-            // batch: graphics::spritebatch::SpriteBatch::new(graphics::Image::solid(
-            //     ctx,
-            //     1,
-            //     graphics::WHITE,
-            // )?),
-            // canvas,
         })
     }
 }
@@ -155,21 +143,6 @@ impl EventHandler for MainState {
         gfx.draw(canvas, None);
         gfx.end_pass();
         gfx.commit_frame();
-        // let fps = timer::fps(ctx);
-        // let fps_display = graphics::Text::new(format!(
-        //     "FPS: {:2.1}, #bullets: {:04}",
-        //     fps, self.bullet_count
-        // ));
-
-        // graphics::set_canvas(ctx, Some(&self.canvas));
-        // graphics::clear(ctx, graphics::BLACK);
-        // graphics::draw(ctx, &self.batch, (na::Point2::origin(),))?;
-        // graphics::draw(ctx, &fps_display, (na::Point2::origin(), graphics::WHITE))?;
-        // graphics::set_canvas(ctx, None);
-
-        // graphics::clear(ctx, graphics::BLACK);
-        // graphics::draw(ctx, &self.canvas, graphics::DrawParam::new())?;
-        // graphics::present(ctx)
         Ok(())
     }
 }
@@ -208,18 +181,6 @@ fn main() -> Result<()> {
         },
         (),
     );
-
-    // let (mut ctx, mut event_loop) = ggez::ContextBuilder::new("bullets", "Sean Leffler")
-    //     .window_setup(ggez::conf::WindowSetup::default().title("Bullets!"))
-    //     .window_mode(ggez::conf::WindowMode::default().dimensions(1280., 960.))
-    //     .build()?;
-
-    // let mut main_state = MainState::new(&mut ctx)?;
-
-    // match event::run(&mut ctx, &mut event_loop, &mut main_state) {
-    //     Ok(_) => println!("Exited cleanly."),
-    //     Err(e) => println!("Error occured: {}", e),
-    // }
 
     Ok(())
 }

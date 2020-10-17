@@ -1,12 +1,14 @@
 use crate::{
-    graphics::{AnyDrawable, Drawable, DrawableId, Graphics, InstanceParam},
+    ecs::{ComponentEvent, Entity, FlaggedComponent, ScContext, SmartComponent, World},
+    graphics::{AnyDrawable, Drawable, DrawableId, ErasedDrawableId, Graphics, InstanceParam},
     math::*,
 };
 use {
     hashbrown::HashMap,
     ordered_float::OrderedFloat,
+    shrev::ReaderId,
     std::{
-        any::Any,
+        any::{Any, TypeId},
         marker::PhantomData,
         mem, ops,
         sync::{
@@ -18,6 +20,7 @@ use {
 };
 
 pub type DrawableNodeId<T> = DrawableId<T, DrawableGraph>;
+pub type ErasedDrawableNodeId = ErasedDrawableId<DrawableGraph>;
 
 pub struct DrawableGraphIter<'a> {
     _outer: RwLockReadGuard<'a, DrawableGraphInner>,
@@ -108,17 +111,41 @@ pub struct DrawableGraph {
 impl<T: AnyDrawable> ops::Index<DrawableNodeId<T>> for DrawableGraph {
     type Output = T;
 
+    #[inline]
     fn index(&self, i: DrawableNodeId<T>) -> &Self::Output {
-        self.objects[i.0].value.as_any().downcast_ref().unwrap()
+        self[ErasedDrawableNodeId::from(i)]
+            .as_any()
+            .downcast_ref()
+            .unwrap()
     }
 }
 
 impl<T: AnyDrawable> ops::IndexMut<DrawableNodeId<T>> for DrawableGraph {
+    #[inline]
     fn index_mut(&mut self, i: DrawableNodeId<T>) -> &mut Self::Output {
+        self[ErasedDrawableNodeId::from(i)]
+            .as_any_mut()
+            .downcast_mut()
+            .unwrap()
+    }
+}
+
+impl ops::Index<ErasedDrawableNodeId> for DrawableGraph {
+    type Output = dyn AnyDrawable;
+
+    #[inline]
+    fn index(&self, i: ErasedDrawableNodeId) -> &Self::Output {
+        &*self.objects[i.0].value
+    }
+}
+
+impl ops::IndexMut<ErasedDrawableNodeId> for DrawableGraph {
+    #[inline]
+    fn index_mut(&mut self, i: ErasedDrawableNodeId) -> &mut Self::Output {
         if matches!(self.objects[i.0].parent, Some(j) if self.objects[j].y_sorted) {
             *self.dirty.get_mut() = true;
         }
-        self.objects[i.0].value.as_any_mut().downcast_mut().unwrap()
+        &mut *self.objects[i.0].value
     }
 }
 
@@ -157,7 +184,69 @@ impl DrawableGraph {
         }
     }
 
+    pub fn insert_any(
+        &mut self,
+        value: Box<dyn AnyDrawable>,
+        layer: i32,
+        y_sorted: bool,
+        parent: Option<impl Into<ErasedDrawableNodeId>>,
+    ) -> ErasedDrawableNodeId {
+        let index = self.objects.insert(Node {
+            value,
+            layer,
+            y_sorted,
+            parent: parent.map(|t| t.into().0),
+            children: vec![],
+        });
+
+        *self.dirty.get_mut() = true;
+
+        ErasedDrawableNodeId::new(index)
+    }
+
+    pub fn set_parent(
+        &mut self,
+        object: impl Into<ErasedDrawableNodeId>,
+        new_parent: Option<impl Into<ErasedDrawableNodeId>>,
+    ) {
+        let object = object.into();
+        let new_parent = new_parent.map(Into::into);
+
+        let old_parent = mem::replace(&mut self.objects[object.0].parent, new_parent.map(|t| t.0));
+
+        if let Some(p) = old_parent {
+            let old_parent_node = &mut self.objects[p];
+            let i = old_parent_node
+                .children
+                .binary_search(&object.0)
+                .expect("invalid scene graph");
+            old_parent_node.children.remove(i);
+        }
+
+        if let Some(p) = new_parent {
+            let new_parent_node = &mut self.objects[p.0];
+            let i = new_parent_node
+                .children
+                .binary_search(&object.0)
+                .expect_err("invalid scene graph");
+            new_parent_node.children.insert(i, object.0);
+        }
+
+        *self.dirty.get_mut() = true;
+    }
+
+    pub fn set_layer(&mut self, object: impl Into<ErasedDrawableNodeId>, layer: i32) {
+        let object = object.into();
+        self.objects[object.0].layer = layer;
+        *self.dirty.get_mut() = true;
+    }
+
     pub fn remove<T: AnyDrawable>(&mut self, object: DrawableNodeId<T>) -> Option<T> {
+        self.remove_any(object.into())
+            .map(|boxed| *Box::<dyn Any>::downcast(boxed.to_box_any()).unwrap())
+    }
+
+    pub fn remove_any(&mut self, object: ErasedDrawableNodeId) -> Option<Box<dyn AnyDrawable>> {
         let node = self.objects.remove(object.0)?;
 
         for child in node.children {
@@ -175,7 +264,7 @@ impl DrawableGraph {
 
         *self.dirty.get_mut() = true;
 
-        Some(*Box::<dyn Any>::downcast(node.value.to_box_any()).unwrap())
+        Some(node.value)
     }
 
     pub fn children<T: AnyDrawable>(

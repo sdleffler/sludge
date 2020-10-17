@@ -1,6 +1,9 @@
 use crate::{
+    assets::{Asset, Cache, Cached, Key, Loaded},
     ecs::{ScContext, SmartComponent},
+    filesystem::Filesystem,
     math::*,
+    resources::Resources,
 };
 use {
     anyhow::*,
@@ -1317,7 +1320,7 @@ pub struct SpriteBatch {
     sprites: Arena<InstanceParam>,
     inner: RwLock<SpriteBatchInner>,
     dirty: AtomicBool,
-    texture: Texture,
+    texture: Cached<Texture>,
 }
 
 impl ops::Index<SpriteId> for SpriteBatch {
@@ -1339,7 +1342,12 @@ impl ops::IndexMut<SpriteId> for SpriteBatch {
 }
 
 impl SpriteBatch {
-    pub fn with_capacity(ctx: &mut Graphics, texture: Texture, capacity: usize) -> Self {
+    pub fn with_capacity<T>(ctx: &mut Graphics, texture: T, capacity: usize) -> Self
+    where
+        T: Into<Cached<Texture>>,
+    {
+        let mut texture = texture.into();
+
         let instances = mq::Buffer::stream(
             &mut ctx.mq,
             mq::BufferType::VertexBuffer,
@@ -1349,7 +1357,7 @@ impl SpriteBatch {
         let bindings = mq::Bindings {
             vertex_buffers: vec![ctx.quad_bindings.vertex_buffers[0], instances],
             index_buffer: ctx.quad_bindings.index_buffer,
-            images: vec![*texture],
+            images: vec![**texture.load_cached()],
         };
 
         Self {
@@ -1371,7 +1379,13 @@ impl SpriteBatch {
         *self.dirty.get_mut() = true;
         let inner = self.inner.get_mut().unwrap();
         if let Some(aabb) = inner.aabb.as_mut() {
-            aabb.merge(&self.texture.aabb().transformed_by(param.tx.matrix()));
+            aabb.merge(
+                &self
+                    .texture
+                    .load_cached()
+                    .aabb()
+                    .transformed_by(param.tx.matrix()),
+            );
         }
         SpriteId(self.sprites.insert(param))
     }
@@ -1396,6 +1410,7 @@ impl SpriteBatch {
         }
 
         let inner = &mut *self.inner.write().unwrap();
+        let texture = self.texture.load();
 
         inner.instances.clear();
         inner
@@ -1403,10 +1418,7 @@ impl SpriteBatch {
             .extend(self.sprites.iter().map(|(_, param)| {
                 param
                     .scale2(param.src.extents())
-                    .scale2(Vector2::new(
-                        self.texture.width as f32,
-                        self.texture.height as f32,
-                    ))
+                    .scale2(Vector2::new(texture.width as f32, texture.height as f32))
                     .to_instance_properties()
             }));
 
@@ -1425,13 +1437,14 @@ impl SpriteBatch {
         }
 
         inner.bindings.vertex_buffers[1].update(&mut ctx.mq, &inner.instances);
+        inner.bindings.images[0] = **texture;
 
         self.dirty.store(false, atomic::Ordering::Relaxed);
     }
 
     #[inline]
-    pub fn texture(&self) -> &Texture {
-        &self.texture
+    pub fn texture(&self) -> Texture {
+        self.texture.load().clone()
     }
 }
 
@@ -1458,7 +1471,7 @@ impl Drawable for SpriteBatch {
 
         let mut inner = self.inner.write().unwrap();
         let mut initial = Box2::invalid();
-        let image_aabb = self.texture.aabb();
+        let image_aabb = self.texture.load().aabb();
         for (_, param) in self.sprites.iter() {
             initial.merge(&param.transform_aabb(&image_aabb));
         }
@@ -1542,11 +1555,18 @@ impl Drawable for Canvas {
 #[derive(Debug)]
 pub struct Sprite {
     pub params: InstanceParam,
-    pub texture: Texture,
+    pub texture: Cached<Texture>,
 }
 
 impl Sprite {
     pub fn new(texture: Texture, params: InstanceParam) -> Self {
+        Self {
+            params,
+            texture: Cached::new(texture),
+        }
+    }
+
+    pub fn from_cached(texture: Cached<Texture>, params: InstanceParam) -> Self {
         Self { params, texture }
     }
 }
@@ -1559,11 +1579,11 @@ impl Drawable for Sprite {
             tx: instance.tx * self.params.tx,
             ..self.params
         };
-        self.texture.draw(ctx, params);
+        self.texture.load().draw(ctx, params);
     }
 
     fn aabb(&self) -> Box2<f32> {
-        let texture_aabb = self.texture.aabb();
+        let texture_aabb = self.texture.load().aabb();
         let extents = self.params.src.extents();
         self.params.transform_aabb(&Box2::from_corners(
             texture_aabb.mins,
@@ -1639,9 +1659,13 @@ pub struct DrawableId<T: AnyDrawable + ?Sized, C>(
 
 impl<T: AnyDrawable + ?Sized, C> fmt::Debug for DrawableId<T, C> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple(&format!("DrawableId<{}>", any::type_name::<C>()))
-            .field(&self.0)
-            .finish()
+        f.debug_tuple(&format!(
+            "DrawableId<{}, {}>",
+            any::type_name::<T>(),
+            any::type_name::<C>()
+        ))
+        .field(&self.0)
+        .finish()
     }
 }
 
@@ -1689,5 +1713,81 @@ where
 impl<T: AnyDrawable + ?Sized, C> DrawableId<T, C> {
     pub(crate) fn new(index: Index) -> Self {
         Self(index, PhantomData, PhantomData)
+    }
+}
+
+pub struct ErasedDrawableId<C>(pub(crate) Index, pub(crate) PhantomData<C>);
+
+impl<C> fmt::Debug for ErasedDrawableId<C> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple(&format!("ErasedDrawableId<{}>", any::type_name::<C>()))
+            .field(&self.0)
+            .finish()
+    }
+}
+
+impl<C> Copy for ErasedDrawableId<C> {}
+impl<C> Clone for ErasedDrawableId<C> {
+    #[inline]
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<C> PartialEq for ErasedDrawableId<C> {
+    fn eq(&self, rhs: &Self) -> bool {
+        self.0 == rhs.0
+    }
+}
+
+impl<C> Eq for ErasedDrawableId<C> {}
+
+impl<C> PartialOrd for ErasedDrawableId<C> {
+    fn partial_cmp(&self, rhs: &Self) -> Option<Ordering> {
+        Some(self.0.cmp(&rhs.0))
+    }
+}
+
+impl<C> Ord for ErasedDrawableId<C> {
+    fn cmp(&self, rhs: &Self) -> Ordering {
+        self.0.cmp(&rhs.0)
+    }
+}
+
+impl<C> Hash for ErasedDrawableId<C> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.hash(state);
+    }
+}
+
+impl<'a, C> SmartComponent<ScContext<'a>> for ErasedDrawableId<C> where C: Send + Sync + 'static {}
+
+impl<C> ErasedDrawableId<C> {
+    pub(crate) fn new(index: Index) -> Self {
+        Self(index, PhantomData)
+    }
+}
+
+impl<T: AnyDrawable + ?Sized, C> From<DrawableId<T, C>> for ErasedDrawableId<C> {
+    fn from(id: DrawableId<T, C>) -> ErasedDrawableId<C> {
+        Self::new(id.0)
+    }
+}
+
+impl Asset for Texture {
+    fn load<'a, R: Resources<'a>>(
+        key: &Key,
+        _cache: &Cache<'a, R>,
+        resources: &R,
+    ) -> Result<Loaded<Self>> {
+        match key {
+            Key::Path(path) => {
+                let mut filesystem = resources.fetch_mut::<Filesystem>();
+                let mut gfx = resources.fetch_mut::<Graphics>();
+                let mut file = filesystem.open(path)?;
+                let texture = Texture::from_reader(&mut *gfx, &mut file)?;
+                Ok(Loaded::new(texture))
+            } // _ => panic!("logical resources not supported (yet)"),
+        }
     }
 }

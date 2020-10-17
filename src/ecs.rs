@@ -2,7 +2,6 @@ use {
     anyhow::*,
     hashbrown::HashMap,
     hibitset::*,
-    rlua::prelude::*,
     shrev::{EventChannel, EventIterator},
     std::{
         any::{Any, TypeId},
@@ -13,8 +12,9 @@ use {
 };
 
 pub use hecs::{
-    Bundle, Component, ComponentError, DynamicBundle, Entity, EntityBuilder, EntityRef,
-    NoSuchEntity, Query, QueryBorrow, QueryOne, Ref, RefMut, SmartComponent,
+    Archetype, ArchetypesGeneration, Bundle, Component, ComponentError, DynamicBundle, Entity,
+    EntityBuilder, EntityRef, NoSuchEntity, Query, QueryBorrow, QueryOne, Ref, RefMut,
+    SmartComponent,
 };
 
 pub use shrev::ReaderId;
@@ -142,34 +142,6 @@ impl CommandBuffer {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct LightEntity(u64);
-
-impl From<Entity> for LightEntity {
-    fn from(entity: Entity) -> LightEntity {
-        Self(entity.to_bits())
-    }
-}
-
-impl From<LightEntity> for Entity {
-    fn from(wrapped: LightEntity) -> Entity {
-        Entity::from_bits(wrapped.0)
-    }
-}
-
-impl<'lua> ToLua<'lua> for LightEntity {
-    fn to_lua(self, _lua: LuaContext<'lua>) -> LuaResult<LuaValue<'lua>> {
-        Ok(LuaValue::LightUserData(LuaLightUserData(self.0 as *mut _)))
-    }
-}
-
-impl<'lua> FromLua<'lua> for LightEntity {
-    fn from_lua(lua_value: LuaValue<'lua>, lua: LuaContext<'lua>) -> LuaResult<Self> {
-        let lud = LuaLightUserData::from_lua(lua_value, lua)?;
-        Ok(Self(lud.0 as u64))
-    }
-}
-
 pub struct ComponentEventIterator<'a> {
     _outer: Pin<RwLockReadGuard<'a, EventChannel<ComponentEvent>>>,
     iter: EventIterator<'a, ComponentEvent>,
@@ -277,6 +249,14 @@ impl World {
                 .map(|fc| (fc.0, EventEmitter::default()))
                 .collect(),
         }
+    }
+
+    pub fn archetypes(&self) -> impl ExactSizeIterator<Item = &Archetype> + '_ {
+        self.ecs.archetypes()
+    }
+
+    pub fn archetypes_generation(&self) -> ArchetypesGeneration {
+        self.ecs.archetypes_generation()
     }
 
     pub fn spawn(&mut self, components: impl DynamicBundle) -> Entity {

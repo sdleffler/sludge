@@ -19,13 +19,6 @@ pub use nalgebra::{
 
 pub use num_traits as num;
 
-pub use ncollide2d::{
-    self as nc2d,
-    bounding_volume::{self, BoundingVolume, HasBoundingVolume},
-    query::{self, DefaultTOIDispatcher, Proximity},
-    shape::{Ball, Cuboid, ShapeHandle},
-};
-
 pub trait Numeric:
     NumAssign + NumAssignRef + NumCast + Scalar + Copy + PartialOrd + SimdPartialOrd + Bounded
 {

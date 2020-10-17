@@ -1,4 +1,4 @@
-#![feature(drain_filter)]
+#![feature(drain_filter, option_expect_none)]
 
 use {
     anyhow::*,
@@ -18,6 +18,7 @@ pub type Atom = DefaultAtom;
 mod utils;
 
 pub mod api;
+pub mod assets;
 pub mod chunked_grid;
 pub mod components;
 pub mod conf;
@@ -30,7 +31,7 @@ pub mod graphics;
 pub mod hierarchy;
 pub mod input;
 pub mod math;
-pub mod resource_cache;
+// pub mod resource_cache;
 pub mod resources;
 pub mod scene;
 pub mod spatial_2d;
@@ -55,7 +56,7 @@ pub mod prelude {
     pub use serde_json;
 
     pub use crate::{
-        api::{Accessor, StaticAccessor, StaticTemplate, Template},
+        api::{Accessor, LuaEntity, StaticAccessor, StaticTemplate, Template},
         ecs::*,
         math::*,
         resources::{OwnedResources, Resources, SharedResources, UnifiedResources},
@@ -74,7 +75,11 @@ pub use {
     std::any::TypeId,
 };
 
-use crate::{api::Registry, dispatcher::Dispatcher, resources::*};
+use crate::{
+    api::{EntityUserDataRegistry, Registry},
+    dispatcher::Dispatcher,
+    resources::*,
+};
 
 pub trait SludgeResultExt: Sized {
     type Ok;
@@ -167,6 +172,7 @@ impl Space {
         local.insert(scheduler);
         local.insert(queue_handle);
         local.insert(Registry::new()?);
+        local.insert(EntityUserDataRegistry::new());
 
         let local = SharedResources::from(local);
         let resources = UnifiedResources { local, global };

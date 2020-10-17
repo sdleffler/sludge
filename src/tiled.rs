@@ -12,6 +12,7 @@ use {
 };
 
 use crate::{
+    assets::{Asset, Cache, Key, Loaded},
     chunked_grid::ChunkedBitGrid,
     ecs::*,
     filesystem::Filesystem,
@@ -20,7 +21,6 @@ use crate::{
         SpriteId, Texture,
     },
     math::*,
-    resource_cache::{Key, Load, Loaded, Storage},
     tiled::xml_parser::LayerData,
     Atom, OwnedResources, Resources, SharedResources, UnifiedResources,
 };
@@ -472,17 +472,18 @@ impl<LayerProps, TileProps> TiledMap<LayerProps, TileProps> {
     }
 }
 
-impl<'a, R, TileProps> Load<R, Key> for TileSheet<TileProps>
+impl<TileProps> Asset for TileSheet<TileProps>
 where
-    R: Resources<'a>,
     TileProps: DeserializeOwned + Send + Sync + 'static,
 {
-    type Error = Error;
-
-    fn load(key: Key, _storage: &mut Storage<R, Key>, ctx: &mut R) -> Result<Loaded<Self, Key>> {
+    fn load<'a, R: Resources<'a>>(
+        key: &Key,
+        _cache: &Cache<'a, R>,
+        resources: &R,
+    ) -> Result<Loaded<Self>> {
         match key {
             Key::Path(path) => {
-                let fh = ctx.fetch_mut::<Filesystem>().open(&path)?;
+                let fh = resources.fetch_mut::<Filesystem>().open(&path)?;
                 let tiled = xml_parser::parse_tileset(fh, 1)?;
                 Ok(TileSheet::from_tiled(&tiled)?.into())
             } //_ => bail!("can only load from logical"),
@@ -490,18 +491,20 @@ where
     }
 }
 
-impl<'a, R, LayerProps, TileProps> Load<R, Key> for TiledMap<LayerProps, TileProps>
+impl<LayerProps, TileProps> Asset for TiledMap<LayerProps, TileProps>
 where
-    R: Resources<'a>,
     LayerProps: DeserializeOwned + Send + Sync + 'static,
     TileProps: DeserializeOwned + Send + Sync + 'static,
 {
-    type Error = Error;
-
-    fn load(key: Key, _storage: &mut Storage<R, Key>, ctx: &mut R) -> Result<Loaded<Self, Key>> {
+    fn load<'a, R: Resources<'a>>(
+        key: &Key,
+        _cache: &Cache<'a, R>,
+        resources: &R,
+    ) -> Result<Loaded<Self>> {
         match key {
             Key::Path(path) => {
-                let tiled = xml_parser::parse_file(&mut *ctx.fetch_mut::<Filesystem>(), &path)?;
+                let tiled =
+                    xml_parser::parse_file(&mut *resources.fetch_mut::<Filesystem>(), &path)?;
 
                 let mut deps = vec![];
                 for ts in tiled.tilesets.iter() {
