@@ -31,7 +31,6 @@ pub mod graphics;
 pub mod hierarchy;
 pub mod input;
 pub mod math;
-// pub mod resource_cache;
 pub mod resources;
 pub mod scene;
 pub mod spatial_2d;
@@ -56,7 +55,7 @@ pub mod prelude {
     pub use serde_json;
 
     pub use crate::{
-        api::{Accessor, LuaEntity, StaticAccessor, StaticTemplate, Template},
+        api::{LuaEntity, StaticTemplate, Template},
         ecs::*,
         math::*,
         resources::{OwnedResources, Resources, SharedResources, UnifiedResources},

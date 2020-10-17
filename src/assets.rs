@@ -8,21 +8,22 @@ use {
     hashbrown::{HashMap, HashSet},
     std::{
         any::{Any, TypeId},
+        borrow::Cow,
         marker::PhantomData,
         ops,
-        path::{Path, PathBuf},
+        path::Path,
         sync::{Arc, Mutex},
     },
 };
 
 pub type DefaultCache = Cache<'static, UnifiedResources<'static>>;
 
-pub struct Loaded<T> {
-    pub deps: Vec<Key>,
+pub struct Loaded<'a, T> {
+    pub deps: Vec<Key<'a>>,
     pub value: T,
 }
 
-impl<T> Loaded<T> {
+impl<'a, T> Loaded<'a, T> {
     pub fn new(value: T) -> Self {
         Self {
             deps: Vec::new(),
@@ -30,12 +31,12 @@ impl<T> Loaded<T> {
         }
     }
 
-    pub fn with_deps(value: T, deps: Vec<Key>) -> Self {
+    pub fn with_deps(value: T, deps: Vec<Key<'a>>) -> Self {
         Self { value, deps }
     }
 }
 
-impl<T> From<T> for Loaded<T> {
+impl<'a, T> From<T> for Loaded<'a, T> {
     fn from(value: T) -> Self {
         Self::new(value)
     }
@@ -46,7 +47,7 @@ pub trait Asset: Send + Sync + 'static + Sized {
         key: &Key,
         cache: &Cache<'a, R>,
         resources: &R,
-    ) -> Result<Loaded<Self>>;
+    ) -> Result<Loaded<'static, Self>>;
 }
 
 #[derive(Debug)]
@@ -100,13 +101,19 @@ impl<'a, T: SmartComponent<ScContext<'a>>> SmartComponent<ScContext<'a>> for Cac
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Key {
-    Path(PathBuf),
+pub enum Key<'a> {
+    Path(Cow<'a, Path>),
 }
 
-impl Key {
-    pub fn from_path<P: AsRef<Path> + ?Sized>(path: &P) -> Self {
-        Self::Path(path.as_ref().to_owned())
+impl<'a> Key<'a> {
+    pub fn from_path<P: AsRef<Path> + ?Sized>(path: &'a P) -> Self {
+        Self::Path(Cow::Borrowed(path.as_ref()))
+    }
+
+    pub fn clone_static(&self) -> Key<'static> {
+        match self {
+            Key::Path(cow_path) => Key::Path(Cow::Owned(cow_path.clone().into_owned())),
+        }
     }
 }
 
@@ -117,8 +124,8 @@ struct KeyEntry {
 
 pub struct Cache<'a, R: Resources<'a>> {
     resources: R,
-    entries: Mutex<HashMap<Key, KeyEntry>>,
-    dependencies: Mutex<HashMap<Key, HashSet<Key>>>,
+    entries: Mutex<HashMap<Key<'static>, KeyEntry>>,
+    dependencies: Mutex<HashMap<Key<'static>, HashSet<Key<'static>>>>,
     _marker: PhantomData<&'a ()>,
 }
 
@@ -153,14 +160,14 @@ impl<'a, R: Resources<'a>> Cache<'a, R> {
         if !loaded.deps.is_empty() {
             let mut dependencies = self.dependencies.lock().unwrap();
             dependencies
-                .entry(key.clone())
+                .entry(key.clone_static())
                 .or_default()
                 .extend(loaded.deps);
         }
         let wrapped = Arc::new(ArcSwap::from_pointee(loaded.value));
 
         let mut entries = self.entries.lock().unwrap();
-        entries.entry(key.clone()).or_default().types.insert(
+        entries.entry(key.clone_static()).or_default().types.insert(
             TypeId::of::<T>(),
             wrapped.clone() as Arc<dyn Any + Send + Sync>,
         );

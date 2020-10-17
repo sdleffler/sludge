@@ -6,7 +6,7 @@ use {
     anyhow::*,
     derivative::*,
     hashbrown::{HashMap, HashSet},
-    rlua::{prelude::*, Variadic as LuaVariadic},
+    rlua::prelude::*,
     std::{
         any::TypeId,
         sync::{Arc, Mutex},
@@ -292,30 +292,6 @@ impl<'lua> FromLua<'lua> for LuaEntity {
     }
 }
 
-pub trait Accessor: Send + Sync + 'static {
-    fn to_userdata<'lua>(
-        &self,
-        lua: LuaContext<'lua>,
-        entity: Entity,
-    ) -> Result<LuaAnyUserData<'lua>>;
-}
-
-pub struct StaticAccessor {
-    name: &'static str,
-    accessor: Arc<dyn Accessor>,
-}
-
-impl StaticAccessor {
-    pub fn new<T: Accessor + 'static>(name: &'static str, accessor: T) -> Self {
-        Self {
-            name,
-            accessor: Arc::new(accessor),
-        }
-    }
-}
-
-inventory::collect!(StaticAccessor);
-
 pub trait Template: Send + Sync + 'static {
     fn archetype(&self) -> Option<&[TypeId]> {
         None
@@ -395,20 +371,14 @@ impl StaticTemplate {
 inventory::collect!(StaticTemplate);
 
 pub struct Registry {
-    accessors: HashMap<String, Arc<dyn Accessor>>,
     templates: HashMap<String, Arc<dyn Template>>,
 }
 
 impl Registry {
     pub fn new() -> Result<Self> {
         let mut this = Self {
-            accessors: HashMap::new(),
             templates: HashMap::new(),
         };
-
-        inventory::iter::<StaticAccessor>()
-            .into_iter()
-            .try_for_each(|st| this.insert_accessor_inner(st.name, st.accessor.clone()))?;
 
         inventory::iter::<StaticTemplate>
             .into_iter()
@@ -434,25 +404,6 @@ impl Registry {
         T: Template,
     {
         self.insert_template_inner(name.as_ref(), Arc::new(template))
-    }
-
-    fn insert_accessor_inner(&mut self, name: &str, accessor: Arc<dyn Accessor>) -> Result<()> {
-        ensure!(
-            !self.accessors.contains_key(name),
-            "accessor already exists"
-        );
-
-        self.accessors.insert(name.to_owned(), accessor);
-
-        Ok(())
-    }
-
-    pub fn insert_accessor<S, T>(&mut self, name: S, accessor: T) -> Result<()>
-    where
-        S: AsRef<str>,
-        T: Accessor,
-    {
-        self.insert_accessor_inner(name.as_ref(), Arc::new(accessor))
     }
 }
 
@@ -548,30 +499,6 @@ impl LuaUserData for Templates {
 inventory::submit! {
     Module::parse("sludge.templates", |lua| {
         Ok(LuaValue::UserData(lua.create_userdata(Templates)?))
-    })
-}
-
-pub fn sludge_to_accessor<'lua>(
-    lua: LuaContext<'lua>,
-    (entity, accessors): (LuaEntity, LuaVariadic<String>),
-) -> LuaResult<LuaMultiValue<'lua>> {
-    let mut out = Vec::new();
-    let resources = lua.resources();
-    let registry = resources.fetch::<Registry>();
-    for accessor_name in accessors {
-        if let Some(accessor) = registry.accessors.get(&accessor_name) {
-            let userdata = accessor.to_userdata(lua, entity.into()).to_lua_err()?;
-            out.push(LuaValue::UserData(userdata));
-        } else {
-            out.push(LuaValue::Nil);
-        }
-    }
-    Ok(LuaMultiValue::from_vec(out))
-}
-
-inventory::submit! {
-    Module::parse("sludge.to_accessor", |lua| {
-        Ok(LuaValue::Function(lua.create_function(sludge_to_accessor)?))
     })
 }
 

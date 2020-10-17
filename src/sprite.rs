@@ -275,7 +275,7 @@ impl Asset for SpriteSheet {
         key: &Key,
         _cache: &Cache<'a, R>,
         resources: &R,
-    ) -> Result<Loaded<Self>> {
+    ) -> Result<Loaded<'static, Self>> {
         match key {
             Key::Path(path) => {
                 let mut fh = resources.fetch_mut::<Filesystem>().open(&path)?;

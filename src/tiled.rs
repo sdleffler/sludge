@@ -480,7 +480,7 @@ where
         key: &Key,
         _cache: &Cache<'a, R>,
         resources: &R,
-    ) -> Result<Loaded<Self>> {
+    ) -> Result<Loaded<'static, Self>> {
         match key {
             Key::Path(path) => {
                 let fh = resources.fetch_mut::<Filesystem>().open(&path)?;
@@ -500,7 +500,7 @@ where
         key: &Key,
         _cache: &Cache<'a, R>,
         resources: &R,
-    ) -> Result<Loaded<Self>> {
+    ) -> Result<Loaded<'static, Self>> {
         match key {
             Key::Path(path) => {
                 let tiled =
@@ -509,7 +509,7 @@ where
                 let mut deps = vec![];
                 for ts in tiled.tilesets.iter() {
                     if let Some(src) = ts.source.as_ref() {
-                        deps.push(Key::from_path(Path::new(src)));
+                        deps.push(Key::from_path(Path::new(src)).clone_static());
                     }
                 }
 

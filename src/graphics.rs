@@ -1779,7 +1779,7 @@ impl Asset for Texture {
         key: &Key,
         _cache: &Cache<'a, R>,
         resources: &R,
-    ) -> Result<Loaded<Self>> {
+    ) -> Result<Loaded<'static, Self>> {
         match key {
             Key::Path(path) => {
                 let mut filesystem = resources.fetch_mut::<Filesystem>();
