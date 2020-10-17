@@ -13,9 +13,10 @@ use {
         tessellation::{self as t, FillOptions, StrokeOptions},
     },
     miniquad as mq,
+    rlua::prelude::*,
     serde::{Deserialize, Serialize},
     std::{
-        any::{self, Any},
+        any::{self, Any, TypeId},
         cmp::Ordering,
         fmt,
         hash::{Hash, Hasher},
@@ -71,7 +72,7 @@ pub mod shader {
 }
 
 pub use {
-    drawable_graph::{DrawableGraph, DrawableNodeBuilder, DrawableNodeId},
+    drawable_graph::{DrawableGraph, DrawableNodeBuilder, DrawableNodeId, ErasedDrawableNodeId},
     shader::{InstanceProperties, Uniforms, Vertex},
     sorted_layer::{SortedLayer, SortedLayerId},
 };
@@ -1789,5 +1790,84 @@ impl Asset for Texture {
                 Ok(Loaded::new(texture))
             } // _ => panic!("logical resources not supported (yet)"),
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct LuaDrawableIdUserData {
+    drawable_id: Index,
+    value_type: TypeId,
+    context_type: TypeId,
+}
+
+impl LuaUserData for LuaDrawableIdUserData {}
+
+impl<'lua, T: AnyDrawable + ?Sized, C: 'static> ToLua<'lua> for DrawableId<T, C> {
+    fn to_lua(self, lua: LuaContext<'lua>) -> LuaResult<LuaValue<'lua>> {
+        LuaDrawableIdUserData {
+            drawable_id: self.0,
+            value_type: TypeId::of::<T>(),
+            context_type: TypeId::of::<C>(),
+        }
+        .to_lua(lua)
+    }
+}
+
+impl<'lua, T: AnyDrawable + ?Sized, C: 'static> FromLua<'lua> for DrawableId<T, C> {
+    fn from_lua(value: LuaValue<'lua>, lua: LuaContext<'lua>) -> LuaResult<Self> {
+        let ldiu = LuaDrawableIdUserData::from_lua(value, lua)?;
+
+        if TypeId::of::<T>() != ldiu.value_type {
+            return Err(LuaError::FromLuaConversionError {
+                from: "LuaDrawableIdUserData.value_type",
+                to: any::type_name::<T>(),
+                message: None,
+            });
+        }
+
+        if TypeId::of::<C>() != ldiu.context_type {
+            return Err(LuaError::FromLuaConversionError {
+                from: "LuaDrawableIdUserData.context_type",
+                to: any::type_name::<C>(),
+                message: None,
+            });
+        }
+
+        Ok(DrawableId::new(ldiu.drawable_id))
+    }
+}
+
+impl<'lua, C: 'static> ToLua<'lua> for ErasedDrawableId<C> {
+    fn to_lua(self, lua: LuaContext<'lua>) -> LuaResult<LuaValue<'lua>> {
+        LuaDrawableIdUserData {
+            drawable_id: self.0,
+            value_type: TypeId::of::<dyn AnyDrawable>(),
+            context_type: TypeId::of::<C>(),
+        }
+        .to_lua(lua)
+    }
+}
+
+impl<'lua, C: 'static> FromLua<'lua> for ErasedDrawableId<C> {
+    fn from_lua(value: LuaValue<'lua>, lua: LuaContext<'lua>) -> LuaResult<Self> {
+        let ldiu = LuaDrawableIdUserData::from_lua(value, lua)?;
+
+        if TypeId::of::<dyn AnyDrawable>() != ldiu.value_type {
+            return Err(LuaError::FromLuaConversionError {
+                from: "LuaDrawableIdUserData.value_type",
+                to: any::type_name::<dyn AnyDrawable>(),
+                message: None,
+            });
+        }
+
+        if TypeId::of::<C>() != ldiu.context_type {
+            return Err(LuaError::FromLuaConversionError {
+                from: "LuaDrawableIdUserData.context_type",
+                to: any::type_name::<C>(),
+                message: None,
+            });
+        }
+
+        Ok(ErasedDrawableId::new(ldiu.drawable_id))
     }
 }

@@ -45,7 +45,6 @@ pub use anyhow;
 pub use nalgebra;
 pub use rlua;
 pub use serde;
-pub use warmy;
 
 pub mod prelude {
     pub use anyhow::*;

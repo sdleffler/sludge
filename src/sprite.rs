@@ -2,25 +2,55 @@ use {
     anyhow::*,
     aseprite::SpritesheetData,
     hashbrown::HashMap,
+    rlua::prelude::*,
     serde::{Deserialize, Serialize},
     std::{io::Read, ops},
 };
 
 use crate::{
-    assets::{Asset, Cache, Key, Loaded},
+    api::{LuaComponent, LuaComponentUserData},
+    assets::{Asset, Cache, Cached, DefaultCache, Key, Loaded},
     ecs::*,
     filesystem::Filesystem,
     math::*,
-    Resources,
+    Resources, SludgeLuaContextExt, SludgeResultExt,
 };
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash,
+)]
 #[serde(transparent)]
 pub struct TagId(u32);
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+impl<'lua> ToLua<'lua> for TagId {
+    fn to_lua(self, lua: LuaContext<'lua>) -> LuaResult<LuaValue<'lua>> {
+        self.0.to_lua(lua)
+    }
+}
+
+impl<'lua> FromLua<'lua> for TagId {
+    fn from_lua(lua_value: LuaValue<'lua>, lua: LuaContext<'lua>) -> LuaResult<Self> {
+        u32::from_lua(lua_value, lua).map(|i| TagId(i))
+    }
+}
+
+#[derive(
+    Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash,
+)]
 #[serde(transparent)]
 pub struct FrameId(u32);
+
+impl<'lua> ToLua<'lua> for FrameId {
+    fn to_lua(self, lua: LuaContext<'lua>) -> LuaResult<LuaValue<'lua>> {
+        self.0.to_lua(lua)
+    }
+}
+
+impl<'lua> FromLua<'lua> for FrameId {
+    fn from_lua(lua_value: LuaValue<'lua>, lua: LuaContext<'lua>) -> LuaResult<Self> {
+        u32::from_lua(lua_value, lua).map(|i| FrameId(i))
+    }
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum Direction {
@@ -285,4 +315,69 @@ impl Asset for SpriteSheet {
             } //_ => bail!("can only load from logical"),
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct SpriteAnimation {
+    pub frame: SpriteFrame,
+    pub tag: SpriteTag,
+    pub sheet: Cached<SpriteSheet>,
+}
+
+impl<'a> SmartComponent<ScContext<'a>> for SpriteAnimation {}
+
+#[derive(Debug, Clone, Copy)]
+pub struct SpriteAnimationAccessor(Entity);
+
+impl LuaUserData for SpriteAnimationAccessor {
+    fn add_methods<'lua, T: LuaUserDataMethods<'lua, Self>>(_methods: &mut T) {}
+}
+
+impl LuaComponentUserData for SpriteAnimation {
+    type Accessor = SpriteAnimationAccessor;
+    fn accessor<'lua>(_lua: LuaContext<'lua>, entity: Entity) -> LuaResult<Self::Accessor> {
+        Ok(SpriteAnimationAccessor(entity))
+    }
+
+    fn bundler<'lua>(
+        lua: LuaContext<'lua>,
+        args: LuaValue<'lua>,
+        builder: &mut EntityBuilder,
+    ) -> LuaResult<()> {
+        let resources = lua.resources();
+
+        let table = LuaTable::from_lua(args, lua)?;
+        let path = table
+            .get::<_, LuaString>("path")
+            .log_error_err(module_path!())?;
+        let mut sprite_sheet = resources
+            .fetch_mut::<DefaultCache>()
+            .get::<SpriteSheet>(&Key::from_path(path.to_str()?))
+            .to_lua_err()?;
+
+        let should_loop = table
+            .get::<_, Option<bool>>("should_loop")?
+            .unwrap_or_default();
+
+        let tag_id = match table
+            .get::<_, Option<LuaString>>("tag")
+            .log_warn_err(module_path!())?
+        {
+            Some(tag_name) => sprite_sheet.load_cached().get_tag(tag_name.to_str()?),
+            None => None,
+        }
+        .unwrap_or_default();
+        let (frame, tag) = sprite_sheet.load_cached().at_tag(tag_id, should_loop);
+
+        builder.add(SpriteAnimation {
+            frame,
+            tag,
+            sheet: sprite_sheet,
+        });
+        Ok(())
+    }
+}
+
+inventory::submit! {
+    LuaComponent::new::<SpriteAnimation>("SpriteAnimation", "sprite_animation")
 }
