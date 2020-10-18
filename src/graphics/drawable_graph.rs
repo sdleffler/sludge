@@ -266,11 +266,11 @@ impl DrawableGraph {
         Some(node.value)
     }
 
-    pub fn children<T: AnyDrawable>(
+    pub fn children(
         &self,
-        object: DrawableNodeId<T>,
+        object: impl Into<ErasedDrawableNodeId>,
     ) -> impl Iterator<Item = (DrawableNodeId<dyn AnyDrawable>, &dyn AnyDrawable)> + '_ {
-        self.objects[object.0]
+        self.objects[object.into().0]
             .children
             .iter()
             .map(move |&index| (DrawableId::new(index), &*self.objects[index].value))
