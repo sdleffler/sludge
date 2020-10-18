@@ -273,7 +273,7 @@ impl Shape {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ShapeTable {
-    Cuboid {
+    Box {
         position: Position,
         width: f32,
         height: f32,
@@ -294,7 +294,7 @@ impl LuaUserData for ShapeAccessor {
                 let extents = cuboid.half_extents * 2.;
                 rlua_serde::to_value(
                     lua,
-                    ShapeTable::Cuboid {
+                    ShapeTable::Box {
                         position: Position(shape.local),
                         width: extents.x,
                         height: extents.y,
@@ -321,7 +321,7 @@ impl LuaComponentUserData for Shape {
     ) -> LuaResult<()> {
         let shape_table = rlua_serde::from_value::<ShapeTable>(args)?;
         match shape_table {
-            ShapeTable::Cuboid {
+            ShapeTable::Box {
                 position,
                 width,
                 height,

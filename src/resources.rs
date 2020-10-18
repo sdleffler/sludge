@@ -4,7 +4,7 @@ use {
     hashbrown::HashMap,
     rlua::prelude::*,
     std::{
-        any::{Any, TypeId},
+        any::{self, Any, TypeId},
         marker::PhantomData,
         ops,
         pin::Pin,
@@ -387,13 +387,23 @@ impl<'a> Resources<'a> for UnifiedResources<'a> {
     }
 
     fn fetch<T: Any + Send + Sync>(&self) -> SharedFetch<'a, '_, T> {
-        self.try_fetch::<T>()
-            .expect("entry not found in local or global resources")
+        match self.try_fetch::<T>() {
+            Some(fetched) => fetched,
+            None => panic!(
+                "entry `{}` not found in local or global resources",
+                any::type_name::<T>()
+            ),
+        }
     }
 
     fn fetch_mut<T: Any + Send>(&self) -> SharedFetchMut<'a, '_, T> {
-        self.try_fetch_mut::<T>()
-            .expect("entry not found in local or global resources")
+        match self.try_fetch_mut::<T>() {
+            Some(fetched) => fetched,
+            None => panic!(
+                "entry `{}` not found in local or global resources",
+                any::type_name::<T>()
+            ),
+        }
     }
 
     fn try_fetch<T: Any + Send + Sync>(&self) -> Option<SharedFetch<'a, '_, T>> {
