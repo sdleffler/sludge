@@ -238,6 +238,10 @@ impl Space {
         self.resources.try_fetch_mut()
     }
 
+    pub fn fetch_shared<T: Any>(&self) -> Option<FetchShared<'static, T>> {
+        self.resources.fetch_shared()
+    }
+
     pub fn resources(&self) -> &UnifiedResources<'static> {
         &self.resources
     }
