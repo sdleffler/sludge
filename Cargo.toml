@@ -54,13 +54,19 @@ ordered-float = "2.0.0"
 alga = "0.9.3"
 arc-swap = "0.4.7"
 im = "15.0.0"
+rand = "0.7.3"
+rand_xorshift = "0.2.0"
 
 [dev-dependencies]
 approx = "0.3.2"
 rand = "0.7.3"
+rand_xorshift = "0.2.0"
 
 [[example]]
 name = "bullets"
+
+[[example]]
+name = "danmaku"
 
 [[example]]
 name = "templates"

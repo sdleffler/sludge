@@ -14,7 +14,7 @@ use {
 pub use hecs::{
     Archetype, ArchetypesGeneration, Bundle, Component, ComponentError, DynamicBundle, Entity,
     EntityBuilder, EntityRef, NoSuchEntity, Query, QueryBorrow, QueryOne, Ref, RefMut,
-    SmartComponent,
+    SmartComponent, SpawnBatchIter,
 };
 
 pub use shrev::ReaderId;
@@ -140,6 +140,36 @@ impl CommandBuffer {
     pub fn is_empty(&self) -> bool {
         self.cmds.is_empty()
     }
+
+    #[inline]
+    pub fn drain_into(&mut self, world: &mut World) -> Result<()> {
+        for cmd in self.cmds.drain(..) {
+            match cmd {
+                Command::Spawn(mut bundle) => {
+                    World::do_spawn(&mut world.channels, &mut world.ecs, bundle.build());
+                    self.pool.push(bundle);
+                }
+                Command::Insert(entity, mut bundle) => {
+                    let res = World::do_insert(
+                        &mut world.channels,
+                        &mut world.ecs,
+                        entity,
+                        bundle.build(),
+                    );
+                    self.pool.push(bundle);
+                    res?;
+                }
+                Command::Remove(entity, remover) => {
+                    remover(&mut world.channels, &mut world.ecs, entity)?;
+                }
+                Command::Despawn(entity) => {
+                    World::do_despawn(&mut world.channels, &mut world.ecs, entity)?;
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 pub struct ComponentEventIterator<'a> {
@@ -195,6 +225,22 @@ impl EventEmitter {
                 .unwrap()
                 .single_write(ComponentEvent::Inserted(entity));
         }
+    }
+
+    pub fn emit_batch_inserted<I>(&mut self, batch: I)
+    where
+        I: IntoIterator<Item = Entity>,
+        I::IntoIter: ExactSizeIterator,
+    {
+        let Self {
+            inserted, channel, ..
+        } = self;
+        channel.get_mut().unwrap().iter_write(
+            batch
+                .into_iter()
+                .inspect(|e| assert!(!inserted.add(e.id())))
+                .map(ComponentEvent::Inserted),
+        );
     }
 
     pub fn emit_modified(&mut self, entity: Entity) {
@@ -271,14 +317,29 @@ impl World {
         let entity = ecs.spawn(components);
 
         for typeid in ecs.entity(entity).expect("just created").component_types() {
-            channels.entry(typeid).or_default();
-
             if let Some(channel) = channels.get_mut(&typeid) {
                 channel.emit_inserted(entity);
             }
         }
 
         entity
+    }
+
+    pub fn spawn_batch<I>(&mut self, iter: I) -> impl Iterator<Item = Entity> + '_
+    where
+        I: IntoIterator,
+        I::Item: Bundle,
+    {
+        let batched = self.ecs.spawn_batch(iter).collect::<Vec<_>>();
+        I::Item::with_static_ids(|ids| {
+            for typeid in ids {
+                if let Some(channel) = self.channels.get_mut(&typeid) {
+                    channel.emit_batch_inserted(batched.iter().copied());
+                }
+            }
+        });
+
+        batched.into_iter()
     }
 
     pub fn despawn(&mut self, entity: Entity) -> Result<(), NoSuchEntity> {
@@ -382,8 +443,6 @@ impl World {
         // FIXME: find a way to do this w/o the undocumented/unstable DynamicBundle::with_ids
         bundle.with_ids(|typeids| {
             for typeid in typeids.iter().copied() {
-                channels.entry(typeid).or_default();
-
                 if let Some(channel) = channels.get_mut(&typeid) {
                     channel.emit_inserted(entity);
                 }
@@ -399,7 +458,7 @@ impl World {
         component: C,
     ) -> Result<(), NoSuchEntity> {
         let typeid = TypeId::of::<C>();
-        self.channels.entry(typeid).or_default();
+
         if let Some(channel) = self.channels.get_mut(&typeid) {
             channel.emit_inserted(entity);
         }
@@ -433,6 +492,10 @@ impl World {
         }
 
         self.ecs.remove_one(entity)
+    }
+
+    pub unsafe fn resolve_unknown_gen(&self, id: u32) -> Option<Entity> {
+        self.ecs.resolve_unknown_gen(id)
     }
 
     pub fn poll<'a, T: Component>(

@@ -1,6 +1,14 @@
 use proc_macro2::Span;
+use proc_macro_crate::crate_name;
 use quote::quote;
 use syn::*;
+
+fn guess_name() -> Ident {
+    match crate_name("sludge") {
+        Ok(name) => Ident::new(&name, Span::call_site()),
+        Err(_) => Ident::new("crate", Span::call_site()),
+    }
+}
 
 #[proc_macro_derive(SimpleComponent)]
 pub fn derive_simple_component(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
@@ -19,9 +27,11 @@ pub fn derive_simple_component(input: proc_macro::TokenStream) -> proc_macro::To
     let (impl_generics, _, where_clause) = generics.split_for_impl();
     let (_, ty_generics, _) = input.generics.split_for_impl();
 
+    let root = guess_name();
+
     let expanded = quote! {
         // The generated impl.
-        impl #impl_generics ::sludge::ecs::SmartComponent<::sludge::ecs::ScContext<#context_lifetime>>
+        impl #impl_generics #root::ecs::SmartComponent<#root::ecs::ScContext<#context_lifetime>>
             for #name #ty_generics #where_clause {}
     };
 
@@ -46,18 +56,20 @@ pub fn derive_flagged_component(input: proc_macro::TokenStream) -> proc_macro::T
     let (impl_generics, _, where_clause) = generics.split_for_impl();
     let (_, original_generics, _) = input.generics.split_for_impl();
 
+    let root = guess_name();
+
     let expanded = quote! {
         // The generated impl.
-        impl #impl_generics ::sludge::SmartComponent<::sludge::ScContext<#context_lifetime>>
+        impl #impl_generics #root::ecs::SmartComponent<#root::ecs::ScContext<#context_lifetime>>
             for #name #original_generics #where_clause {
-            fn on_borrow_mut(&self, entity: ::sludge::Entity, context: ::sludge::ScContext<#context_lifetime>) {
-                context[&::sludge::TypeId::of::<#name #original_generics>()].set_modified_atomic(entity.id());
+            fn on_borrow_mut(&mut self, entity: #root::ecs::Entity, context: #root::ecs::ScContext<#context_lifetime>) {
+                context[&#root::TypeId::of::<#name #original_generics>()].emit_modified_atomic(entity);
             }
         }
 
         // Register the flagged component so that `World`s create a channel for it.
-        ::sludge::inventory::submit! {
-            ::sludge::FlaggedComponent::of::<Parent>()
+        #root::inventory::submit! {
+            #root::ecs::FlaggedComponent::of::<#name #original_generics>()
         }
     };
 

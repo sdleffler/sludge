@@ -1,7 +1,8 @@
 use {
     nalgebra::{storage::Storage, SimdPartialOrd, Vector, U3},
     num_traits::{Bounded, NumAssign, NumAssignRef, NumCast},
-    serde::{Deserialize, Serialize},
+    rlua::prelude::*,
+    serde::{de::DeserializeOwned, Deserialize, Serialize},
     std::{
         mem,
         ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign},
@@ -29,6 +30,7 @@ impl<T> Numeric for T where
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(into = "Box2Proxy<N>", from = "Box2Proxy<N>")]
 pub struct Box2<N: Numeric> {
     pub mins: Point2<N>,
     pub maxs: Point2<N>,
@@ -201,6 +203,50 @@ impl<N: Numeric> Box2<N> {
             tx.transform_point(&br).xy(),
             tx.transform_point(&bl).xy(),
         ])
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename = "Box2")]
+struct Box2Proxy<N: Numeric> {
+    x: N,
+    y: N,
+    w: N,
+    h: N,
+}
+
+impl<N: Numeric> From<Box2<N>> for Box2Proxy<N> {
+    fn from(b: Box2<N>) -> Self {
+        Self {
+            x: b.mins.x,
+            y: b.mins.y,
+            w: b.maxs.x - b.mins.x,
+            h: b.maxs.y - b.mins.y,
+        }
+    }
+}
+
+impl<N: Numeric> From<Box2Proxy<N>> for Box2<N> {
+    fn from(b: Box2Proxy<N>) -> Self {
+        Self::from_extents(Point2::new(b.x, b.y), Vector2::new(b.w, b.h))
+    }
+}
+
+impl<'lua, N> ToLua<'lua> for Box2<N>
+where
+    N: Numeric + Serialize + ToLua<'lua>,
+{
+    fn to_lua(self, lua: LuaContext<'lua>) -> LuaResult<LuaValue<'lua>> {
+        rlua_serde::to_value(lua, self)
+    }
+}
+
+impl<'lua, N> FromLua<'lua> for Box2<N>
+where
+    N: Numeric + DeserializeOwned + FromLua<'lua>,
+{
+    fn from_lua(lua_value: LuaValue<'lua>, _lua: LuaContext<'lua>) -> LuaResult<Self> {
+        rlua_serde::from_value(lua_value)
     }
 }
 

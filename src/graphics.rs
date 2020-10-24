@@ -949,8 +949,14 @@ impl Graphics {
         drawable.draw(self, param.into().unwrap_or_default());
     }
 
+    #[inline]
     pub fn set_blend(&mut self, blend: Option<BlendMode>) {
         self.mq.set_blend(blend.map(mq::BlendState::from), None);
+    }
+
+    #[inline]
+    pub fn get_screen_size(&self) -> (f32, f32) {
+        self.mq.screen_size()
     }
 }
 
@@ -1230,6 +1236,17 @@ impl InstanceParam {
     #[inline]
     pub fn src(self, src: Box2<f32>) -> Self {
         Self { src, ..self }
+    }
+
+    #[inline]
+    pub fn rotate2(self, angle: f32) -> Self {
+        Self {
+            tx: self.tx
+                * Transform3::from_matrix_unchecked(homogeneous_mat3_to_mat4(
+                    &Rotation2::new(angle).to_homogeneous(),
+                )),
+            ..self
+        }
     }
 
     #[inline]

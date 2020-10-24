@@ -355,9 +355,7 @@ impl LuaComponentUserData for SpriteAnimation {
             .get::<SpriteSheet>(&Key::from_path(path.to_str()?))
             .to_lua_err()?;
 
-        let should_loop = table
-            .get::<_, Option<bool>>("should_loop")?
-            .unwrap_or_default();
+        let should_loop = table.get::<_, Option<bool>>("should_loop")?.unwrap_or(true);
 
         let tag_id = match table
             .get::<_, Option<LuaString>>("tag")

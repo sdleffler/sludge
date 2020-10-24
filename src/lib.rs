@@ -1,4 +1,4 @@
-#![feature(drain_filter, option_expect_none)]
+#![feature(drain_filter, exact_size_is_empty, option_expect_none)]
 
 use {
     anyhow::*,
@@ -22,6 +22,7 @@ pub mod assets;
 pub mod chunked_grid;
 pub mod components;
 pub mod conf;
+pub mod danmaku;
 pub mod dependency_graph;
 pub mod dispatcher;
 pub mod ecs;
@@ -43,6 +44,7 @@ pub mod vfs;
 
 pub use anyhow;
 pub use nalgebra;
+pub use ncollide2d;
 pub use rlua;
 pub use serde;
 
@@ -248,6 +250,13 @@ impl Space {
 
     pub fn lua(&self) -> &Lua {
         &self.lua
+    }
+
+    pub fn refresh(&self, dispatcher: &mut Dispatcher) -> Result<()> {
+        let local_resources = &mut *self.resources.local.borrow_mut();
+        let global_resources = &self.resources.global;
+        self.lua
+            .context(|lua| dispatcher.refresh(lua, local_resources, Some(global_resources)))
     }
 
     pub fn dispatch(&self, dispatcher: &mut Dispatcher) -> Result<()> {
@@ -523,7 +532,10 @@ impl Scheduler {
                                             .or_default();
                                         match threads.binary_search(&sleeping.thread()) {
                                             Ok(i) => threads[i] = new_index,
-                                            Err(i) => threads.insert(i, new_index),
+                                            Err(i) if threads.get(i) != Some(&new_index) => {
+                                                threads.insert(i, new_index)
+                                            }
+                                            _ => {}
                                         }
                                     }
                                 }

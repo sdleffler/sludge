@@ -349,8 +349,21 @@ where
     Buttons: Eq + Hash + Clone,
 {
     Axis(Axes, bool),
-    Button(Buttons),
+    Button(Buttons, Option<Point2<f32>>),
     Cursor(Point2<f32>),
+}
+
+impl<Axes, Buttons> InputEffect<Axes, Buttons>
+where
+    Axes: Eq + Hash + Clone,
+    Buttons: Eq + Hash + Clone,
+{
+    pub fn with_point(self, point: Point2<f32>) -> Self {
+        match self {
+            Self::Button(button, _) => Self::Button(button, Some(point)),
+            _ => self,
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -404,6 +417,7 @@ impl Default for AxisState {
 struct ButtonState {
     pressed: bool,
     pressed_last_frame: bool,
+    event_location: Option<Point2<f32>>,
 }
 
 /// A struct that contains a mapping from physical input events
@@ -446,7 +460,7 @@ where
     pub fn bind_key_to_button(mut self, keycode: KeyCode, button: Buttons) -> Self {
         self.bindings.insert(
             InputType::KeyEvent(keycode),
-            InputEffect::Button(button.clone()),
+            InputEffect::Button(button.clone(), None),
         );
         self
     }
@@ -454,14 +468,25 @@ where
     pub fn bind_mouse_to_button(mut self, mouse_button: MouseButton, button: Buttons) -> Self {
         self.bindings.insert(
             InputType::MouseButtonEvent(mouse_button),
-            InputEffect::Button(button.clone()),
+            InputEffect::Button(button.clone(), None),
         );
         self
     }
 
     /// Takes an physical input type and turns it into a logical input type (keycode -> axis/button).
-    pub fn resolve(&self, keycode: KeyCode) -> Option<InputEffect<Axes, Buttons>> {
+    pub fn resolve_keycode(&self, keycode: KeyCode) -> Option<InputEffect<Axes, Buttons>> {
         self.bindings.get(&InputType::KeyEvent(keycode)).cloned()
+    }
+
+    pub fn resolve_mouse_button(
+        &self,
+        mouse_button: MouseButton,
+        point: Point2<f32>,
+    ) -> Option<InputEffect<Axes, Buttons>> {
+        self.bindings
+            .get(&InputType::MouseButtonEvent(mouse_button))
+            .cloned()
+            .map(|eff| eff.with_point(point))
     }
 }
 
@@ -537,12 +562,12 @@ where
 
     /// This method should get called by your key_down_event handler.
     pub fn update_button_down(&mut self, button: Buttons) {
-        self.update_effect(InputEffect::Button(button), true);
+        self.update_effect(InputEffect::Button(button, None), true);
     }
 
     /// This method should get called by your key_up_event handler.
     pub fn update_button_up(&mut self, button: Buttons) {
-        self.update_effect(InputEffect::Button(button), false);
+        self.update_effect(InputEffect::Button(button, None), false);
     }
 
     /// This method should get called by your key_up_event handler.
@@ -574,10 +599,11 @@ where
                     axis_status.direction = 0.0;
                 }
             }
-            InputEffect::Button(button) => {
+            InputEffect::Button(button, point) => {
                 let f = || ButtonState::default();
                 let button_status = self.buttons.entry(button).or_insert_with(f);
                 button_status.pressed = started;
+                button_status.event_location = point;
             }
             InputEffect::Cursor(position) => {
                 self.mouse.position = position;
@@ -624,6 +650,11 @@ where
     pub fn get_button_released(&self, axis: Buttons) -> bool {
         let b = self.get_button(axis);
         !b.pressed && b.pressed_last_frame
+    }
+
+    pub fn get_button_event_location(&self, axis: Buttons) -> Option<Point2<f32>> {
+        let b = self.get_button(axis);
+        b.event_location
     }
 
     pub fn mouse_position(&self) -> Point2<f32> {
