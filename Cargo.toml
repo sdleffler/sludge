@@ -49,7 +49,6 @@ sludge-macros = { path = "macros" }
 miniquad = { git = "https://github.com/sdleffler/miniquad", optional = true }
 mint = "0.5"
 lyon = "0.16.2"
-ggez = { version = "0.5.1", optional = true }
 ordered-float = "2.0.0"
 alga = "0.9.3"
 arc-swap = "0.4.7"
@@ -61,13 +60,10 @@ rand_xorshift = "0.2.0"
 approx = "0.3.2"
 rand = "0.7.3"
 rand_xorshift = "0.2.0"
+sludge-danmaku = { path = "sludge-danmaku" }
 
 [[example]]
 name = "bullets"
 
 [[example]]
 name = "danmaku"
-
-[[example]]
-name = "templates"
-required-features = ["ggez"]

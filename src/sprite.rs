@@ -279,11 +279,11 @@ impl SpriteSheet {
 pub struct SpriteName(pub String);
 
 /// Component holding the current frame ID of a sprite.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Default, Serialize, Deserialize)]
 pub struct SpriteFrame(pub FrameId);
 
 /// Component holding the state of a running animation at a given tag.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Default, Serialize, Deserialize)]
 pub struct SpriteTag {
     /// The index of the currently running animation/tag.
     pub tag_id: TagId,

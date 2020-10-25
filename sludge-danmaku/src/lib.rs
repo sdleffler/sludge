@@ -1,19 +1,12 @@
-use crate::{
-    api::Module,
-    ecs::*,
-    math::*,
-    resources::{OwnedResources, Resources, SharedResources, UnifiedResources},
-    SludgeLuaContextExt, System,
-};
+#![feature(exact_size_is_empty)]
+
 use {
-    anyhow::*,
     atomic_refcell::AtomicRefCell,
     hashbrown::HashMap,
     hibitset::{BitSet, DrainableBitSet},
     rand::{RngCore, SeedableRng},
     rand_xorshift::XorShiftRng,
-    rlua::prelude::*,
-    sludge_macros::*,
+    sludge::{api::Module, prelude::*},
     std::{f32, marker::PhantomData, sync},
 };
 
@@ -96,6 +89,14 @@ pub struct Rectangle {
 pub struct MaximumVelocity {
     pub linear: f32,
     pub angular: f32,
+}
+
+#[derive(Debug, Clone, Copy, SimpleComponent)]
+pub struct DespawnOutOfBounds;
+
+#[derive(Debug, Clone, Copy, SimpleComponent)]
+pub struct DespawnAfterTimeLimit {
+    pub ttl: f32,
 }
 
 #[derive(Debug, Clone, Copy, Bundle)]
@@ -801,18 +802,6 @@ impl Pattern for Ring {
     }
 }
 
-impl LuaUserData for Ring {
-    fn add_methods<'lua, T: LuaUserDataMethods<'lua, Self>>(methods: &mut T) {
-        methods.add_meta_method(
-            LuaMetaMethod::Call,
-            |_lua, this, mut builder: LuaPatternBuilder| {
-                this.build(&mut builder).to_lua_err()?;
-                Ok(())
-            },
-        );
-    }
-}
-
 #[derive(Debug, Clone, Copy)]
 pub struct Arc {
     pub radius: f32,
@@ -851,18 +840,6 @@ impl Pattern for Arc {
     }
 }
 
-impl LuaUserData for Arc {
-    fn add_methods<'lua, T: LuaUserDataMethods<'lua, Self>>(methods: &mut T) {
-        methods.add_meta_method(
-            LuaMetaMethod::Call,
-            |_lua, this, mut builder: LuaPatternBuilder| {
-                this.build(&mut builder).to_lua_err()?;
-                Ok(())
-            },
-        );
-    }
-}
-
 #[derive(Debug, Clone, Copy)]
 pub struct Stack {
     pub delta: SpeedParameters,
@@ -890,15 +867,18 @@ impl Pattern for Stack {
     }
 }
 
-impl LuaUserData for Stack {
-    fn add_methods<'lua, T: LuaUserDataMethods<'lua, Self>>(methods: &mut T) {
-        methods.add_meta_method(
-            LuaMetaMethod::Call,
-            |_lua, this, mut builder: LuaPatternBuilder| {
-                this.build(&mut builder).to_lua_err()?;
-                Ok(())
-            },
-        );
+pub struct Aimed {
+    pub target: Point2<f32>,
+}
+
+impl Pattern for Aimed {
+    fn build<'lua>(&self, builder: &mut dyn PatternBuilder<'lua>) -> Result<()> {
+        builder.push(None)?;
+        builder.aim_at(self.target)?;
+        builder.fire()?;
+        builder.pop()?;
+
+        Ok(())
     }
 }
 
@@ -976,7 +956,9 @@ impl Danmaku {
                 }
             }
 
-            proj.position = motion.velocity.integrate(dt) * proj.position;
+            let integrated = motion.velocity.integrate(dt);
+            proj.position.translation.vector += integrated.translation.vector;
+            proj.position.rotation *= integrated.rotation;
         }
 
         for (_e, (mut proj, mut motion, maximum)) in world
@@ -1002,12 +984,14 @@ impl Danmaku {
                 }
             }
 
-            proj.position =
-                motion.velocity.transformed(&proj.position).integrate(dt) * proj.position;
+            proj.position *= motion.velocity.integrate(dt);
         }
 
         if let Some(bounds) = self.bounds {
-            for (e, (proj, circle)) in world.query::<(&Projectile, &Circle)>().iter() {
+            for (e, (proj, circle, _)) in world
+                .query::<(&Projectile, &Circle, &DespawnOutOfBounds)>()
+                .iter()
+            {
                 let circle_bb = Box2::from_half_extents(
                     Point2::from(proj.position.translation.vector),
                     Vector2::repeat(circle.radius),
@@ -1018,7 +1002,10 @@ impl Danmaku {
                 }
             }
 
-            for (e, (proj, rect)) in world.query::<(&Projectile, &Rectangle)>().iter() {
+            for (e, (proj, rect, _)) in world
+                .query::<(&Projectile, &Rectangle, &DespawnOutOfBounds)>()
+                .iter()
+            {
                 let homogeneous = homogeneous_mat3_to_mat4(&proj.position.to_homogeneous());
                 let rect_bb = Box2::from_half_extents(Point2::origin(), rect.half_extents)
                     .transformed_by(&homogeneous);
@@ -1026,6 +1013,16 @@ impl Danmaku {
                 if !bounds.intersects(&rect_bb) {
                     self.to_despawn.add(e.id());
                 }
+            }
+        }
+
+        for (e, (_, mut time_limit)) in world
+            .query::<(&Projectile, &mut DespawnAfterTimeLimit)>()
+            .iter()
+        {
+            time_limit.ttl -= dt;
+            if time_limit.ttl <= 0. {
+                self.to_despawn.add(e.id());
             }
         }
 
@@ -1291,6 +1288,15 @@ pub fn load<'lua>(lua: LuaContext<'lua>) -> Result<LuaValue<'lua>> {
             "spawn",
             lua.create_function(move |lua, (bullet_ty, closure): (LuaString, LuaFunction)| {
                 bullets[bullet_ty.to_str()?].batch_me(lua, closure)
+            })?,
+        ),
+        (
+            "set_bounds",
+            lua.create_function(|lua, bounds: Option<Box2<f32>>| {
+                let resources = lua.resources();
+                let mut danmaku = resources.fetch_mut::<Danmaku>();
+                danmaku.bounds = bounds;
+                Ok(())
             })?,
         ),
     ])?;

@@ -3,10 +3,11 @@ use proc_macro_crate::crate_name;
 use quote::quote;
 use syn::*;
 
-fn guess_name() -> Ident {
+fn guess_name() -> Option<Ident> {
+    // if proc-macro-crate fails, assume we're in the sludge crate itself.
     match crate_name("sludge") {
-        Ok(name) => Ident::new(&name, Span::call_site()),
-        Err(_) => Ident::new("crate", Span::call_site()),
+        Ok(_) => None,
+        Err(_) => Some(Ident::new("crate", Span::call_site())),
     }
 }
 
@@ -31,7 +32,7 @@ pub fn derive_simple_component(input: proc_macro::TokenStream) -> proc_macro::To
 
     let expanded = quote! {
         // The generated impl.
-        impl #impl_generics #root::ecs::SmartComponent<#root::ecs::ScContext<#context_lifetime>>
+        impl #impl_generics #root::sludge::SmartComponent<#root::sludge::ScContext<#context_lifetime>>
             for #name #ty_generics #where_clause {}
     };
 
@@ -60,16 +61,16 @@ pub fn derive_flagged_component(input: proc_macro::TokenStream) -> proc_macro::T
 
     let expanded = quote! {
         // The generated impl.
-        impl #impl_generics #root::ecs::SmartComponent<#root::ecs::ScContext<#context_lifetime>>
+        impl #impl_generics #root::SmartComponent<#root::ScContext<#context_lifetime>>
             for #name #original_generics #where_clause {
-            fn on_borrow_mut(&mut self, entity: #root::ecs::Entity, context: #root::ecs::ScContext<#context_lifetime>) {
+            fn on_borrow_mut(&mut self, entity: #root::Entity, context: #root::ScContext<#context_lifetime>) {
                 context[&#root::TypeId::of::<#name #original_generics>()].emit_modified_atomic(entity);
             }
         }
 
         // Register the flagged component so that `World`s create a channel for it.
         #root::inventory::submit! {
-            #root::ecs::FlaggedComponent::of::<#name #original_generics>()
+            #root::FlaggedComponent::of::<#name #original_generics>()
         }
     };
 

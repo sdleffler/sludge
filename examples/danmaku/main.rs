@@ -1,20 +1,22 @@
 #![feature(exact_size_is_empty)]
 
-use {
+extern crate sludge as sloodge;
+
+use ::{
     anyhow::*,
     hashbrown::HashMap,
-    rand::distributions::uniform::Uniform,
     shrev::ReaderId,
-    sludge::{
-        assets::DefaultCache, components::Transform, conf::Conf, dispatcher::Dispatcher,
-        event::EventHandler, filesystem::Filesystem, graphics::*, prelude::*,
+    sloodge::{
+        assets::DefaultCache, conf::Conf, dispatcher::Dispatcher, event::EventHandler,
+        filesystem::Filesystem, graphics::*, prelude::*,
     },
+    sludge_danmaku::*,
     std::{env, path::PathBuf},
 };
 
-mod danmaku;
-
-use danmaku::*;
+mod sludge {
+    pub use ::sludge::sludge::*;
+}
 
 #[derive(Debug, Clone, Copy, SimpleComponent)]
 struct SpriteIndex {
@@ -230,7 +232,7 @@ fn main() -> Result<()> {
         .chain(std::io::stdout())
         .apply()?;
 
-    sludge::event::run::<MainState>(
+    sloodge::event::run::<MainState>(
         Conf {
             window_title: "Bullets!".to_string(),
             window_width: 320 * 4,

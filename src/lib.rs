@@ -22,7 +22,6 @@ pub mod assets;
 pub mod chunked_grid;
 pub mod components;
 pub mod conf;
-pub mod danmaku;
 pub mod dependency_graph;
 pub mod dispatcher;
 pub mod ecs;
@@ -52,8 +51,6 @@ pub mod prelude {
     pub use anyhow::*;
     pub use inventory;
     pub use rlua::prelude::*;
-    pub use rlua_serde;
-    pub use serde_json;
 
     pub use crate::{
         api::{LuaEntity, StaticTemplate, Template},
@@ -66,14 +63,22 @@ pub mod prelude {
     pub use sludge_macros::*;
 }
 
+pub use inventory;
+pub use rlua_serde;
 pub use sludge_macros::*;
 
 #[doc(hidden)]
-pub use {
-    crate::ecs::{Entity, ScContext},
-    inventory,
-    std::any::TypeId,
-};
+pub mod sludge {
+    #[doc(hidden)]
+    pub use {
+        crate::ecs::{Entity, ScContext, SmartComponent},
+        inventory,
+        std::any::TypeId,
+    };
+}
+
+#[doc(hidden)]
+pub use sludge::*;
 
 use crate::{
     api::{EntityUserDataRegistry, Registry},

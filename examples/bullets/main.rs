@@ -1,10 +1,16 @@
+extern crate sludge as sloodge;
+
 use {
     anyhow::*,
     rand::distributions::uniform::Uniform,
-    sludge::{
+    sloodge::{
         components::Transform, conf::Conf, ecs::World, event::EventHandler, graphics::*, prelude::*,
     },
 };
+
+mod sludge {
+    pub use ::sludge::sludge::*;
+}
 
 #[derive(Debug, SimpleComponent)]
 struct Spatial {
@@ -172,7 +178,7 @@ fn main() -> Result<()> {
         .chain(std::io::stdout())
         .apply()?;
 
-    sludge::event::run::<MainState>(
+    sloodge::event::run::<MainState>(
         Conf {
             window_title: "Bullets!".to_string(),
             window_width: 320 * 4,

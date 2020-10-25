@@ -131,7 +131,12 @@ pub fn new_transform(_ctx: LuaContext, _: ()) -> LuaResult<Transform> {
 }
 
 pub fn load<'lua>(lua: LuaContext<'lua>) -> Result<LuaValue<'lua>> {
-    let table = lua.create_table_from(vec![("Transform", lua.create_function(new_transform)?)])?;
+    let table = lua.create_table_from(vec![
+        ("Transform", lua.create_function(new_transform)?),
+        ("sinh", lua.create_function(|_lua, f: f32| Ok(f.sinh()))?),
+        ("cosh", lua.create_function(|_lua, f: f32| Ok(f.cosh()))?),
+        ("tanh", lua.create_function(|_lua, f: f32| Ok(f.tanh()))?),
+    ])?;
 
     Ok(LuaValue::Table(table))
 }
