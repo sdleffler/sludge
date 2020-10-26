@@ -217,7 +217,7 @@ impl TimeContext {
     /// # struct State;
     /// # impl State {
     /// fn update(&mut self, ctx: &mut TimeContext) -> Result<()> {
-    ///     while(ctx.check_update_time(60)) {
+    ///     while ctx.check_update_time(60) {
     ///         update_game_physics()?;
     ///     }
     ///     Ok(())

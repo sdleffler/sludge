@@ -219,16 +219,16 @@ impl SpeedParameters {
 #[derive(Debug, Clone, Copy)]
 pub struct Parameters {
     pub position: Isometry2<f32>,
-    pub speed: SpeedParameters,
-    pub accel: SpeedParameters,
+    pub speed: Velocity2<f32>,
+    pub accel: Velocity2<f32>,
 }
 
 impl Default for Parameters {
     fn default() -> Self {
         Self {
             position: Isometry2::identity(),
-            speed: SpeedParameters::default(),
-            accel: SpeedParameters::default(),
+            speed: Velocity2::zero(),
+            accel: Velocity2::zero(),
         }
     }
 }
@@ -263,28 +263,31 @@ impl Parameters {
     }
 
     #[inline]
-    pub fn composed(mut self, sp: &SpeedParameters) -> Self {
-        self.speed = self.speed.after(sp);
-        self
-    }
-
-    #[inline]
     pub fn apply_to_position(&self, iso: &Isometry2<f32>) -> Isometry2<f32> {
         self.position * iso
     }
 
     #[inline]
-    pub fn apply_to_derivative(&self, dx: &Velocity2<f32>) -> Velocity2<f32> {
-        let mut dx = dx.transformed(&self.position);
+    pub fn apply_to_velocity(&self, dx: &Velocity2<f32>) -> Velocity2<f32> {
+        (*dx + self.speed).transformed(&self.position)
+        // let mut dx = dx.transformed(&self.position);
 
-        let speed = dx.linear.norm();
-        if speed != 0. {
-            let adjusted_speed = self.speed.apply_linear(speed);
-            dx.linear *= adjusted_speed / speed;
-        }
-        dx.angular = self.speed.apply_angular(dx.angular);
+        // let speed = dx.linear.norm();
+        // if speed != 0. {
+        //     let adjusted_speed = self.speed.apply_linear(speed);
+        //     dx.linear *= adjusted_speed / speed;
+        // } else {
+        //     let adjusted_speed = self.speed.apply_linear(1.);
+        //     dx.linear += Vector2::x() * adjusted_speed;
+        // }
+        // dx.angular = self.speed.apply_angular(dx.angular);
 
-        dx
+        // dx
+    }
+
+    #[inline]
+    pub fn apply_to_acceleration(&self, dv: &Velocity2<f32>) -> Velocity2<f32> {
+        (*dv + self.accel).transformed(&self.position)
     }
 }
 
@@ -294,7 +297,14 @@ pub enum Op {
     Transform(Isometry2<f32>),
     Translate(Vector2<f32>),
     Rotate(UnitComplex<f32>),
-    Compose(SpeedParameters),
+    RotateVelocity(UnitComplex<f32>),
+    AddLinearVelocity(Vector2<f32>),
+    AddAngularVelocity(f32),
+    MulVelocity(f32),
+    RotateAccel(UnitComplex<f32>),
+    AddLinearAccel(Vector2<f32>),
+    AddAngularAccel(f32),
+    MulAccel(f32),
     AimAt(Point2<f32>),
     Pop,
     Fire,
@@ -309,12 +319,12 @@ impl<'lua> ToLuaMulti<'lua> for Op {
                 ps.position.translation.y,
                 ps.position.rotation.re,
                 ps.position.rotation.im,
-                ps.speed.coeff,
-                ps.speed.linear_bias,
-                ps.speed.angular_bias,
-                ps.accel.coeff,
-                ps.accel.linear_bias,
-                ps.accel.angular_bias,
+                ps.speed.linear.x,
+                ps.speed.linear.y,
+                ps.speed.angular,
+                ps.accel.linear.x,
+                ps.accel.linear.y,
+                ps.accel.angular,
             )
                 .to_lua_multi(lua),
             Op::Push(None) => ("push",).to_lua_multi(lua),
@@ -328,9 +338,14 @@ impl<'lua> ToLuaMulti<'lua> for Op {
                 .to_lua_multi(lua),
             Op::Translate(v) => ("translate", v.x, v.y).to_lua_multi(lua),
             Op::Rotate(r) => ("rotate", r.re, r.im).to_lua_multi(lua),
-            Op::Compose(sp) => {
-                ("compose", sp.coeff, sp.linear_bias, sp.angular_bias).to_lua_multi(lua)
-            }
+            Op::RotateVelocity(r) => ("rotate_velocity", r.re, r.im).to_lua_multi(lua),
+            Op::AddLinearVelocity(v) => ("add_linear_velocity", v.x, v.y).to_lua_multi(lua),
+            Op::AddAngularVelocity(theta) => ("add_angular_velocity", theta).to_lua_multi(lua),
+            Op::MulVelocity(m) => ("mul_velocity", m).to_lua_multi(lua),
+            Op::RotateAccel(r) => ("rotate_accel", r.re, r.im).to_lua_multi(lua),
+            Op::AddLinearAccel(v) => ("add_linear_accel", v.x, v.y).to_lua_multi(lua),
+            Op::AddAngularAccel(theta) => ("add_angular_accel", theta).to_lua_multi(lua),
+            Op::MulAccel(m) => ("mul_accel", m).to_lua_multi(lua),
             Op::AimAt(pt) => ("aim_at", pt.x, pt.y).to_lua_multi(lua),
             Op::Pop => ("pop",).to_lua_multi(lua),
             Op::Fire => ("fire",).to_lua_multi(lua),
@@ -351,23 +366,21 @@ impl<'lua> FromLuaMulti<'lua> for Op {
                     let re = f32::from_lua(vec.next().unwrap(), lua)?;
                     let im = f32::from_lua(vec.next().unwrap(), lua)?;
                     let speed = {
-                        let coeff = f32::from_lua(vec.next().unwrap(), lua)?;
-                        let linear_bias = f32::from_lua(vec.next().unwrap(), lua)?;
-                        let angular_bias = f32::from_lua(vec.next().unwrap(), lua)?;
-                        SpeedParameters {
-                            coeff,
-                            linear_bias,
-                            angular_bias,
+                        let x = f32::from_lua(vec.next().unwrap(), lua)?;
+                        let y = f32::from_lua(vec.next().unwrap(), lua)?;
+                        let angular = f32::from_lua(vec.next().unwrap(), lua)?;
+                        Velocity2 {
+                            linear: Vector2::new(x, y),
+                            angular,
                         }
                     };
                     let accel = {
-                        let coeff = f32::from_lua(vec.next().unwrap(), lua)?;
-                        let linear_bias = f32::from_lua(vec.next().unwrap(), lua)?;
-                        let angular_bias = f32::from_lua(vec.next().unwrap(), lua)?;
-                        SpeedParameters {
-                            coeff,
-                            linear_bias,
-                            angular_bias,
+                        let x = f32::from_lua(vec.next().unwrap(), lua)?;
+                        let y = f32::from_lua(vec.next().unwrap(), lua)?;
+                        let angular = f32::from_lua(vec.next().unwrap(), lua)?;
+                        Velocity2 {
+                            linear: Vector2::new(x, y),
+                            angular,
                         }
                     };
                     Ok(Op::Push(Some(Parameters {
@@ -402,18 +415,43 @@ impl<'lua> FromLuaMulti<'lua> for Op {
                 let im = f32::from_lua(vec.next().unwrap(), lua)?;
                 Ok(Op::Rotate(Unit::new_unchecked(Complex::new(re, im))))
             }
-            "compose" => {
-                let speed = {
-                    let coeff = f32::from_lua(vec.next().unwrap(), lua)?;
-                    let linear_bias = f32::from_lua(vec.next().unwrap(), lua)?;
-                    let angular_bias = f32::from_lua(vec.next().unwrap(), lua)?;
-                    SpeedParameters {
-                        coeff,
-                        linear_bias,
-                        angular_bias,
-                    }
-                };
-                Ok(Op::Compose(speed))
+            "rotate_velocity" => {
+                let re = f32::from_lua(vec.next().unwrap(), lua)?;
+                let im = f32::from_lua(vec.next().unwrap(), lua)?;
+                Ok(Op::RotateVelocity(Unit::new_unchecked(Complex::new(
+                    re, im,
+                ))))
+            }
+            "add_linear_velocity" => {
+                let x = f32::from_lua(vec.next().unwrap(), lua)?;
+                let y = f32::from_lua(vec.next().unwrap(), lua)?;
+                Ok(Op::AddLinearVelocity(Vector2::new(x, y)))
+            }
+            "add_angular_velocity" => {
+                let theta = f32::from_lua(vec.next().unwrap(), lua)?;
+                Ok(Op::AddAngularVelocity(theta))
+            }
+            "mul_velocity" => {
+                let m = f32::from_lua(vec.next().unwrap(), lua)?;
+                Ok(Op::MulVelocity(m))
+            }
+            "rotate_accel" => {
+                let re = f32::from_lua(vec.next().unwrap(), lua)?;
+                let im = f32::from_lua(vec.next().unwrap(), lua)?;
+                Ok(Op::RotateAccel(Unit::new_unchecked(Complex::new(re, im))))
+            }
+            "add_linear_accel" => {
+                let x = f32::from_lua(vec.next().unwrap(), lua)?;
+                let y = f32::from_lua(vec.next().unwrap(), lua)?;
+                Ok(Op::AddLinearAccel(Vector2::new(x, y)))
+            }
+            "add_angular_accel" => {
+                let theta = f32::from_lua(vec.next().unwrap(), lua)?;
+                Ok(Op::AddAngularAccel(theta))
+            }
+            "mul_accel" => {
+                let m = f32::from_lua(vec.next().unwrap(), lua)?;
+                Ok(Op::MulAccel(m))
             }
             "aim_at" => {
                 let x = f32::from_lua(vec.next().unwrap(), lua)?;
@@ -449,23 +487,43 @@ pub trait PatternBuilder<'lua> {
     }
 
     #[inline]
-    fn compose(&mut self, sp: SpeedParameters) -> Result<()> {
-        self.op(Op::Compose(sp))
+    fn rotate_velocity(&mut self, angle: f32) -> Result<()> {
+        self.op(Op::RotateVelocity(UnitComplex::new(angle)))
     }
 
     #[inline]
-    fn mul_speed(&mut self, coeff: f32) -> Result<()> {
-        self.compose(SpeedParameters::coeff(coeff))
+    fn add_linear_velocity(&mut self, v: Vector2<f32>) -> Result<()> {
+        self.op(Op::AddLinearVelocity(v))
     }
 
     #[inline]
-    fn add_linear_speed(&mut self, linear_bias: f32) -> Result<()> {
-        self.compose(SpeedParameters::linear_bias(linear_bias))
+    fn add_angular_velocity(&mut self, theta: f32) -> Result<()> {
+        self.op(Op::AddAngularVelocity(theta))
     }
 
     #[inline]
-    fn add_angular_speed(&mut self, angular_bias: f32) -> Result<()> {
-        self.compose(SpeedParameters::angular_bias(angular_bias))
+    fn mul_velocity(&mut self, m: f32) -> Result<()> {
+        self.op(Op::MulVelocity(m))
+    }
+
+    #[inline]
+    fn rotate_accel(&mut self, angle: f32) -> Result<()> {
+        self.op(Op::RotateAccel(UnitComplex::new(angle)))
+    }
+
+    #[inline]
+    fn add_linear_accel(&mut self, v: Vector2<f32>) -> Result<()> {
+        self.op(Op::AddLinearVelocity(v))
+    }
+
+    #[inline]
+    fn add_angular_accel(&mut self, theta: f32) -> Result<()> {
+        self.op(Op::AddAngularAccel(theta))
+    }
+
+    #[inline]
+    fn mul_accel(&mut self, m: f32) -> Result<()> {
+        self.op(Op::MulAccel(m))
     }
 
     #[inline]
@@ -640,6 +698,22 @@ impl LuaUserData for LuaPatternBuilderUserData {
             this.get_user_value::<LuaFunction>()?
                 .call::<_, ()>(("rotate", rot.re, rot.im))
         });
+
+        methods.add_function(
+            "add_linear_velocity",
+            |_lua, (this, x, y): (LuaAnyUserData, f32, f32)| {
+                this.get_user_value::<LuaFunction>()?
+                    .call::<_, ()>(("add_linear_velocity", x, y))
+            },
+        );
+
+        methods.add_function(
+            "add_linear_accel",
+            |_lua, (this, x, y): (LuaAnyUserData, f32, f32)| {
+                this.get_user_value::<LuaFunction>()?
+                    .call::<_, ()>(("add_linear_accel", x, y))
+            },
+        );
 
         methods.add_function("pop", |_lua, this: LuaAnyUserData| {
             this.get_user_value::<LuaFunction>()?.call::<_, ()>("pop")
@@ -842,12 +916,12 @@ impl Pattern for Arc {
 
 #[derive(Debug, Clone, Copy)]
 pub struct Stack {
-    pub delta: SpeedParameters,
+    pub delta: Velocity2<f32>,
     pub count: u32,
 }
 
 impl Stack {
-    pub fn new(delta: SpeedParameters, count: u32) -> Self {
+    pub fn new(delta: Velocity2<f32>, count: u32) -> Self {
         Self { delta, count }
     }
 }
@@ -858,7 +932,8 @@ impl Pattern for Stack {
         builder.push(None)?;
         builder.fire()?;
         for _ in 1..self.count {
-            builder.compose(self.delta)?;
+            builder.add_linear_velocity(self.delta.linear)?;
+            builder.add_angular_velocity(self.delta.angular)?;
             builder.fire()?;
         }
         builder.pop()?;
@@ -1044,8 +1119,8 @@ impl Bullet for QuadraticShot {
 
     fn to_bundled(&self, parameters: &Parameters) -> Self::Bundled {
         let position = parameters.apply_to_position(&self.projectile.position);
-        let velocity = parameters.apply_to_derivative(&self.motion.velocity);
-        let acceleration = parameters.apply_to_derivative(&self.motion.acceleration);
+        let velocity = parameters.apply_to_velocity(&self.motion.velocity);
+        let acceleration = parameters.apply_to_acceleration(&self.motion.acceleration);
 
         Self {
             projectile: Projectile { position },
@@ -1062,8 +1137,8 @@ impl Bullet for DirectionalShot {
 
     fn to_bundled(&self, parameters: &Parameters) -> Self::Bundled {
         let position = parameters.apply_to_position(&self.projectile.position);
-        let velocity = parameters.apply_to_derivative(&self.motion.velocity);
-        let acceleration = parameters.apply_to_derivative(&self.motion.acceleration);
+        let velocity = parameters.apply_to_velocity(&self.motion.velocity);
+        let acceleration = parameters.apply_to_acceleration(&self.motion.acceleration);
 
         Self {
             projectile: Projectile { position },
@@ -1142,9 +1217,37 @@ where
                 let top = self.stack.last_mut().unwrap();
                 *top = top.rotated_wrt_center(&r);
             }
-            Op::Compose(sp) => {
+            Op::RotateVelocity(r) => {
                 let top = self.stack.last_mut().unwrap();
-                *top = top.composed(&sp);
+                top.speed = top.speed.rotated(&r.to_rotation_matrix());
+            }
+            Op::AddLinearVelocity(v) => {
+                let top = self.stack.last_mut().unwrap();
+                top.speed.linear += v;
+            }
+            Op::AddAngularVelocity(theta) => {
+                let top = self.stack.last_mut().unwrap();
+                top.speed.angular += theta;
+            }
+            Op::MulVelocity(m) => {
+                let top = self.stack.last_mut().unwrap();
+                top.speed *= m;
+            }
+            Op::RotateAccel(r) => {
+                let top = self.stack.last_mut().unwrap();
+                top.accel = top.accel.rotated(&r.to_rotation_matrix());
+            }
+            Op::AddLinearAccel(v) => {
+                let top = self.stack.last_mut().unwrap();
+                top.accel.linear += v;
+            }
+            Op::AddAngularAccel(theta) => {
+                let top = self.stack.last_mut().unwrap();
+                top.accel.angular += theta;
+            }
+            Op::MulAccel(m) => {
+                let top = self.stack.last_mut().unwrap();
+                top.accel *= m;
             }
             Op::AimAt(p0) => {
                 let ps = self.stack.last_mut().unwrap();
@@ -1275,14 +1378,12 @@ pub fn load<'lua>(lua: LuaContext<'lua>) -> Result<LuaValue<'lua>> {
         ),
         (
             "stack",
-            lua.create_function(
-                |_, (coeff, linear_bias, angular_bias, count)| -> LuaResult<RustPattern> {
-                    Ok(RustPattern::new(Stack {
-                        delta: SpeedParameters::new(coeff, linear_bias, angular_bias),
-                        count,
-                    }))
-                },
-            )?,
+            lua.create_function(|_, (x, y, angular, count)| -> LuaResult<RustPattern> {
+                Ok(RustPattern::new(Stack {
+                    delta: Velocity2::new(Vector2::new(x, y), angular),
+                    count,
+                }))
+            })?,
         ),
         (
             "spawn",

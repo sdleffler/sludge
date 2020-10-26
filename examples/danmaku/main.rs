@@ -36,8 +36,8 @@ impl Bullet for TestBullet {
 
     fn to_bundled(&self, parameters: &Parameters) -> Self::Bundled {
         let position = parameters.apply_to_position(&self.projectile.position);
-        let velocity = parameters.apply_to_derivative(&self.motion.velocity);
-        let acceleration = parameters.apply_to_derivative(&self.motion.acceleration);
+        let velocity = parameters.apply_to_velocity(&self.motion.velocity);
+        let acceleration = parameters.apply_to_acceleration(&self.motion.acceleration);
 
         Self {
             projectile: Projectile { position },
@@ -55,7 +55,7 @@ inventory::submit! {
         projectile: Projectile {
             position: Isometry2::identity(),
         },
-        motion: QuadraticMotion::new(Velocity2::linear(30., 0.), Velocity2::linear(-5., 0.)),
+        motion: QuadraticMotion::new(Velocity2::zero(), Velocity2::zero()),
         sprite_idx: SpriteIndex { idx: None },
         hitbox: Circle { radius: 1.0 },
     })

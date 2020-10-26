@@ -143,10 +143,12 @@ impl<'lua> SludgeLuaContextExt for LuaContext<'lua> {
 pub trait System {
     fn init(
         &self,
-        lua: LuaContext,
-        local: &mut OwnedResources,
-        global: Option<&SharedResources>,
-    ) -> Result<()>;
+        _lua: LuaContext,
+        _local: &mut OwnedResources,
+        _global: Option<&SharedResources>,
+    ) -> Result<()> {
+        Ok(())
+    }
 
     fn update(&self, lua: LuaContext, resources: &UnifiedResources) -> Result<()>;
 }
