@@ -101,16 +101,22 @@ impl LuaUserData for PositionAccessor {
             let world = resources.fetch::<World>();
             let pos = world.get::<Position>(this.0).to_lua_err()?;
             match key.to_str()? {
-                "x" => pos.translation.vector.x.to_lua_multi(lua),
-                "y" => pos.translation.vector.y.to_lua_multi(lua),
-                "position" => {
-                    let x = pos.translation.vector.x;
-                    let y = pos.translation.vector.y;
-                    (x, y).to_lua_multi(lua)
-                }
-                "angle" => pos.rotation.angle().to_lua_multi(lua),
-                _ => ().to_lua_multi(lua),
+                "x" => pos.translation.vector.x.to_lua(lua),
+                "y" => pos.translation.vector.y.to_lua(lua),
+                "angle" => pos.rotation.angle().to_lua(lua),
+                _ => LuaValue::Nil.to_lua(lua),
             }
+        });
+
+        // Separate method from index because index cannot return multiple
+        // values.
+        methods.add_method("coords", |lua, this, ()| {
+            let resources = lua.resources();
+            let world = resources.fetch::<World>();
+            let pos = world.get::<Position>(this.0).to_lua_err()?;
+            let x = pos.translation.vector.x;
+            let y = pos.translation.vector.y;
+            (x, y).to_lua_multi(lua)
         });
 
         methods.add_method("to_table", |lua, this, ()| {
@@ -214,16 +220,20 @@ impl LuaUserData for VelocityAccessor {
             let world = resources.fetch::<World>();
             let velocity = world.get::<Velocity>(this.0).to_lua_err()?;
             match key.to_str()? {
-                "x" => velocity.linear.x.to_lua_multi(lua),
-                "y" => velocity.linear.y.to_lua_multi(lua),
-                "linear" => {
-                    let x = velocity.linear.x;
-                    let y = velocity.linear.y;
-                    (x, y).to_lua_multi(lua)
-                }
-                "angular" => velocity.angular.to_lua_multi(lua),
-                _ => ().to_lua_multi(lua),
+                "x" => velocity.linear.x.to_lua(lua),
+                "y" => velocity.linear.y.to_lua(lua),
+                "angular" => velocity.angular.to_lua(lua),
+                _ => LuaValue::Nil.to_lua(lua),
             }
+        });
+
+        methods.add_method("linear", |lua, this, ()| {
+            let resources = lua.resources();
+            let world = resources.fetch::<World>();
+            let velocity = world.get::<Velocity>(this.0).to_lua_err()?;
+            let x = velocity.linear.x;
+            let y = velocity.linear.y;
+            (x, y).to_lua_multi(lua)
         });
 
         methods.add_method("to_table", |lua, this, ()| {

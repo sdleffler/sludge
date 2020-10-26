@@ -715,6 +715,14 @@ impl LuaUserData for LuaPatternBuilderUserData {
             },
         );
 
+        methods.add_function(
+            "aim_at",
+            |_lua, (this, x, y): (LuaAnyUserData, f32, f32)| {
+                this.get_user_value::<LuaFunction>()?
+                    .call::<_, ()>(("aim_at", x, y))
+            },
+        );
+
         methods.add_function("pop", |_lua, this: LuaAnyUserData| {
             this.get_user_value::<LuaFunction>()?.call::<_, ()>("pop")
         });
@@ -722,6 +730,17 @@ impl LuaUserData for LuaPatternBuilderUserData {
         methods.add_function("fire", |_lua, this: LuaAnyUserData| {
             this.get_user_value::<LuaFunction>()?.call::<_, ()>("fire")
         });
+
+        methods.add_meta_method(
+            LuaMetaMethod::Index,
+            |_lua, _this, (key, _): (LuaString, LuaMultiValue)| -> LuaResult<()> {
+                Err(anyhow!(
+                    "no such method `{}` for PatternBuilder",
+                    key.to_str()?
+                ))
+                .to_lua_err()
+            },
+        );
     }
 }
 
