@@ -1570,7 +1570,7 @@ impl Drawable for Canvas {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Sprite {
     pub params: InstanceParam,
     pub texture: Cached<Texture>,

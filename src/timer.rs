@@ -46,6 +46,12 @@ use std::f64;
 use std::thread;
 use std::time;
 
+type Instant = f64;
+
+pub fn time() -> f64 {
+    miniquad::date::now()
+}
+
 /// A simple buffer that fills
 /// up to a limit and then holds the last
 /// N items that have been inserted into it,
@@ -114,8 +120,8 @@ where
 /// A structure that contains our time-tracking state.
 #[derive(Debug)]
 pub struct TimeContext {
-    init_instant: time::Instant,
-    last_instant: time::Instant,
+    init_instant: Instant,
+    last_instant: Instant,
     frame_durations: LogBuffer<time::Duration>,
     residual_update_dt: time::Duration,
     frame_count: usize,
@@ -129,8 +135,8 @@ impl TimeContext {
     pub fn new() -> TimeContext {
         let initial_dt = time::Duration::from_millis(16);
         TimeContext {
-            init_instant: time::Instant::now(),
-            last_instant: time::Instant::now(),
+            init_instant: time(),
+            last_instant: time(),
             frame_durations: LogBuffer::new(TIME_LOG_FRAMES, initial_dt),
             residual_update_dt: time::Duration::from_secs(0),
             frame_count: 0,
@@ -145,13 +151,13 @@ impl TimeContext {
     /// It's usually not necessary to call this function yourself,
     /// [`event::run()`](../event/fn.run.html) will do it for you.
     pub fn tick(&mut self) {
-        let now = time::Instant::now();
+        let now = time();
         let time_since_last = now - self.last_instant;
-        self.frame_durations.push(time_since_last);
+        self.frame_durations.push(f64_to_duration(time_since_last));
         self.last_instant = now;
         self.frame_count += 1;
 
-        self.residual_update_dt += time_since_last;
+        self.residual_update_dt += f64_to_duration(time_since_last);
     }
 }
 
@@ -192,7 +198,7 @@ impl TimeContext {
     /// Returns the time since the game was initialized,
     /// as reported by the system clock.
     pub fn time_since_start(&self) -> time::Duration {
-        time::Instant::now() - self.init_instant
+        f64_to_duration(time() - self.init_instant)
     }
 
     /// Check whether or not the desired amount of time has elapsed
@@ -228,6 +234,27 @@ impl TimeContext {
         let target_dt = fps_as_duration(target_fps);
         if self.residual_update_dt > target_dt {
             self.residual_update_dt -= target_dt;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// This is a variant of `check_update_time` which intends you to pass an iteration
+    /// counter. If the iteration counter is zero, it will do an update regardless of
+    /// whether there's enough remaining time, and set the residual delta time to zero.
+    /// This helps avoid cascading stutters where the game performs no updates one frame
+    /// and then many the next.
+    pub fn check_update_time_forced(&mut self, target_fps: u32, iteration: &mut u32) -> bool {
+        let target_dt = fps_as_duration(target_fps);
+        if self.residual_update_dt > target_dt
+            || (*iteration == 0 && self.fps() < 2. * target_fps as f64)
+        {
+            *iteration += 1;
+            self.residual_update_dt = self
+                .residual_update_dt
+                .checked_sub(target_dt)
+                .unwrap_or_default();
             true
         } else {
             false

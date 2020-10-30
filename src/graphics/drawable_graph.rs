@@ -88,6 +88,7 @@ struct Node {
     value: Box<dyn AnyDrawable>,
     layer: i32,
     y_sorted: bool,
+    hidden: bool,
     parent: Option<Index>,
     children: Vec<Index>,
 }
@@ -170,6 +171,7 @@ impl DrawableGraph {
             value: Box::new(value),
             layer: 0,
             y_sorted: false,
+            hidden: false,
             parent: None,
             children: vec![],
         });
@@ -194,6 +196,7 @@ impl DrawableGraph {
             value,
             layer,
             y_sorted,
+            hidden: false,
             parent: parent.map(|t| t.into().0),
             children: vec![],
         });
@@ -235,9 +238,15 @@ impl DrawableGraph {
     }
 
     pub fn set_layer(&mut self, object: impl Into<ErasedDrawableNodeId>, layer: i32) {
-        let object = object.into();
-        self.objects[object.0].layer = layer;
-        *self.dirty.get_mut() = true;
+        let object = &mut self.objects[object.into().0];
+        *self.dirty.get_mut() |= object.layer != layer;
+        object.layer = layer;
+    }
+
+    pub fn set_hidden(&mut self, object: impl Into<ErasedDrawableNodeId>, hidden: bool) {
+        let object = &mut self.objects[object.into().0];
+        *self.dirty.get_mut() |= object.hidden != hidden;
+        object.hidden = hidden;
     }
 
     pub fn remove<T: AnyDrawable>(&mut self, object: DrawableNodeId<T>) -> Option<T> {
@@ -297,7 +306,7 @@ impl DrawableGraph {
 
         roots.clear();
         for (index, node) in objects.iter() {
-            if node.parent.is_none() {
+            if node.parent.is_none() && !node.hidden {
                 roots.push(index);
             }
         }
@@ -309,10 +318,15 @@ impl DrawableGraph {
 
         stack.extend(roots.iter().rev());
         while let Some(index) = stack.pop() {
+            let object = &objects[index];
+
+            if object.hidden {
+                continue;
+            }
+
             sorted.push(index);
             buf.clear();
 
-            let object = &objects[index];
             buf.extend_from_slice(&object.children);
 
             if object.y_sorted {

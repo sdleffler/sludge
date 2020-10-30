@@ -143,6 +143,7 @@ impl CommandBuffer {
 
     #[inline]
     pub fn drain_into(&mut self, world: &mut World) -> Result<()> {
+        let mut errs = Vec::new();
         for cmd in self.cmds.drain(..) {
             match cmd {
                 Command::Spawn(mut bundle) => {
@@ -157,16 +158,30 @@ impl CommandBuffer {
                         bundle.build(),
                     );
                     self.pool.push(bundle);
-                    res?;
+
+                    if let Err(err) = res {
+                        errs.push(err.to_string());
+                    }
                 }
                 Command::Remove(entity, remover) => {
-                    remover(&mut world.channels, &mut world.ecs, entity)?;
+                    if let Err(err) = remover(&mut world.channels, &mut world.ecs, entity) {
+                        errs.push(err.to_string());
+                    }
                 }
                 Command::Despawn(entity) => {
-                    World::do_despawn(&mut world.channels, &mut world.ecs, entity)?;
+                    if let Err(err) = World::do_despawn(&mut world.channels, &mut world.ecs, entity)
+                    {
+                        errs.push(err.to_string());
+                    }
                 }
             }
         }
+
+        ensure!(
+            errs.is_empty(),
+            "one or more errors occurred while draining command buffer: {}",
+            errs.join(", ")
+        );
 
         Ok(())
     }

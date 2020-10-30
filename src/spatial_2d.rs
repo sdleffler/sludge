@@ -1,5 +1,5 @@
 use crate::{
-    api::{LuaComponent, LuaComponentUserData},
+    api::{LuaComponent, LuaComponentInterface},
     ecs::*,
     math::*,
     Resources, SludgeLuaContextExt,
@@ -128,10 +128,9 @@ impl LuaUserData for PositionAccessor {
     }
 }
 
-impl LuaComponentUserData for Position {
-    type Accessor = PositionAccessor;
-    fn accessor<'lua>(_lua: LuaContext<'lua>, entity: Entity) -> LuaResult<Self::Accessor> {
-        Ok(PositionAccessor(entity))
+impl LuaComponentInterface for Position {
+    fn accessor<'lua>(lua: LuaContext<'lua>, entity: Entity) -> LuaResult<LuaValue<'lua>> {
+        PositionAccessor(entity).to_lua(lua)
     }
 
     fn bundler<'lua>(
@@ -245,10 +244,9 @@ impl LuaUserData for VelocityAccessor {
     }
 }
 
-impl LuaComponentUserData for Velocity {
-    type Accessor = VelocityAccessor;
-    fn accessor<'lua>(_lua: LuaContext<'lua>, entity: Entity) -> LuaResult<Self::Accessor> {
-        Ok(VelocityAccessor(entity))
+impl LuaComponentInterface for Velocity {
+    fn accessor<'lua>(lua: LuaContext<'lua>, entity: Entity) -> LuaResult<LuaValue<'lua>> {
+        VelocityAccessor(entity).to_lua(lua)
     }
 
     fn bundler<'lua>(
@@ -317,11 +315,9 @@ impl LuaUserData for ShapeAccessor {
     }
 }
 
-impl LuaComponentUserData for Shape {
-    type Accessor = ShapeAccessor;
-
-    fn accessor<'lua>(_lua: LuaContext<'lua>, entity: Entity) -> LuaResult<Self::Accessor> {
-        Ok(ShapeAccessor(entity))
+impl LuaComponentInterface for Shape {
+    fn accessor<'lua>(lua: LuaContext<'lua>, entity: Entity) -> LuaResult<LuaValue<'lua>> {
+        ShapeAccessor(entity).to_lua(lua)
     }
 
     fn bundler<'lua>(

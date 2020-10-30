@@ -1,6 +1,6 @@
 use crate::{
     ecs::{Component, Entity, EntityBuilder, World},
-    Resources, SludgeLuaContextExt,
+    Resources, SimpleComponent, SludgeLuaContextExt,
 };
 use {
     anyhow::*,
@@ -81,9 +81,8 @@ impl EntityUserDataRegistry {
     }
 }
 
-pub trait LuaComponentUserData: Component {
-    type Accessor: LuaUserData + Send;
-    fn accessor<'lua>(lua: LuaContext<'lua>, entity: Entity) -> LuaResult<Self::Accessor>;
+pub trait LuaComponentInterface: Component {
+    fn accessor<'lua>(lua: LuaContext<'lua>, entity: Entity) -> LuaResult<LuaValue<'lua>>;
     fn bundler<'lua>(
         lua: LuaContext<'lua>,
         args: LuaValue<'lua>,
@@ -91,9 +90,8 @@ pub trait LuaComponentUserData: Component {
     ) -> LuaResult<()>;
 }
 
-pub type AccessorConstructor = Arc<
-    dyn for<'lua> Fn(LuaContext<'lua>, Entity) -> LuaResult<LuaAnyUserData<'lua>> + Send + Sync,
->;
+pub type AccessorConstructor =
+    Arc<dyn for<'lua> Fn(LuaContext<'lua>, Entity) -> LuaResult<LuaValue<'lua>> + Send + Sync>;
 
 pub type BundlerConstructor = Arc<
     dyn for<'lua> Fn(LuaContext<'lua>, LuaValue<'lua>, &mut EntityBuilder) -> LuaResult<()>
@@ -116,12 +114,15 @@ pub struct LuaComponent {
 }
 
 impl LuaComponent {
-    pub fn new<T: LuaComponentUserData>(type_name: &'static str, field_name: &'static str) -> Self {
+    pub fn new<T: LuaComponentInterface>(
+        type_name: &'static str,
+        field_name: &'static str,
+    ) -> Self {
         Self {
             type_name,
             field_name,
             type_id: TypeId::of::<T>(),
-            accessor: Arc::new(|lua, entity| lua.create_userdata(T::accessor(lua, entity)?)),
+            accessor: Arc::new(|lua, entity| T::accessor(lua, entity)?.to_lua(lua)),
             bundler: Arc::new(T::bundler),
         }
     }
@@ -500,6 +501,43 @@ inventory::submit! {
     Module::parse("sludge.templates", |lua| {
         Ok(LuaValue::UserData(lua.create_userdata(Templates)?))
     })
+}
+
+/// A component providing special behavior to an entity through hooks in the Lua API,
+/// such as serialization/deserialization behavior.
+#[derive(Debug, SimpleComponent)]
+pub struct EntityTable {
+    key: LuaRegistryKey,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct EntityTableAccessor(Entity);
+
+impl LuaUserData for EntityTableAccessor {
+    fn add_methods<'lua, T: LuaUserDataMethods<'lua, Self>>(methods: &mut T) {
+        methods.add_method("get", |lua, this, ()| {
+            let resources = lua.resources();
+            let world = resources.fetch::<World>();
+            let et = world.get::<EntityTable>(this.0).to_lua_err()?;
+            lua.registry_value::<LuaValue<'lua>>(&et.key)
+        });
+    }
+}
+
+impl LuaComponentInterface for EntityTableAccessor {
+    fn accessor<'lua>(lua: LuaContext<'lua>, entity: Entity) -> LuaResult<LuaValue<'lua>> {
+        EntityTableAccessor(entity).to_lua(lua)
+    }
+
+    fn bundler<'lua>(
+        lua: LuaContext<'lua>,
+        args: LuaValue<'lua>,
+        builder: &mut EntityBuilder,
+    ) -> LuaResult<()> {
+        let key = lua.create_registry_value(args)?;
+        builder.add(EntityTable { key });
+        Ok(())
+    }
 }
 
 pub fn spawn<'lua>(lua: LuaContext<'lua>, table: LuaTable<'lua>) -> LuaResult<LuaEntity> {

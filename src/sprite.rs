@@ -8,7 +8,7 @@ use {
 };
 
 use crate::{
-    api::{LuaComponent, LuaComponentUserData},
+    api::{LuaComponent, LuaComponentInterface},
     assets::{Asset, Cache, Cached, DefaultCache, Key, Loaded},
     ecs::*,
     filesystem::Filesystem,
@@ -333,10 +333,9 @@ impl LuaUserData for SpriteAnimationAccessor {
     fn add_methods<'lua, T: LuaUserDataMethods<'lua, Self>>(_methods: &mut T) {}
 }
 
-impl LuaComponentUserData for SpriteAnimation {
-    type Accessor = SpriteAnimationAccessor;
-    fn accessor<'lua>(_lua: LuaContext<'lua>, entity: Entity) -> LuaResult<Self::Accessor> {
-        Ok(SpriteAnimationAccessor(entity))
+impl LuaComponentInterface for SpriteAnimation {
+    fn accessor<'lua>(lua: LuaContext<'lua>, entity: Entity) -> LuaResult<LuaValue<'lua>> {
+        SpriteAnimationAccessor(entity).to_lua(lua)
     }
 
     fn bundler<'lua>(
