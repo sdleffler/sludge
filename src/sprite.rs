@@ -376,5 +376,5 @@ impl LuaComponentInterface for SpriteAnimation {
 }
 
 inventory::submit! {
-    LuaComponent::new::<SpriteAnimation>("SpriteAnimation", "sprite_animation")
+    LuaComponent::new::<SpriteAnimation>("SpriteAnimation")
 }

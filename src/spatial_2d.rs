@@ -145,7 +145,7 @@ impl LuaComponentInterface for Position {
 }
 
 inventory::submit! {
-    LuaComponent::new::<Position>("Position", "position")
+    LuaComponent::new::<Position>("Position")
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -261,7 +261,7 @@ impl LuaComponentInterface for Velocity {
 }
 
 inventory::submit! {
-    LuaComponent::new::<Velocity>("Velocity", "velocity")
+    LuaComponent::new::<Velocity>("Velocity")
 }
 
 #[derive(Clone)]
@@ -346,5 +346,5 @@ impl LuaComponentInterface for Shape {
 }
 
 inventory::submit! {
-    LuaComponent::new::<Shape>("Shape", "shape")
+    LuaComponent::new::<Shape>("Shape")
 }

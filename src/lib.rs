@@ -7,8 +7,16 @@ use {
     hashbrown::HashMap,
     nalgebra as na,
     rlua::prelude::*,
+    serde::{Deserialize, Serialize},
     smallvec::SmallVec,
-    std::{any::Any, cmp::Ordering, collections::BinaryHeap, fmt, iter},
+    std::{
+        any::Any,
+        cmp::Ordering,
+        collections::BinaryHeap,
+        fmt,
+        io::{Read, Write},
+        iter,
+    },
     string_cache::DefaultAtom,
     thunderdome::{Arena, Index},
 };
@@ -31,6 +39,7 @@ pub mod graphics;
 pub mod hierarchy;
 pub mod input;
 pub mod math;
+pub mod persist;
 pub mod resources;
 pub mod scene;
 pub mod spatial_2d;
@@ -78,11 +87,12 @@ pub mod sludge {
 }
 
 #[doc(hidden)]
-pub use sludge::*;
+pub use crate::sludge::*;
 
 use crate::{
     api::{EntityUserDataRegistry, Registry},
     dispatcher::Dispatcher,
+    ecs::World,
     resources::*,
 };
 
@@ -172,9 +182,19 @@ impl Space {
     }
 
     pub fn with_global_resources(global: SharedResources<'static>) -> Result<Self> {
-        let lua = Lua::new();
+        use rlua::StdLib;
+        let lua = Lua::new_with(
+            StdLib::BASE
+                | StdLib::COROUTINE
+                | StdLib::TABLE
+                | StdLib::STRING
+                | StdLib::UTF8
+                | StdLib::MATH
+                | StdLib::ERIS,
+        );
         let mut local = OwnedResources::new();
 
+        local.insert(World::new());
         let (scheduler, queue_handle) = Scheduler::new();
         local.insert(scheduler);
         local.insert(queue_handle);
@@ -270,28 +290,51 @@ impl Space {
         self.lua
             .context(|lua| dispatcher.update(lua, &self.resources))
     }
+
+    #[inline]
+    pub fn world(&self) -> SharedFetch<'static, '_, World> {
+        self.fetch()
+    }
+
+    #[inline]
+    pub fn world_mut(&self) -> SharedFetchMut<'static, '_, World> {
+        self.fetch_mut()
+    }
+
+    #[inline]
+    pub fn scheduler(&self) -> SharedFetch<'static, '_, Scheduler> {
+        self.fetch()
+    }
+
+    #[inline]
+    pub fn scheduler_mut(&self) -> SharedFetchMut<'static, '_, Scheduler> {
+        self.fetch_mut()
+    }
+
+    pub fn save<W: Write>(&self, writer: W) -> Result<()> {
+        todo!()
+    }
+
+    pub fn load<R: Read>(&self, reader: R) -> Result<()> {
+        todo!()
+    }
 }
 
-#[derive(Debug, Derivative)]
-#[derivative(PartialEq, Eq, PartialOrd, Ord)]
-pub struct ScheduledThread {
-    /// The running Lua coroutine. We ignore it in comparison here because the
-    /// comparisons on `ScheduledThread` are used to place it in a priority queue
-    /// ordered by wakeup times.
-    #[derivative(PartialEq = "ignore", PartialOrd = "ignore", Ord = "ignore")]
-    thread: LuaRegistryKey,
-
-    /// The tick (time in 60ths of a second) on which this thread wants to wake up.
-    /// We want a reversed order because we want a min-heap based on `wakeup`.
-    #[derivative(
-        PartialOrd(compare_with = "utils::partial_cmp_reversed"),
-        Ord(compare_with = "utils::cmp_reversed")
-    )]
-    wakeup: u64,
-}
-
+/// A thread waiting to be woken up, living in the scheduler's queue. This
+/// can represent a thread which is scheduled for a given tick, or a thread
+/// which was waiting for an event which was previously broadcast this tick
+/// and is ready to be run.
+///
+/// An event wakeup will always appear as if it's scheduled for tick 0, and
+/// as such will always be at the front of the priority queue.
+///
+/// Wakeups may not point to a valid thread. When a thread is resumed, all
+/// previous indices referring to it become invalidated. Popping a wakeup
+/// which no longer has a valid thread is not an error, but simply to be
+/// ignored.
 #[derive(Debug)]
 pub enum Wakeup {
+    Immediate(Index),
     Event {
         thread: Index,
         name: EventName,
@@ -306,14 +349,16 @@ pub enum Wakeup {
 impl Wakeup {
     pub fn scheduled_for(&self) -> u64 {
         match self {
-            Self::Event { .. } => 0,
+            Self::Immediate(..) | Self::Event { .. } => 0,
             Self::Timed { scheduled_for, .. } => *scheduled_for,
         }
     }
 
     pub fn thread(&self) -> Index {
         match self {
-            Self::Event { thread, .. } | Self::Timed { thread, .. } => *thread,
+            Self::Immediate(thread) | Self::Event { thread, .. } | Self::Timed { thread, .. } => {
+                *thread
+            }
         }
     }
 }
@@ -337,6 +382,16 @@ impl PartialOrd for Wakeup {
 /// result.
 impl Ord for Wakeup {
     fn cmp(&self, rhs: &Self) -> Ordering {
+        if matches!(self, Self::Immediate(..)) || matches!(rhs, Self::Immediate(..)) {
+            if matches!(self, Self::Immediate(..)) && matches!(rhs, Self::Immediate(..)) {
+                return Ordering::Equal;
+            } else if matches!(self, Self::Immediate(..)) {
+                return Ordering::Greater;
+            } else if matches!(rhs, Self::Immediate(..)) {
+                return Ordering::Less;
+            }
+        }
+
         self.scheduled_for()
             .cmp(&rhs.scheduled_for())
             .reverse()
@@ -344,7 +399,7 @@ impl Ord for Wakeup {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct EventName(Atom);
 
 pub type EventArgs = SmallVec<[LuaRegistryKey; 3]>;
@@ -361,6 +416,45 @@ pub struct SchedulerQueueChannel {
     event: Sender<Event>,
 }
 
+/// The scheduler controls the execution of Lua "threads", under a cooperative
+/// concurrency model. It is a priority queue of coroutines to be resumed,
+/// ordered by how soon they should be woken. It also supports waking threads
+/// via string-keyed events, with Lua-valued arguments for event broadcasts.
+///
+/// # Persistence and the `Scheduler`
+///
+/// In order to robustly save/load the state of a `Space`, it is necessary to
+/// persist/load the scheduler itself. There are a few things to note about this.
+///
+/// Persistence of Lua values is implemented through Eris, which is capable of
+/// robustly serializing *any* pure Lua value, up to and including coroutines
+/// and closures. Userdata cannot be persisted, and is serialized through a sort
+/// of bridging which persists userdata objects as closures which reconstruct
+/// equivalent objects.
+///
+/// It is not possible for Eris to persist the currently running thread. As a
+/// corollary, it seems like a good idea for serialization to be forced only
+/// outside of Lua, and provide in Lua only an API which *requests* serialization
+/// asynchronously.
+///
+/// Persisting a `Space`'s state involves serializing data from the ECS, among
+/// other sources. The ECS is particularly troublesome because it references through
+/// indices which are not stable across instances of a program. As a result,
+/// we must leverage Eris's "permanents" table, which allows for custom handling
+/// of non-trivial data on a per-value basis. The permanents table will have
+/// to be generated separately, and will contain all userdata and bound functions
+/// from Sludge's API as well as mappings from userdata to tables containing the
+/// necessary data to reconstruct them.
+///
+/// The scheduler itself can be represented purely in Lua. In order to serialize
+/// it, it may be beneficial to convert the scheduler to a Lua representation to
+/// be bundled alongside all other Lua data and then serialized in the context of
+/// the permanents table. Whether it should be legal to serialize a scheduler
+/// with pending non-timed wakeups is an unanswered question. If the answer is "yes"
+/// then it actually does become possible to serialize "synchronously" from Lua
+/// by setting a flag, yielding from the requesting thread, breaking from the
+/// scheduler, and then immediately serializing the resulting state, with the
+/// requesting thread given a special wakeup priority.
 #[derive(Debug)]
 pub struct Scheduler {
     /// Priority queue of scheduled threads, ordered by wakeup.
@@ -489,6 +583,7 @@ impl Scheduler {
                 let thread = lua.registry_value::<LuaThread>(key)?;
 
                 let resumed = match &sleeping {
+                    Wakeup::Immediate(..) => thread.resume::<_, LuaMultiValue>(()),
                     Wakeup::Timed { scheduled_for, .. } => {
                         thread.resume::<_, LuaMultiValue>(*scheduled_for)
                     }
