@@ -312,11 +312,12 @@ impl Space {
     }
 
     pub fn save<W: Write>(&self, writer: W) -> Result<()> {
-        todo!()
+        self.lua.context(|lua| persist::persist(lua, self, writer))
     }
 
     pub fn load<R: Read>(&self, reader: R) -> Result<()> {
-        todo!()
+        self.lua
+            .context(|lua| persist::unpersist(lua, self, reader))
     }
 }
 

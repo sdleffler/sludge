@@ -557,7 +557,7 @@ impl LuaUserData for EntityTableAccessor {
     }
 }
 
-impl LuaComponentInterface for EntityTableAccessor {
+impl LuaComponentInterface for EntityTable {
     fn accessor<'lua>(lua: LuaContext<'lua>, entity: Entity) -> LuaResult<LuaValue<'lua>> {
         EntityTableAccessor(entity).to_lua(lua)
     }
@@ -567,10 +567,15 @@ impl LuaComponentInterface for EntityTableAccessor {
         args: LuaValue<'lua>,
         builder: &mut EntityBuilder,
     ) -> LuaResult<()> {
-        let key = lua.create_registry_value(args)?;
+        let table = LuaTable::from_lua(args, lua)?;
+        let key = lua.create_registry_value(table)?;
         builder.add(EntityTable { key });
         Ok(())
     }
+}
+
+inventory::submit! {
+    LuaComponent::new::<EntityTable>("Table")
 }
 
 pub fn spawn<'lua>(lua: LuaContext<'lua>, table: LuaTable<'lua>) -> LuaResult<LuaEntity> {
