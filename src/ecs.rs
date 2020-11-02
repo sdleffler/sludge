@@ -509,6 +509,18 @@ impl World {
         self.ecs.remove_one(entity)
     }
 
+    pub fn clear(&mut self) {
+        for (id, e) in self.ecs.iter() {
+            for typeid in e.component_types() {
+                if let Some(channel) = self.channels.get_mut(&typeid) {
+                    channel.emit_removed(id);
+                }
+            }
+        }
+
+        self.ecs.clear();
+    }
+
     pub unsafe fn resolve_unknown_gen(&self, id: u32) -> Option<Entity> {
         self.ecs.resolve_unknown_gen(id)
     }
