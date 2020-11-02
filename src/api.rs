@@ -1,6 +1,7 @@
 use crate::{
     ecs::{Component, Entity, EntityBuilder, World},
-    Resources, SimpleComponent, SludgeLuaContextExt,
+    filesystem::Filesystem,
+    Resources, SimpleComponent, SludgeLuaContextExt, SludgeResultExt,
 };
 use {
     anyhow::*,
@@ -9,6 +10,7 @@ use {
     rlua::prelude::*,
     std::{
         any::TypeId,
+        io::Read,
         sync::{Arc, Mutex},
     },
 };
@@ -23,6 +25,9 @@ pub const WORLD_TABLE_REGISTRY_KEY: &'static str = "sludge.world_table";
 pub const PERMANENTS_SER_TABLE_REGISTRY_KEY: &'static str = "sludge.permanents_ser";
 pub const PERMANENTS_DE_TABLE_REGISTRY_KEY: &'static str = "sludge.permanents_de";
 pub const PLAYBACK_THUNK_REGISTRY_KEY: &'static str = "sludge.playback_thunk";
+pub const LOADED_MODULES_REGISTRY_KEY: &'static str = "sludge.loaded_modules";
+pub const PACKAGE_PATH_REGISTRY_KEY: &'static str = "sludge.package_path";
+pub const DEFAULT_PACKAGE_PATH: &'static str = "/?.lua";
 
 pub struct EntityUserDataRegistry {
     archetypes: Mutex<HashMap<Vec<TypeId>, Vec<(&'static str, LuaComponent)>>>,
@@ -654,6 +659,60 @@ inventory::submit! {
     })
 }
 
+/// Lua-exposed function for loading a module from sludge's `Filesystem`.
+///
+/// Similar to Lua's built-in `require`, this will search along paths found in
+/// `sludge.package.path`, which is expected to be a colon-separated list of
+/// paths to search, where any `?` characters found are replaced by the module
+/// path being searched for. The default value of `sludge.package.path` is "/?.lua",
+/// which will simply search for any Lua files found in the VFS.
+///
+/// The limitations of opening files through this `require` are the same as opening
+/// any file through the `Filesystem`.
+pub fn require<'lua>(lua: LuaContext<'lua>, module: String) -> LuaResult<LuaValue> {
+    let loaded_modules = lua.named_registry_value::<_, LuaTable>(LOADED_MODULES_REGISTRY_KEY)?;
+    if let Some(module) = loaded_modules.get::<_, Option<LuaValue>>(module.as_str())? {
+        Ok(module)
+    } else {
+        let resources = lua.resources();
+        let mut fs = resources.fetch_mut::<Filesystem>();
+        let package_path = lua.named_registry_value::<_, LuaString>(PACKAGE_PATH_REGISTRY_KEY)?;
+        let segments = package_path.to_str()?.split(":");
+
+        for segment in segments {
+            let path = segment.replace('?', &module);
+            let mut file = match fs.open(&path) {
+                Ok(file) => file,
+                Err(_) => continue,
+            };
+            let mut buf = String::new();
+            file.read_to_string(&mut buf)
+                .log_error_err(module_path!())
+                .to_lua_err()?;
+            let loaded = lua.load(&buf).into_function()?.call::<_, LuaValue>(())?;
+            loaded_modules.set(path.as_str(), loaded.clone())?;
+            return Ok(loaded);
+        }
+
+        // FIXME: better error reporting here; collect errors from individual module attempts
+        // and log them?
+        Err(anyhow!("module not found!")).to_lua_err()
+    }
+}
+
+inventory::submit! {
+    Module::parse("sludge.package", |lua| {
+        let table = lua.create_table()?;
+        table.set("path", DEFAULT_PACKAGE_PATH)?;
+
+        let req_fn = lua.create_function(require)?;
+        table.set("require", req_fn.clone())?;
+        lua.globals().set("require", req_fn)?;
+
+        Ok(LuaValue::Table(table))
+    })
+}
+
 pub trait SludgeApiLuaContextExt<'lua> {
     fn register_permanents(&self, key: &str, value: impl ToLua<'lua>) -> LuaResult<()>;
 }
@@ -669,14 +728,6 @@ impl<'lua> SludgeApiLuaContextExt<'lua> for LuaContext<'lua> {
         if ser_table.contains_key(value.clone())? {
             return Ok(());
         }
-
-        // let converted = self.load("return tostring(...)").into_function()?;
-        // let strung = converted.call::<_, LuaString>(value.clone())?;
-        // eprintln!(
-        //     "registering permanent: {} = {:?}",
-        //     key,
-        //     CStr::from_bytes_with_nul(strung.as_bytes_with_nul())
-        // );
 
         ser_table.set(value.clone(), key)?;
         de_table.set(key, value.clone())?;
@@ -703,9 +754,16 @@ impl<'lua> SludgeApiLuaContextExt<'lua> for LuaContext<'lua> {
 }
 
 pub fn load<'lua>(lua: LuaContext<'lua>) -> Result<()> {
-    ["print", "dofile", "load", "loadstring", "loadfile"]
-        .iter()
-        .try_for_each(|&s| lua.globals().set(s, LuaValue::Nil))?;
+    [
+        "dofile",
+        "load",
+        "loadfile",
+        "loadstring",
+        "print",
+        "require",
+    ]
+    .iter()
+    .try_for_each(|&s| lua.globals().set(s, LuaValue::Nil))?;
 
     lua.set_named_registry_value(PERMANENTS_SER_TABLE_REGISTRY_KEY, lua.create_table()?)?;
     lua.set_named_registry_value(PERMANENTS_DE_TABLE_REGISTRY_KEY, lua.create_table()?)?;
