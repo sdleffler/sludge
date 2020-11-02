@@ -25,8 +25,7 @@ pub const WORLD_TABLE_REGISTRY_KEY: &'static str = "sludge.world_table";
 pub const PERMANENTS_SER_TABLE_REGISTRY_KEY: &'static str = "sludge.permanents_ser";
 pub const PERMANENTS_DE_TABLE_REGISTRY_KEY: &'static str = "sludge.permanents_de";
 pub const PLAYBACK_THUNK_REGISTRY_KEY: &'static str = "sludge.playback_thunk";
-pub const LOADED_MODULES_REGISTRY_KEY: &'static str = "sludge.loaded_modules";
-pub const PACKAGE_PATH_REGISTRY_KEY: &'static str = "sludge.package_path";
+pub const PACKAGE_REGISTRY_KEY: &'static str = "sludge.package";
 pub const DEFAULT_PACKAGE_PATH: &'static str = "/?.lua";
 
 pub struct EntityUserDataRegistry {
@@ -670,13 +669,14 @@ inventory::submit! {
 /// The limitations of opening files through this `require` are the same as opening
 /// any file through the `Filesystem`.
 pub fn require<'lua>(lua: LuaContext<'lua>, module: String) -> LuaResult<LuaValue> {
-    let loaded_modules = lua.named_registry_value::<_, LuaTable>(LOADED_MODULES_REGISTRY_KEY)?;
+    let package = lua.named_registry_value::<_, LuaTable>(PACKAGE_REGISTRY_KEY)?;
+    let loaded_modules = package.get::<_, LuaTable>("modules")?;
     if let Some(module) = loaded_modules.get::<_, Option<LuaValue>>(module.as_str())? {
         Ok(module)
     } else {
         let resources = lua.resources();
         let mut fs = resources.fetch_mut::<Filesystem>();
-        let package_path = lua.named_registry_value::<_, LuaString>(PACKAGE_PATH_REGISTRY_KEY)?;
+        let package_path = package.get::<_, LuaString>("path")?;
         let segments = package_path.to_str()?.split(":");
 
         for segment in segments {
@@ -689,7 +689,11 @@ pub fn require<'lua>(lua: LuaContext<'lua>, module: String) -> LuaResult<LuaValu
             file.read_to_string(&mut buf)
                 .log_error_err(module_path!())
                 .to_lua_err()?;
-            let loaded = lua.load(&buf).into_function()?.call::<_, LuaValue>(())?;
+            let loaded = lua
+                .load(&buf)
+                .set_name(&module)?
+                .into_function()?
+                .call::<_, LuaValue>(())?;
             loaded_modules.set(path.as_str(), loaded.clone())?;
             return Ok(loaded);
         }
@@ -708,6 +712,11 @@ inventory::submit! {
         let req_fn = lua.create_function(require)?;
         table.set("require", req_fn.clone())?;
         lua.globals().set("require", req_fn)?;
+
+        let modules = lua.create_table()?;
+        table.set("modules", modules.clone())?;
+
+        lua.set_named_registry_value(PACKAGE_REGISTRY_KEY, table.clone())?;
 
         Ok(LuaValue::Table(table))
     })
