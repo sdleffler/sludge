@@ -50,12 +50,6 @@ pub mod timer;
 pub mod transform;
 pub mod vfs;
 
-pub use anyhow;
-pub use nalgebra;
-pub use ncollide2d;
-pub use rlua;
-pub use serde;
-
 pub mod prelude {
     pub use anyhow::*;
     pub use inventory;
@@ -72,9 +66,8 @@ pub mod prelude {
     pub use sludge_macros::*;
 }
 
-pub use inventory;
-pub use rlua_serde;
-pub use sludge_macros::*;
+#[doc(hidden)]
+pub use ::{anyhow, inventory, nalgebra, ncollide2d, rlua, rlua_serde, serde, sludge_macros::*};
 
 #[doc(hidden)]
 pub mod sludge {
