@@ -5,11 +5,10 @@ use crate::{
 use {
     anyhow::*,
     derivative::*,
-    hashbrown::{HashMap, HashSet},
+    hashbrown::HashMap,
     rlua::prelude::*,
     std::{
         any::TypeId,
-        ffi::CStr,
         sync::{Arc, Mutex},
     },
 };
@@ -552,7 +551,14 @@ impl LuaUserData for EntityTableAccessor {
             let resources = lua.resources();
             let world = resources.fetch::<World>();
             let et = world.get::<EntityTable>(this.0).to_lua_err()?;
-            lua.registry_value::<LuaValue<'lua>>(&et.key)
+            lua.registry_value::<LuaValue>(&et.key)
+        });
+
+        methods.add_method("to_table", |lua, this, ()| {
+            let resources = lua.resources();
+            let world = resources.fetch::<World>();
+            let et = world.get::<EntityTable>(this.0).to_lua_err()?;
+            lua.registry_value::<LuaTable>(&et.key)
         });
     }
 }
