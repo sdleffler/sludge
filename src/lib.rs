@@ -54,7 +54,7 @@ pub mod prelude {
     pub use rlua::prelude::*;
 
     pub use crate::{
-        api::{LuaEntity, StaticTemplate, Template},
+        api::LuaEntity,
         ecs::*,
         math::*,
         resources::{OwnedResources, Resources, SharedResources, UnifiedResources},
@@ -80,12 +80,7 @@ pub mod sludge {
 #[doc(hidden)]
 pub use crate::sludge::*;
 
-use crate::{
-    api::{EntityUserDataRegistry, Registry},
-    dispatcher::Dispatcher,
-    ecs::World,
-    resources::*,
-};
+use crate::{api::EntityUserDataRegistry, dispatcher::Dispatcher, ecs::World, resources::*};
 
 pub trait SludgeResultExt: Sized {
     type Ok;
@@ -189,7 +184,6 @@ impl Space {
         let (scheduler, queue_handle) = Scheduler::new();
         local.insert(scheduler);
         local.insert(queue_handle);
-        local.insert(Registry::new()?);
         local.insert(EntityUserDataRegistry::new());
 
         let local = SharedResources::from(local);
