@@ -95,12 +95,7 @@ impl Drop for OwnedBuffer {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
-pub enum BufferType {
-    VertexBuffer,
-    IndexBuffer,
-}
-
+/// A type that wraps the OwnedBuffer type in an Arc
 #[derive(Debug, Clone)]
 pub struct Buffer {
     pub shared: Arc<OwnedBuffer>,
@@ -122,6 +117,7 @@ impl From<mq::Buffer> for Buffer {
     }
 }
 
+/// A wrapper for the mq::Texture type
 #[derive(Debug)]
 pub struct OwnedTexture {
     pub texture: mq::Texture,
@@ -171,6 +167,7 @@ impl Drop for OwnedTexture {
     }
 }
 
+/// A type that wraps the OwnedTexture type in an Arc
 #[derive(Debug, Clone)]
 pub struct Texture {
     pub shared: Arc<OwnedTexture>,
@@ -233,11 +230,13 @@ impl Drawable for Texture {
     }
 }
 
+/// A type wrapper for mq::Pipeline
 #[derive(Debug, Clone)]
 pub struct Pipeline {
     pub mq: mq::Pipeline,
 }
 
+/// I'm not sure why this is wrapped as an Arc
 #[derive(Debug, Clone)]
 pub struct RenderPass {
     pub shared: Arc<mq::RenderPass>,
@@ -273,6 +272,7 @@ impl RenderPass {
     }
 }
 
+/// A type that closely mirrors the mq::PassAction type
 #[derive(Debug, Copy, Clone)]
 pub enum PassAction {
     Nothing,
@@ -554,6 +554,7 @@ impl From<LinearColor> for [f32; 4] {
     }
 }
 
+/// A thin wrapper over the enum mq::Equation enum
 #[derive(Debug, Clone, Copy)]
 pub enum BlendEquation {
     Add,
@@ -571,6 +572,7 @@ impl From<BlendEquation> for mq::Equation {
     }
 }
 
+/// Defines a thin wrapper over the MqBf enum
 #[derive(Debug, Clone, Copy)]
 pub enum BlendFactor {
     Zero,
@@ -760,6 +762,8 @@ impl TransformStack {
     }
 }
 
+/// The main graphics struct that combines a bunch of mq types and the
+/// model view matrix to create a basic window that can be drawn into
 #[derive(Derivative)]
 #[derivative(Debug)]
 pub struct Graphics {
@@ -1197,6 +1201,7 @@ impl MeshBuilder {
     }
 }
 
+/// A type used to store additional basic parameters for types that need it
 #[derive(Debug, Copy, Clone)]
 pub struct InstanceParam {
     pub src: Box2<f32>,
@@ -1307,6 +1312,7 @@ fn quad_indices() -> [u16; 6] {
     [0, 1, 2, 0, 2, 3]
 }
 
+/// A wrapper over the Index type used specifically for Sprites
 #[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub struct SpriteId(Index);
 
@@ -1315,8 +1321,10 @@ impl<'a> SmartComponent<ScContext<'a>> for SpriteId {}
 #[derive(Debug)]
 struct SpriteBatchInner {
     instances: Vec<InstanceProperties>,
+    /// Capacity it used to store the length of the buffers inside of mq::Bindings
     capacity: usize,
     bindings: mq::Bindings,
+    /// A bounding box that encaspulates all of the sprites within the batch
     aabb: Option<Box2<f32>>,
 }
 
