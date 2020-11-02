@@ -428,12 +428,6 @@ pub fn spawn<'lua>(lua: LuaContext<'lua>, table: LuaTable<'lua>) -> LuaResult<Lu
     Ok(LuaEntity::from(world.spawn(builder.build())))
 }
 
-inventory::submit! {
-    Module::parse("sludge.spawn", |lua| {
-        Ok(LuaValue::Function(lua.create_function(spawn)?))
-    })
-}
-
 pub fn insert<'lua>(
     lua: LuaContext<'lua>,
     (entity, table): (LuaEntity, LuaTable<'lua>),
@@ -458,12 +452,6 @@ pub fn insert<'lua>(
     Ok(())
 }
 
-inventory::submit! {
-    Module::parse("sludge.insert", |lua| {
-        Ok(LuaValue::Function(lua.create_function(insert)?))
-    })
-}
-
 pub fn despawn<'lua>(lua: LuaContext<'lua>, entity: LuaEntity) -> LuaResult<Result<bool, String>> {
     Ok(lua
         .resources()
@@ -473,9 +461,21 @@ pub fn despawn<'lua>(lua: LuaContext<'lua>, entity: LuaEntity) -> LuaResult<Resu
         .map_err(|err| err.to_string()))
 }
 
+pub fn clear<'lua>(lua: LuaContext<'lua>, _: ()) -> LuaResult<()> {
+    lua.resources().fetch_mut::<World>().clear();
+    Ok(())
+}
+
 inventory::submit! {
-    Module::parse("sludge.despawn", |lua| {
-        Ok(LuaValue::Function(lua.create_function(despawn)?))
+    Module::parse("sludge", |lua| {
+        let table = lua.create_table_from(vec![
+            ("spawn", lua.create_function(spawn)?),
+            ("insert", lua.create_function(insert)?),
+            ("despawn", lua.create_function(despawn)?),
+            ("clear", lua.create_function(clear)?),
+        ])?;
+
+        Ok(LuaValue::Table(table))
     })
 }
 
@@ -607,9 +607,16 @@ pub fn load<'lua>(lua: LuaContext<'lua>) -> Result<()> {
         }
     }
 
-    for module in inventory::iter::<Module> {
+    // Sort the modules by their paths in lexicographical order, so that parent modules
+    // are always loaded before their children and we don't end up with a parent thinking
+    // it's a duplicate because loading the child caused the parent's table to be created.
+    // Also avoids overwriting loaded children.
+    let mut modules = inventory::iter::<Module>.into_iter().collect::<Vec<_>>();
+    modules.sort_unstable_by_key(|m| &m.path);
+
+    for module in modules.iter() {
         let mut t = lua.globals();
-        let (&head, rest) = module
+        let (&last, rest) = module
             .path
             .split_last()
             .ok_or_else(|| anyhow!("empty module path!"))?;
@@ -633,13 +640,13 @@ pub fn load<'lua>(lua: LuaContext<'lua>) -> Result<()> {
         }
 
         ensure!(
-            !t.contains_key(head)?,
+            !t.contains_key(last)?,
             "name collision while loading modules: two modules have the same path `{}`",
             module.path.join(".")
         );
         let table = (module.load)(lua)?;
         lua.register_permanents(&module.path.join("."), table.clone())?;
-        t.set(head, table)?;
+        t.set(last, table)?;
     }
 
     lua.set_named_registry_value(
