@@ -23,8 +23,6 @@ use {
 
 pub type Atom = DefaultAtom;
 
-mod utils;
-
 pub mod api;
 pub mod assets;
 pub mod chunked_grid;
