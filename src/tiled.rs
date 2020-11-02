@@ -2,17 +2,22 @@ use {
     anyhow::*,
     hashbrown::HashMap,
     nalgebra as na,
+    rlua::prelude::*,
     serde::{de::DeserializeOwned, Deserialize, Serialize},
-    std::path::{Path, PathBuf},
+    std::{
+        marker::PhantomData,
+        path::{Path, PathBuf},
+    },
 };
 
 use crate::{
+    api::LuaComponentInterface,
     assets::{Asset, Cache, Key, Loaded},
     ecs::*,
     filesystem::Filesystem,
     math::*,
     tiled::xml_parser::LayerData,
-    Resources,
+    Resources, SludgeLuaContextExt, SludgeResultExt,
 };
 
 mod xml_parser;
@@ -514,5 +519,36 @@ where
                 Ok(Loaded::with_deps(Self::from_tiled(&path, &tiled)?, deps))
             } //_ => bail!("can only load from path"),
         }
+    }
+}
+
+pub struct TiledMapAccessor<L: LayerProperties, T: TileProperties>(Entity, PhantomData<(L, T)>);
+
+impl<L: LayerProperties, T: TileProperties> LuaUserData for TiledMapAccessor<L, T> {}
+
+impl<L: LayerProperties + DeserializeOwned, T: TileProperties + DeserializeOwned>
+    LuaComponentInterface for TiledMap<L, T>
+{
+    fn accessor<'lua>(lua: LuaContext<'lua>, entity: Entity) -> LuaResult<LuaValue<'lua>> {
+        TiledMapAccessor::<L, T>(entity, PhantomData).to_lua(lua)
+    }
+
+    fn bundler<'lua>(
+        lua: LuaContext<'lua>,
+        args: LuaValue<'lua>,
+        builder: &mut EntityBuilder,
+    ) -> LuaResult<()> {
+        let map_path = String::from_lua(args, lua)?;
+        let resources = lua.resources();
+
+        // FIXME(sleffy): type parameter for determining the cache type to load from.
+        let mut tiled_map = resources
+            .fetch_mut::<crate::assets::DefaultCache>()
+            .get::<TiledMap<L, T>>(&Key::from_path(&map_path))
+            .log_error_err(module_path!())
+            .to_lua_err()?;
+
+        builder.add::<TiledMap<L, T>>(tiled_map.load_cached().clone());
+        Ok(())
     }
 }
