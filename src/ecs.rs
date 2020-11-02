@@ -2,12 +2,10 @@ use {
     anyhow::*,
     hashbrown::HashMap,
     hibitset::*,
-    rlua::prelude::*,
     shrev::{EventChannel, EventIterator},
     std::{
         any::{Any, TypeId},
         fmt,
-        io::Write,
         pin::Pin,
         sync::{Mutex, RwLock, RwLockReadGuard},
     },
