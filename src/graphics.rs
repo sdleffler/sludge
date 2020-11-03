@@ -77,6 +77,9 @@ pub use {
     sorted_layer::{SortedLayer, SortedLayerId},
 };
 
+// FIXME(sleffy): we aren't actually using `OwnedBuffer` and `Buffer` anywhere
+/// An `OwnedBuffer` represents either a VertexBuffer or an IndexBuffer, and
+/// can be used in a binding to a render pipeline
 #[derive(Debug)]
 pub struct OwnedBuffer {
     pub buffer: mq::Buffer,
@@ -88,36 +91,24 @@ impl From<mq::Buffer> for OwnedBuffer {
     }
 }
 
-impl ops::Deref for OwnedBuffer {
-    type Target = mq::Buffer;
-
-    fn deref(&self) -> &Self::Target {
-        &self.buffer
-    }
-}
-
 impl Drop for OwnedBuffer {
     fn drop(&mut self) {
         self.buffer.delete();
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
-pub enum BufferType {
-    VertexBuffer,
-    IndexBuffer,
-}
-
+/// `Buffer` is a convenience type that represents a safe way to create
+/// multiple asynchronous references to an `OwnedBuffer` object
 #[derive(Debug, Clone)]
 pub struct Buffer {
     pub shared: Arc<OwnedBuffer>,
 }
 
 impl ops::Deref for Buffer {
-    type Target = mq::Buffer;
+    type Target = OwnedBuffer;
 
     fn deref(&self) -> &Self::Target {
-        &self.shared.buffer
+        &*self.shared
     }
 }
 
@@ -129,28 +120,26 @@ impl From<mq::Buffer> for Buffer {
     }
 }
 
+/// An `OwnedTexture` contains one or more images used to apply detail to an
+/// object (typically it contains a 2D image)
 #[derive(Debug)]
 pub struct OwnedTexture {
     pub texture: mq::Texture,
-    pub width: u32,
-    pub height: u32,
 }
 
 impl OwnedTexture {
-    pub fn from_parts(texture: mq::Texture, width: u32, height: u32) -> Self {
+    pub fn from_inner(texture: mq::Texture) -> Self {
         Self {
             texture,
-            width,
-            height,
         }
     }
-}
 
-impl ops::Deref for OwnedTexture {
-    type Target = mq::Texture;
+    pub fn width(&self) -> u32 {
+        self.texture.width
+    }
 
-    fn deref(&self) -> &Self::Target {
-        &self.texture
+    pub fn height(&self) -> u32 {
+        self.texture.height
     }
 }
 
@@ -159,7 +148,7 @@ impl Drawable for OwnedTexture {
         ctx.quad_bindings.vertex_buffers[1].update(
             &mut ctx.mq,
             &[param
-                .scale2(Vector2::new(self.width as f32, self.height as f32))
+                .scale2(Vector2::new(self.width() as f32, self.height() as f32))
                 .scale2(param.src.extents())
                 .to_instance_properties()],
         );
@@ -171,7 +160,7 @@ impl Drawable for OwnedTexture {
     fn aabb(&self) -> Box2<f32> {
         Box2::from_corners(
             Point2::origin(),
-            Point2::new(self.width as f32, self.height as f32),
+            Point2::new(self.width() as f32, self.height() as f32),
         )
     }
 }
@@ -182,6 +171,8 @@ impl Drop for OwnedTexture {
     }
 }
 
+/// A `Texture` is a safe type used to obtain asynchronous references to an
+/// `OwnedTexture`
 #[derive(Debug, Clone)]
 pub struct Texture {
     pub shared: Arc<OwnedTexture>,
@@ -196,10 +187,10 @@ impl From<OwnedTexture> for Texture {
 }
 
 impl ops::Deref for Texture {
-    type Target = mq::Texture;
+    type Target = OwnedTexture;
 
     fn deref(&self) -> &Self::Target {
-        &self.shared.texture
+        &*self.shared
     }
 }
 
@@ -208,7 +199,7 @@ impl Texture {
     pub fn from_rgba8(ctx: &mut Graphics, width: u16, height: u16, bytes: &[u8]) -> Self {
         let tex = mq::Texture::from_rgba8(&mut ctx.mq, width, height, bytes);
         tex.set_filter(&mut ctx.mq, mq::FilterMode::Nearest);
-        Self::from_parts(tex, width as u32, height as u32)
+        Self::from_inner(tex)
     }
 
     /// Parse a buffer containing the raw contents of an image file such as a PNG, GIF, etc.
@@ -229,8 +220,8 @@ impl Texture {
         Self::from_memory(ctx, &buf)
     }
 
-    pub fn from_parts(texture: mq::Texture, width: u32, height: u32) -> Self {
-        Self::from(OwnedTexture::from_parts(texture, width, height))
+    pub fn from_inner(texture: mq::Texture) -> Self {
+        Self::from(OwnedTexture::from_inner(texture))
     }
 }
 
@@ -244,11 +235,13 @@ impl Drawable for Texture {
     }
 }
 
+/// `Pipeline` represents an identifier for the current graphics pipeline
 #[derive(Debug, Clone)]
 pub struct Pipeline {
     pub mq: mq::Pipeline,
 }
 
+/// I'm not sure why this is wrapped as an Arc
 #[derive(Debug, Clone)]
 pub struct RenderPass {
     pub shared: Arc<mq::RenderPass>,
@@ -275,7 +268,7 @@ impl RenderPass {
         depth_img: impl Into<Option<Texture>>,
     ) -> Self {
         let render_pass =
-            mq::RenderPass::new(&mut ctx.mq, *color_img, depth_img.into().map(|di| *di));
+            mq::RenderPass::new(&mut ctx.mq, color_img.texture, depth_img.into().map(|di| di.texture));
         let this = Self {
             shared: Arc::new(render_pass),
         };
@@ -284,6 +277,9 @@ impl RenderPass {
     }
 }
 
+/// A type that represents the different types of actions one can apply
+/// to a frame buffer at the start of a render pass. Mainly used to initialize
+/// a framebuffer to some specific state
 #[derive(Debug, Copy, Clone)]
 pub enum PassAction {
     Nothing,
@@ -565,6 +561,8 @@ impl From<LinearColor> for [f32; 4] {
     }
 }
 
+/// `BlendEquation` represents the different types of equations that can be
+/// used to blend colors
 #[derive(Debug, Clone, Copy)]
 pub enum BlendEquation {
     Add,
@@ -582,6 +580,8 @@ impl From<BlendEquation> for mq::Equation {
     }
 }
 
+/// `BlendFactor` represents the different factors that can be used when
+/// blending two colors
 #[derive(Debug, Clone, Copy)]
 pub enum BlendFactor {
     Zero,
@@ -620,6 +620,8 @@ impl From<BlendFactor> for mq::BlendFactor {
     }
 }
 
+/// `BlendMode` represents a struct that encapsulates all of the different
+/// fields required to blend two colors
 #[derive(Debug, Copy, Clone)]
 pub struct BlendMode {
     eq: BlendEquation,
@@ -771,6 +773,8 @@ impl TransformStack {
     }
 }
 
+/// The main graphics struct combines a bunch of mq types and the
+/// model view matrix to represent a basic context that can be drawn into
 #[derive(Derivative)]
 #[derivative(Debug)]
 pub struct Graphics {
@@ -819,10 +823,8 @@ impl Graphics {
             },
         );
 
-        let null_texture = Texture::from_parts(
+        let null_texture = Texture::from_inner(
             mq::Texture::from_rgba8(&mut mq, 1, 1, &[255, 255, 255, 255]),
-            1,
-            1,
         );
 
         let quad_vertices =
@@ -839,7 +841,7 @@ impl Graphics {
         let quad_bindings = mq::Bindings {
             vertex_buffers: vec![quad_vertices, instances],
             index_buffer: quad_indices,
-            images: vec![*null_texture],
+            images: vec![null_texture.texture],
         };
 
         Ok(Self {
@@ -1202,7 +1204,7 @@ impl MeshBuilder {
             bindings: mq::Bindings {
                 vertex_buffers: vec![vertex_buffer, instance],
                 index_buffer,
-                images: vec![*self.texture],
+                images: vec![self.texture.texture],
             },
             len: self.buffer.indices.len() as i32,
             aabb,
@@ -1210,6 +1212,7 @@ impl MeshBuilder {
     }
 }
 
+/// A type used to store additional basic parameters for types that need it
 #[derive(Debug, Copy, Clone)]
 pub struct InstanceParam {
     pub src: Box2<f32>,
@@ -1320,6 +1323,7 @@ fn quad_indices() -> [u16; 6] {
     [0, 1, 2, 0, 2, 3]
 }
 
+/// Represents the index of a `Sprite` within a `SpriteBatch`
 #[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub struct SpriteId(Index);
 
@@ -1328,8 +1332,12 @@ impl<'a> SmartComponent<ScContext<'a>> for SpriteId {}
 #[derive(Debug)]
 struct SpriteBatchInner {
     instances: Vec<InstanceProperties>,
+    /// Capacity is used to store the length of the buffers inside of mq::Bindings
     capacity: usize,
     bindings: mq::Bindings,
+    /// A cached bounding box that encaspulates all of the sprites within the
+    /// batch. The bounding box is recalculated if any of the instance params
+    /// of any of the sprites within the batch are changed
     aabb: Option<Box2<f32>>,
 }
 
@@ -1375,7 +1383,7 @@ impl SpriteBatch {
         let bindings = mq::Bindings {
             vertex_buffers: vec![ctx.quad_bindings.vertex_buffers[0], instances],
             index_buffer: ctx.quad_bindings.index_buffer,
-            images: vec![**texture.load_cached()],
+            images: vec![texture.load_cached().texture],
         };
 
         Self {
@@ -1436,7 +1444,7 @@ impl SpriteBatch {
             .extend(self.sprites.iter().map(|(_, param)| {
                 param
                     .scale2(param.src.extents())
-                    .scale2(Vector2::new(texture.width as f32, texture.height as f32))
+                    .scale2(Vector2::new(texture.width() as f32, texture.height() as f32))
                     .to_instance_properties()
             }));
 
@@ -1455,7 +1463,7 @@ impl SpriteBatch {
         }
 
         inner.bindings.vertex_buffers[1].update(&mut ctx.mq, &inner.instances);
-        inner.bindings.images[0] = **texture;
+        inner.bindings.images[0] = texture.texture;
 
         self.dirty.store(false, atomic::Ordering::Relaxed);
     }
@@ -1514,7 +1522,7 @@ impl AsRef<RenderPass> for Canvas {
 
 impl Canvas {
     pub fn new(ctx: &mut Graphics, width: u32, height: u32) -> Self {
-        let color_img = Texture::from_parts(
+        let color_img = Texture::from_inner(
             mq::Texture::new_render_texture(
                 &mut ctx.mq,
                 mq::TextureParams {
@@ -1525,11 +1533,9 @@ impl Canvas {
                     ..Default::default()
                 },
             ),
-            width,
-            height,
         );
 
-        let depth_img = Texture::from_parts(
+        let depth_img = Texture::from_inner(
             mq::Texture::new_render_texture(
                 &mut ctx.mq,
                 mq::TextureParams {
@@ -1540,8 +1546,6 @@ impl Canvas {
                     ..Default::default()
                 },
             ),
-            width,
-            height,
         );
 
         let render_pass = RenderPass::new(ctx, color_img.clone(), depth_img.clone());
@@ -1563,8 +1567,8 @@ impl Drawable for Canvas {
         Box2::from_corners(
             Point2::new(0., 0.),
             Point2::new(
-                self.color_buffer.width as f32,
-                self.color_buffer.height as f32,
+                self.color_buffer.width() as f32,
+                self.color_buffer.height() as f32,
             ),
         )
     }
