@@ -37,6 +37,7 @@ pub mod graphics;
 pub mod hierarchy;
 pub mod input;
 pub mod math;
+pub mod path_clean;
 pub mod persist;
 pub mod resources;
 pub mod scene;

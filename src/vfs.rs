@@ -49,6 +49,8 @@ use {
     zip,
 };
 
+use crate::path_clean::PathClean;
+
 fn convenient_path_to_str(path: &path::Path) -> Result<&str> {
     path.to_str()
         .ok_or_else(|| anyhow!("Invalid path format for resource: {:?}", path))
@@ -219,9 +221,8 @@ fn sanitize_path(path: &path::Path) -> Option<PathBuf> {
     // doesn't need this backslash-to-forward-slash hack. The hack is here because
     // `path_clean` is a port of a routine for UNIX systems, and doesn't know about
     // backslashes.
-    let replaced = path.to_str()?.replace('\\', "/");
-    let cleaned = path_clean::clean(&replaced);
-    let mut c = Path::new(&cleaned).components();
+    let cleaned = path.clean();
+    let mut c = cleaned.components();
     match c.next() {
         Some(path::Component::RootDir) => (),
         _ => return None,
@@ -827,6 +828,9 @@ mod tests {
         let p = path::Path::new("/");
         assert!(sanitize_path(p).is_some());
 
+        let p = path::Path::new("/foo/../bop");
+        assert!(sanitize_path(p).is_some());
+
         // Invalid paths
         let p = path::Path::new("../foo");
         assert!(sanitize_path(p).is_none());
@@ -836,9 +840,6 @@ mod tests {
 
         let p = path::Path::new("/foo/../../");
         assert!(sanitize_path(p).is_none());
-
-        let p = path::Path::new("/foo/../bop");
-        assert!(sanitize_path(p).is_some());
 
         let p = path::Path::new("/../bar");
         assert!(sanitize_path(p).is_none());
