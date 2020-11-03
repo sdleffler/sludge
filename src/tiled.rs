@@ -46,27 +46,6 @@ fn deserialize_properties<T: DeserializeOwned>(properties: &xml_parser::Properti
     ron::Value::Map(ron_map).into_rust().map_err(Error::from)
 }
 
-pub trait TileProperties: Send + Sync + Clone + 'static {
-    fn is_solid(&self) -> bool {
-        false
-    }
-}
-
-impl TileProperties for ron::Value {
-    fn is_solid(&self) -> bool {
-        #[derive(Deserialize)]
-        struct Extract {
-            #[serde(default)]
-            solid: bool,
-        }
-
-        self.clone()
-            .into_rust::<Extract>()
-            .map(|ext| ext.solid)
-            .unwrap_or_default()
-    }
-}
-
 pub trait LayerProperties: Send + Sync + Clone + 'static {
     fn is_solid(&self) -> bool {
         false
@@ -105,6 +84,31 @@ impl LayerProperties for ron::Value {
     }
 }
 
+pub trait TileProperties: Send + Sync + Clone + 'static {
+    fn is_solid(&self) -> bool {
+        false
+    }
+}
+
+impl TileProperties for ron::Value {
+    fn is_solid(&self) -> bool {
+        #[derive(Deserialize)]
+        struct Extract {
+            #[serde(default)]
+            solid: bool,
+        }
+
+        self.clone()
+            .into_rust::<Extract>()
+            .map(|ext| ext.solid)
+            .unwrap_or_default()
+    }
+}
+
+pub trait ObjectProperties: Send + Sync + Clone + 'static {}
+
+impl ObjectProperties for ron::Value {}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Frame {
     pub local_id: u32,
@@ -113,7 +117,7 @@ pub struct Frame {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(bound(deserialize = "TileProps: DeserializeOwned"))]
-pub struct TileData<TileProps = ron::Value> {
+pub struct TileData<TileProps> {
     pub tile_type: Option<String>,
     pub local_id: u32,
     pub frames: Option<Vec<Frame>>,
@@ -124,7 +128,7 @@ pub struct TileData<TileProps = ron::Value> {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(bound(deserialize = "TileProps: DeserializeOwned"))]
-pub struct TileSheet<TileProps = ron::Value> {
+pub struct TileSheet<TileProps> {
     name: String,
 
     first_global_id: u32,
@@ -310,7 +314,7 @@ impl Chunk {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(bound(deserialize = "LayerProps: DeserializeOwned"))]
-pub struct TileLayer<LayerProps = ron::Value> {
+pub struct TileLayer<LayerProps> {
     pub name: Option<String>,
     pub opacity: f32,
     pub visible: bool,
@@ -318,7 +322,9 @@ pub struct TileLayer<LayerProps = ron::Value> {
     pub properties: LayerProps,
 }
 
-impl Default for TileLayer {
+pub type DefaultTileLayer = TileLayer<ron::Value>;
+
+impl Default for DefaultTileLayer {
     fn default() -> Self {
         Self {
             name: None,
@@ -338,7 +344,7 @@ impl<L> TileLayer<L> {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(bound(deserialize = "LayerProps: DeserializeOwned"))]
-pub struct ImageLayer<LayerProps = ron::Value> {
+pub struct ImageLayer<LayerProps> {
     pub name: Option<String>,
     pub opacity: f32,
     pub visible: bool,
@@ -351,15 +357,52 @@ pub struct ImageLayer<LayerProps = ron::Value> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(bound(deserialize = "LayerProps: DeserializeOwned"))]
-pub enum Layer<LayerProps = ron::Value> {
-    TileLayer(TileLayer<LayerProps>),
-    ImageLayer(ImageLayer<LayerProps>),
+pub enum ObjectShape {
+    Rect { width: f32, height: f32 },
+    Polygon { points: Vec<(f32, f32)> },
+    Point(f32, f32),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(bound(deserialize = "LayerProps: DeserializeOwned, TileProps: DeserializeOwned"))]
-pub struct TiledMap<LayerProps = ron::Value, TileProps = ron::Value> {
+#[serde(bound(deserialize = "ObjectProps: DeserializeOwned"))]
+pub struct Object<ObjectProps> {
+    pub id: u32,
+    pub gid: u32,
+    pub name: String,
+    pub object_type: String,
+    pub width: f32,
+    pub height: f32,
+    pub x: f32,
+    pub y: f32,
+    pub rot: f32,
+    pub visible: bool,
+    pub shape: ObjectShape,
+    pub properties: ObjectProps,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound(deserialize = "LayerProps: DeserializeOwned, ObjectProps: DeserializeOwned"))]
+pub struct ObjectLayer<LayerProps, ObjectProps> {
+    pub name: String,
+    pub opacity: f32,
+    pub visible: bool,
+    pub objects: Vec<Object<ObjectProps>>,
+    pub properties: LayerProps,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound(deserialize = "LayerProps: DeserializeOwned, ObjectProps: DeserializeOwned"))]
+pub enum Layer<LayerProps, ObjectProps> {
+    TileLayer(TileLayer<LayerProps>),
+    ImageLayer(ImageLayer<LayerProps>),
+    ObjectLayer(ObjectLayer<LayerProps, ObjectProps>),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound(
+    deserialize = "LayerProps: DeserializeOwned, TileProps: DeserializeOwned, ObjectProps: DeserializeOwned"
+))]
+pub struct TiledMap<LayerProps, TileProps, ObjectProps> {
     source: PathBuf,
 
     width: u32,
@@ -369,16 +412,20 @@ pub struct TiledMap<LayerProps = ron::Value, TileProps = ron::Value> {
     tile_height: u32,
 
     tile_sheets: Vec<TileSheet<TileProps>>,
-    layers: Vec<Layer<LayerProps>>,
+    layers: Vec<Layer<LayerProps, ObjectProps>>,
 }
 
-impl<'a, L: Component, T: Component> SmartComponent<ScContext<'a>> for TiledMap<L, T> {}
+impl<'a, L: Component, T: Component, O: Component> SmartComponent<ScContext<'a>>
+    for TiledMap<L, T, O>
+{
+}
 
-impl<LayerProps, TileProps> TiledMap<LayerProps, TileProps> {
+impl<LayerProps, TileProps, ObjectProps> TiledMap<LayerProps, TileProps, ObjectProps> {
     pub fn from_tiled(path: &Path, tiled: &xml_parser::Map) -> Result<Self>
     where
         LayerProps: DeserializeOwned,
         TileProps: DeserializeOwned,
+        ObjectProps: DeserializeOwned,
     {
         let tile_sheets = tiled
             .tilesets
@@ -453,6 +500,55 @@ impl<LayerProps, TileProps> TiledMap<LayerProps, TileProps> {
             layers.push((layer.layer_index, image_layer));
         }
 
+        for layer in tiled.object_groups.iter() {
+            let mut objects = Vec::new();
+            for object in layer.objects.iter() {
+                use xml_parser::ObjectShape::*;
+                let shape = match &object.shape {
+                    Rect { width, height } => ObjectShape::Rect {
+                        width: *width,
+                        height: *height,
+                    },
+                    Polygon { points } => ObjectShape::Polygon {
+                        points: points.clone(),
+                    },
+                    Point(x, y) => ObjectShape::Point(*x, *y),
+                    _ => bail!(
+                        "unsupported shape type for object named `{}` (id {})",
+                        object.name,
+                        object.id
+                    ),
+                };
+
+                let object = Object {
+                    id: object.id,
+                    gid: object.gid,
+                    name: object.name.clone(),
+                    object_type: object.obj_type.clone(),
+                    width: object.width,
+                    height: object.height,
+                    x: object.x,
+                    y: object.y,
+                    rot: object.rotation,
+                    visible: object.visible,
+                    shape,
+                    properties: deserialize_properties(&object.properties)?,
+                };
+
+                objects.push(object);
+            }
+
+            let object_layer = Layer::ObjectLayer(ObjectLayer {
+                name: layer.name.clone(),
+                opacity: layer.opacity,
+                visible: layer.visible,
+                objects,
+                properties: deserialize_properties(&layer.properties)?,
+            });
+
+            layers.push((layer.layer_index.unwrap_or(0), object_layer));
+        }
+
         layers.sort_by_key(|&(i, _)| i);
 
         Ok(TiledMap {
@@ -481,7 +577,7 @@ impl<LayerProps, TileProps> TiledMap<LayerProps, TileProps> {
         (self.tile_width, self.tile_height)
     }
 
-    pub fn layers(&self) -> &[Layer<LayerProps>] {
+    pub fn layers(&self) -> &[Layer<LayerProps, ObjectProps>] {
         &self.layers
     }
 
@@ -520,10 +616,11 @@ where
     }
 }
 
-impl<LayerProps, TileProps> Asset for TiledMap<LayerProps, TileProps>
+impl<LayerProps, TileProps, ObjectProps> Asset for TiledMap<LayerProps, TileProps, ObjectProps>
 where
     LayerProps: DeserializeOwned + Send + Sync + 'static,
     TileProps: DeserializeOwned + Send + Sync + 'static,
+    ObjectProps: DeserializeOwned + Send + Sync + 'static,
 {
     fn load<'a, R: Resources<'a>>(
         key: &Key,
@@ -558,8 +655,11 @@ pub struct TiledMapAccessor<L: LayerProperties, T: TileProperties>(Entity, Phant
 
 impl<L: LayerProperties, T: TileProperties> LuaUserData for TiledMapAccessor<L, T> {}
 
-impl<L: LayerProperties + DeserializeOwned, T: TileProperties + DeserializeOwned>
-    LuaComponentInterface for TiledMap<L, T>
+impl<L, T, O> LuaComponentInterface for TiledMap<L, T, O>
+where
+    L: LayerProperties + DeserializeOwned,
+    T: TileProperties + DeserializeOwned,
+    O: ObjectProperties + DeserializeOwned,
 {
     fn accessor<'lua>(lua: LuaContext<'lua>, entity: Entity) -> LuaResult<LuaValue<'lua>> {
         TiledMapAccessor::<L, T>(entity, PhantomData).to_lua(lua)
@@ -576,11 +676,11 @@ impl<L: LayerProperties + DeserializeOwned, T: TileProperties + DeserializeOwned
         // FIXME(sleffy): type parameter for determining the cache type to load from.
         let mut tiled_map = resources
             .fetch_mut::<crate::assets::DefaultCache>()
-            .get::<TiledMap<L, T>>(&Key::from_path(&map_path))
+            .get::<TiledMap<L, T, O>>(&Key::from_path(&map_path))
             .log_error_err(module_path!())
             .to_lua_err()?;
 
-        builder.add::<TiledMap<L, T>>(tiled_map.load_cached().clone());
+        builder.add::<TiledMap<L, T, O>>(tiled_map.load_cached().clone());
         Ok(())
     }
 }
