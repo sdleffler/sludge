@@ -14,12 +14,12 @@ use {
 };
 
 #[derive(Debug)]
-pub struct FetchShared<'a, T: 'static> {
+pub struct Shared<'a, T: 'static> {
     inner: Arc<AtomicRefCell<StoredResource<'a>>>,
     _marker: PhantomData<T>,
 }
 
-impl<'a, T: 'static> Clone for FetchShared<'a, T> {
+impl<'a, T: 'static> Clone for Shared<'a, T> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
@@ -28,7 +28,7 @@ impl<'a, T: 'static> Clone for FetchShared<'a, T> {
     }
 }
 
-impl<'a, T: 'static> FetchShared<'a, T> {
+impl<'a, T: 'static> Shared<'a, T> {
     fn new(inner: Arc<AtomicRefCell<StoredResource<'a>>>) -> Self {
         Self {
             inner,
@@ -317,11 +317,8 @@ impl<'a> OwnedResources<'a> {
         })
     }
 
-    pub fn fetch_shared<T: Any>(&self) -> Option<FetchShared<'a, T>> {
-        self.map
-            .get(&TypeId::of::<T>())
-            .cloned()
-            .map(FetchShared::new)
+    pub fn fetch_shared<T: Any>(&self) -> Option<Shared<'a, T>> {
+        self.map.get(&TypeId::of::<T>()).cloned().map(Shared::new)
     }
 
     pub fn get_mut<T: Any + Send + Sync>(&mut self) -> Option<&mut T> {
@@ -463,7 +460,7 @@ impl<'a> Resources<'a> for SharedResources<'a> {
         })
     }
 
-    fn fetch_shared<T: Any>(&self) -> Option<FetchShared<'a, T>> {
+    fn fetch_shared<T: Any>(&self) -> Option<Shared<'a, T>> {
         self.shared.borrow().fetch_shared::<T>()
     }
 }
@@ -524,7 +521,7 @@ impl<'a> Resources<'a> for UnifiedResources<'a> {
             .or_else(|| self.global.try_fetch_mut::<T>())
     }
 
-    fn fetch_shared<T: Any>(&self) -> Option<FetchShared<'a, T>> {
+    fn fetch_shared<T: Any>(&self) -> Option<Shared<'a, T>> {
         self.local
             .fetch_shared::<T>()
             .or_else(|| self.global.fetch_shared::<T>())
@@ -540,7 +537,7 @@ pub trait Resources<'a> {
     fn fetch_mut<T: Any + Send>(&self) -> SharedFetchMut<'a, '_, T>;
     fn try_fetch<T: Any + Send + Sync>(&self) -> Option<SharedFetch<'a, '_, T>>;
     fn try_fetch_mut<T: Any + Send>(&self) -> Option<SharedFetchMut<'a, '_, T>>;
-    fn fetch_shared<T: Any>(&self) -> Option<FetchShared<'a, T>>;
+    fn fetch_shared<T: Any>(&self) -> Option<Shared<'a, T>>;
 }
 
 #[cfg(test)]

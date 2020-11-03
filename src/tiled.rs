@@ -315,8 +315,6 @@ pub struct TileLayer<LayerProps = ron::Value> {
     pub opacity: f32,
     pub visible: bool,
     pub chunks: HashMap<(i32, i32), Chunk>,
-
-    #[serde(bound(deserialize = "LayerProps: DeserializeOwned"))]
     pub properties: LayerProps,
 }
 
@@ -340,10 +338,23 @@ impl<L> TileLayer<L> {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(bound(deserialize = "LayerProps: DeserializeOwned"))]
-#[non_exhaustive]
+pub struct ImageLayer<LayerProps = ron::Value> {
+    pub name: Option<String>,
+    pub opacity: f32,
+    pub visible: bool,
+    pub offset_x: f32,
+    pub offset_y: f32,
+    pub source: PathBuf,
+    pub image_width: u32,
+    pub image_height: u32,
+    pub properties: LayerProps,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound(deserialize = "LayerProps: DeserializeOwned"))]
 pub enum Layer<LayerProps = ron::Value> {
-    #[serde(bound(deserialize = "LayerProps: DeserializeOwned"))]
     TileLayer(TileLayer<LayerProps>),
+    ImageLayer(ImageLayer<LayerProps>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -375,60 +386,75 @@ impl<LayerProps, TileProps> TiledMap<LayerProps, TileProps> {
             .map(|ts| TileSheet::from_tiled(ts))
             .collect::<Result<_>>()?;
 
-        let mut layers = tiled
-            .layers
-            .iter()
-            .map(|layer| {
-                let mut chunks = HashMap::new();
+        let mut layers = Vec::new();
 
-                match &layer.tiles {
-                    LayerData::Finite(data) => {
+        for layer in tiled.layers.iter() {
+            let mut chunks = HashMap::new();
+
+            match &layer.tiles {
+                LayerData::Finite(data) => {
+                    chunks.insert(
+                        (0, 0),
+                        Chunk {
+                            x: 0,
+                            y: 0,
+                            w: tiled.width,
+                            h: tiled.height,
+                            data: data.iter().flatten().map(|lt| lt.gid).collect(),
+                        },
+                    );
+                }
+                LayerData::Infinite(tiled_chunks) => {
+                    for (&(x, y), tiled_chunk) in tiled_chunks.iter() {
                         chunks.insert(
-                            (0, 0),
+                            (x, y),
                             Chunk {
-                                x: 0,
-                                y: 0,
-                                w: tiled.width,
-                                h: tiled.height,
-                                data: data.iter().flatten().map(|lt| lt.gid).collect(),
+                                x: tiled_chunk.x,
+                                y: tiled_chunk.y,
+                                w: tiled_chunk.width,
+                                h: tiled_chunk.height,
+                                data: tiled_chunk
+                                    .tiles
+                                    .iter()
+                                    .flatten()
+                                    .map(|lt| lt.gid)
+                                    .collect(),
                             },
                         );
                     }
-                    LayerData::Infinite(tiled_chunks) => {
-                        for (&(x, y), tiled_chunk) in tiled_chunks.iter() {
-                            chunks.insert(
-                                (x, y),
-                                Chunk {
-                                    x: tiled_chunk.x,
-                                    y: tiled_chunk.y,
-                                    w: tiled_chunk.width,
-                                    h: tiled_chunk.height,
-                                    data: tiled_chunk
-                                        .tiles
-                                        .iter()
-                                        .flatten()
-                                        .map(|lt| lt.gid)
-                                        .collect(),
-                                },
-                            );
-                        }
-                    }
                 }
+            }
 
-                Ok((
-                    layer.layer_index,
-                    Layer::TileLayer(TileLayer {
-                        name: Some(layer.name.clone()),
-                        visible: layer.visible,
-                        opacity: layer.opacity,
-                        chunks,
-                        properties: deserialize_properties(&layer.properties)?,
-                    }),
-                ))
-            })
-            .collect::<Result<Vec<_>>>()?;
+            let tile_layer = Layer::TileLayer(TileLayer {
+                name: Some(layer.name.clone()),
+                visible: layer.visible,
+                opacity: layer.opacity,
+                chunks,
+                properties: deserialize_properties(&layer.properties)?,
+            });
+
+            layers.push((layer.layer_index, tile_layer));
+        }
+
+        for layer in tiled.image_layers.iter() {
+            let image = layer.image.as_ref().unwrap();
+            let image_layer = Layer::ImageLayer(ImageLayer {
+                name: Some(layer.name.clone()),
+                visible: layer.visible,
+                opacity: layer.opacity,
+                offset_x: layer.offset_x,
+                offset_y: layer.offset_y,
+                source: image.source.clone(),
+                image_width: image.width as u32,
+                image_height: image.height as u32,
+                properties: deserialize_properties(&layer.properties)?,
+            });
+
+            layers.push((layer.layer_index, image_layer));
+        }
 
         layers.sort_by_key(|&(i, _)| i);
+
         Ok(TiledMap {
             source: path.to_owned(),
 
@@ -513,6 +539,12 @@ where
                 for ts in tiled.tilesets.iter() {
                     if let Some(src) = ts.source.as_ref() {
                         deps.push(Key::from_path(Path::new(src)).clone_static());
+                    }
+                }
+
+                for ls in tiled.image_layers.iter() {
+                    if let Some(img) = &ls.image {
+                        deps.push(Key::from_path(Path::new(&img.source)).clone_static());
                     }
                 }
 
