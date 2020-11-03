@@ -521,8 +521,8 @@ impl World {
         self.ecs.clear();
     }
 
-    pub unsafe fn resolve_unknown_gen(&self, id: u32) -> Option<Entity> {
-        self.ecs.resolve_unknown_gen(id)
+    pub unsafe fn find_entity_from_id(&self, id: u32) -> Entity {
+        self.ecs.find_entity_from_id(id)
     }
 
     pub fn poll<'a, T: Component>(

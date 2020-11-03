@@ -1121,7 +1121,7 @@ impl Danmaku {
         }
 
         for id in self.to_despawn.drain() {
-            let entity = unsafe { world.resolve_unknown_gen(id) }.unwrap();
+            let entity = unsafe { world.find_entity_from_id(id) };
             world.despawn(entity).unwrap();
         }
     }
