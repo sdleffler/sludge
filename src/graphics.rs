@@ -77,7 +77,9 @@ pub use {
     sorted_layer::{SortedLayer, SortedLayerId},
 };
 
-/// A wrapper for the mq::Buffer type
+// FIXME(sleffy): we aren't actually using `OwnedBuffer` and `Buffer` anywhere
+/// An `OwnedBuffer` represents either a VertexBuffer or an IndexBuffer, and
+/// can be used in a binding to a render pipeline
 #[derive(Debug)]
 pub struct OwnedBuffer {
     pub buffer: mq::Buffer,
@@ -95,7 +97,8 @@ impl Drop for OwnedBuffer {
     }
 }
 
-/// A type that wraps the OwnedBuffer type in an Arc
+/// `Buffer` is a convinience type that represents a safe way to create
+/// multiple asynchronous references to an `OwnedBuffer` objectc
 #[derive(Debug, Clone)]
 pub struct Buffer {
     pub shared: Arc<OwnedBuffer>,
@@ -117,7 +120,8 @@ impl From<mq::Buffer> for Buffer {
     }
 }
 
-/// A wrapper for the mq::Texture type
+/// An `OwnedTexture` contains one or more images used to apply detail to an
+/// object (typically it contains a 2D image)
 #[derive(Debug)]
 pub struct OwnedTexture {
     pub texture: mq::Texture,
@@ -167,7 +171,8 @@ impl Drop for OwnedTexture {
     }
 }
 
-/// A type that wraps the OwnedTexture type in an Arc
+/// A `Texture` is a safe type used to obtain asynchronous references to an
+/// `OwnedTexture`
 #[derive(Debug, Clone)]
 pub struct Texture {
     pub shared: Arc<OwnedTexture>,
@@ -230,7 +235,7 @@ impl Drawable for Texture {
     }
 }
 
-/// A type wrapper for mq::Pipeline
+/// `Pipeline` represents an identifier for the current graphics pipeline
 #[derive(Debug, Clone)]
 pub struct Pipeline {
     pub mq: mq::Pipeline,
@@ -272,7 +277,8 @@ impl RenderPass {
     }
 }
 
-/// A type that closely mirrors the mq::PassAction type
+/// A type that represents the different types of actions one can apply
+/// to a frame buffer during Render passes
 #[derive(Debug, Copy, Clone)]
 pub enum PassAction {
     Nothing,
@@ -554,7 +560,8 @@ impl From<LinearColor> for [f32; 4] {
     }
 }
 
-/// A thin wrapper over the enum mq::Equation enum
+/// `BlendEquation` represents the different types of equations that can be
+/// used to blend colors
 #[derive(Debug, Clone, Copy)]
 pub enum BlendEquation {
     Add,
@@ -572,7 +579,8 @@ impl From<BlendEquation> for mq::Equation {
     }
 }
 
-/// Defines a thin wrapper over the MqBf enum
+/// `BlendFactor` represents the different factors that can be used when
+/// blending two colors
 #[derive(Debug, Clone, Copy)]
 pub enum BlendFactor {
     Zero,
@@ -611,6 +619,8 @@ impl From<BlendFactor> for mq::BlendFactor {
     }
 }
 
+/// `BlendMode` represents a struct that encapsulates all of the different
+/// fields required to blend two colors
 #[derive(Debug, Copy, Clone)]
 pub struct BlendMode {
     eq: BlendEquation,
