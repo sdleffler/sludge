@@ -97,8 +97,8 @@ impl Drop for OwnedBuffer {
     }
 }
 
-/// `Buffer` is a convinience type that represents a safe way to create
-/// multiple asynchronous references to an `OwnedBuffer` objectc
+/// `Buffer` is a convenience type that represents a safe way to create
+/// multiple asynchronous references to an `OwnedBuffer` object
 #[derive(Debug, Clone)]
 pub struct Buffer {
     pub shared: Arc<OwnedBuffer>,
@@ -139,7 +139,7 @@ impl OwnedTexture {
     }
 
     pub fn height(&self) -> u32 {
-        self.texture.width
+        self.texture.height
     }
 }
 
@@ -268,7 +268,7 @@ impl RenderPass {
         depth_img: impl Into<Option<Texture>>,
     ) -> Self {
         let render_pass =
-            mq::RenderPass::new(&mut ctx.mq, (*color_img).texture, depth_img.into().map(|di| (*di).texture));
+            mq::RenderPass::new(&mut ctx.mq, color_img.texture, depth_img.into().map(|di| di.texture));
         let this = Self {
             shared: Arc::new(render_pass),
         };
@@ -278,7 +278,8 @@ impl RenderPass {
 }
 
 /// A type that represents the different types of actions one can apply
-/// to a frame buffer during Render passes
+/// to a frame buffer at the start of a render pass. Mainly used to initialize
+/// a framebuffer to some specific state
 #[derive(Debug, Copy, Clone)]
 pub enum PassAction {
     Nothing,
@@ -772,8 +773,8 @@ impl TransformStack {
     }
 }
 
-/// The main graphics struct that combines a bunch of mq types and the
-/// model view matrix to create a basic window that can be drawn into
+/// The main graphics struct combines a bunch of mq types and the
+/// model view matrix to represent a basic context that can be drawn into
 #[derive(Derivative)]
 #[derivative(Debug)]
 pub struct Graphics {
@@ -840,7 +841,7 @@ impl Graphics {
         let quad_bindings = mq::Bindings {
             vertex_buffers: vec![quad_vertices, instances],
             index_buffer: quad_indices,
-            images: vec![(*null_texture).texture],
+            images: vec![null_texture.texture],
         };
 
         Ok(Self {
@@ -1203,7 +1204,7 @@ impl MeshBuilder {
             bindings: mq::Bindings {
                 vertex_buffers: vec![vertex_buffer, instance],
                 index_buffer,
-                images: vec![(*self.texture).texture],
+                images: vec![self.texture.texture],
             },
             len: self.buffer.indices.len() as i32,
             aabb,
@@ -1322,7 +1323,7 @@ fn quad_indices() -> [u16; 6] {
     [0, 1, 2, 0, 2, 3]
 }
 
-/// A wrapper over the Index type used specifically for Sprites
+/// Represents the index of a `Sprite` within a `SpriteBatch`
 #[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub struct SpriteId(Index);
 
@@ -1331,10 +1332,12 @@ impl<'a> SmartComponent<ScContext<'a>> for SpriteId {}
 #[derive(Debug)]
 struct SpriteBatchInner {
     instances: Vec<InstanceProperties>,
-    /// Capacity it used to store the length of the buffers inside of mq::Bindings
+    /// Capacity is used to store the length of the buffers inside of mq::Bindings
     capacity: usize,
     bindings: mq::Bindings,
-    /// A bounding box that encaspulates all of the sprites within the batch
+    /// A cached bounding box that encaspulates all of the sprites within the
+    /// batch. The bounding box is recalculated if any of the instance params
+    /// of any of the sprites within the batch are changed
     aabb: Option<Box2<f32>>,
 }
 
@@ -1380,7 +1383,7 @@ impl SpriteBatch {
         let bindings = mq::Bindings {
             vertex_buffers: vec![ctx.quad_bindings.vertex_buffers[0], instances],
             index_buffer: ctx.quad_bindings.index_buffer,
-            images: vec![(**texture.load_cached()).texture],
+            images: vec![texture.load_cached().texture],
         };
 
         Self {
@@ -1460,7 +1463,7 @@ impl SpriteBatch {
         }
 
         inner.bindings.vertex_buffers[1].update(&mut ctx.mq, &inner.instances);
-        inner.bindings.images[0] = (**texture).texture;
+        inner.bindings.images[0] = texture.texture;
 
         self.dirty.store(false, atomic::Ordering::Relaxed);
     }
