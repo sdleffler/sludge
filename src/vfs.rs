@@ -215,7 +215,13 @@ impl VMetadata for PhysicalMetadata {
 /// components (other than the first), and pushing an absolute `Path`
 /// onto a `PathBuf` just completely nukes its existing contents.
 fn sanitize_path(path: &path::Path) -> Option<PathBuf> {
-    let mut c = path.components();
+    // FIXME: stop relying on `path_clean` and make our own implementation that
+    // doesn't need this backslash-to-forward-slash hack. The hack is here because
+    // `path_clean` is a port of a routine for UNIX systems, and doesn't know about
+    // backslashes.
+    let replaced = path.to_str()?.replace('\\', "/");
+    let cleaned = path_clean::clean(&replaced);
+    let mut c = Path::new(&cleaned).components();
     match c.next() {
         Some(path::Component::RootDir) => (),
         _ => return None,
@@ -832,7 +838,7 @@ mod tests {
         assert!(sanitize_path(p).is_none());
 
         let p = path::Path::new("/foo/../bop");
-        assert!(sanitize_path(p).is_none());
+        assert!(sanitize_path(p).is_some());
 
         let p = path::Path::new("/../bar");
         assert!(sanitize_path(p).is_none());

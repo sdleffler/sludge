@@ -425,7 +425,7 @@ impl Tileset {
         );
 
         let tileset_path = map_path.ok_or(TiledError::Other("Maps with external tilesets must know their file location.  See parse_with_path(Path).".to_string()))?.with_file_name(&source);
-        let file = fs.open(&tileset_path).map_err(|_| {
+        let file = fs.open(&tileset_path).with_context(|| {
             TiledError::Other(format!(
                 "External tileset file not found: {:?}",
                 tileset_path

@@ -1,6 +1,7 @@
 use crate::{
     ecs::{Component, Entity, EntityBuilder, World},
-    Resources, SimpleComponent, SludgeLuaContextExt,
+    filesystem::Filesystem,
+    Resources, SimpleComponent, SludgeLuaContextExt, SludgeResultExt,
 };
 use {
     anyhow::*,
@@ -9,6 +10,7 @@ use {
     rlua::prelude::*,
     std::{
         any::TypeId,
+        io::Read,
         sync::{Arc, Mutex},
     },
 };
@@ -23,6 +25,8 @@ pub const WORLD_TABLE_REGISTRY_KEY: &'static str = "sludge.world_table";
 pub const PERMANENTS_SER_TABLE_REGISTRY_KEY: &'static str = "sludge.permanents_ser";
 pub const PERMANENTS_DE_TABLE_REGISTRY_KEY: &'static str = "sludge.permanents_de";
 pub const PLAYBACK_THUNK_REGISTRY_KEY: &'static str = "sludge.playback_thunk";
+pub const PACKAGE_REGISTRY_KEY: &'static str = "sludge.package";
+pub const DEFAULT_PACKAGE_PATH: &'static str = "/?.lua";
 
 pub struct EntityUserDataRegistry {
     archetypes: Mutex<HashMap<Vec<TypeId>, Vec<(&'static str, LuaComponent)>>>,
@@ -307,143 +311,6 @@ impl<'lua> FromLua<'lua> for LuaEntity {
     }
 }
 
-pub trait Template: Send + Sync + 'static {
-    fn archetype(&self) -> Option<&[TypeId]> {
-        None
-    }
-
-    fn constructor<'lua>(
-        &self,
-        lua: LuaContext<'lua>,
-        args: LuaMultiValue<'lua>,
-    ) -> Result<Entity> {
-        self.from_table(lua, LuaTable::from_lua_multi(args, lua)?)
-    }
-
-    fn to_table<'lua>(
-        &self,
-        _lua: LuaContext<'lua>,
-        _instance: Entity,
-    ) -> Result<Option<LuaTable<'lua>>> {
-        Ok(None)
-    }
-
-    fn from_table<'lua>(&self, lua: LuaContext<'lua>, table: LuaTable<'lua>) -> Result<Entity>;
-}
-
-#[derive(Debug)]
-pub struct LuaTemplate {
-    key: LuaRegistryKey,
-}
-
-impl Template for LuaTemplate {
-    fn constructor<'lua>(
-        &self,
-        lua: LuaContext<'lua>,
-        args: LuaMultiValue<'lua>,
-    ) -> Result<Entity> {
-        Ok(lua
-            .registry_value::<LuaTable<'lua>>(&self.key)?
-            .get::<_, LuaFunction<'lua>>("spawn")?
-            .call::<_, LuaEntity>(args)?
-            .into())
-    }
-
-    fn to_table<'lua>(
-        &self,
-        lua: LuaContext<'lua>,
-        instance: Entity,
-    ) -> Result<Option<LuaTable<'lua>>> {
-        Ok(lua
-            .registry_value::<LuaTable<'lua>>(&self.key)?
-            .get::<_, LuaFunction<'lua>>("to_table")?
-            .call(LuaEntity::from(instance))?)
-    }
-
-    fn from_table<'lua>(&self, lua: LuaContext<'lua>, table: LuaTable<'lua>) -> Result<Entity> {
-        Ok(lua
-            .registry_value::<LuaTable<'lua>>(&self.key)?
-            .get::<_, LuaFunction<'lua>>("from_table")?
-            .call::<_, LuaEntity>(table)?
-            .into())
-    }
-}
-
-pub struct StaticTemplate {
-    name: &'static str,
-    template: Arc<dyn Template>,
-}
-
-impl StaticTemplate {
-    pub fn new<T: Template + 'static>(name: &'static str, template: T) -> Self {
-        Self {
-            name,
-            template: Arc::new(template),
-        }
-    }
-}
-
-inventory::collect!(StaticTemplate);
-
-pub struct Registry {
-    templates: HashMap<String, Arc<dyn Template>>,
-}
-
-impl Registry {
-    pub fn new() -> Result<Self> {
-        let mut this = Self {
-            templates: HashMap::new(),
-        };
-
-        inventory::iter::<StaticTemplate>
-            .into_iter()
-            .try_for_each(|st| this.insert_template_inner(st.name, st.template.clone()))?;
-
-        Ok(this)
-    }
-
-    fn insert_template_inner(&mut self, name: &str, template: Arc<dyn Template>) -> Result<()> {
-        ensure!(
-            !self.templates.contains_key(name),
-            "template already exists"
-        );
-
-        self.templates.insert(name.to_owned(), template);
-
-        Ok(())
-    }
-
-    pub fn insert_template<S, T>(&mut self, name: S, template: T) -> Result<()>
-    where
-        S: AsRef<str>,
-        T: Template,
-    {
-        self.insert_template_inner(name.as_ref(), Arc::new(template))
-    }
-}
-
-pub struct WrappedTemplate(Arc<dyn Template>);
-
-impl LuaUserData for WrappedTemplate {
-    fn add_methods<'lua, M: LuaUserDataMethods<'lua, Self>>(methods: &mut M) {
-        methods.add_method("spawn", |lua, this, args| {
-            let entity = this.0.constructor(lua, args).to_lua_err()?;
-            Ok(LuaEntity::from(entity))
-        });
-
-        methods.add_method("to_table", |lua, this, entity: LuaEntity| {
-            this.0.to_table(lua, entity.into()).to_lua_err()
-        });
-
-        methods.add_method("from_table", |lua, this, table: LuaTable<'lua>| {
-            this.0
-                .from_table(lua, table)
-                .map(LuaEntity::from)
-                .to_lua_err()
-        });
-    }
-}
-
 pub type ModuleLoader = Box<dyn for<'lua> Fn(LuaContext<'lua>) -> Result<LuaValue<'lua>> + 'static>;
 
 pub struct Module {
@@ -474,48 +341,6 @@ impl Module {
 }
 
 inventory::collect!(Module);
-
-pub fn sludge_template<'lua>(lua: LuaContext<'lua>, name: String) -> LuaResult<LuaTable<'lua>> {
-    let table = lua.create_table()?;
-    let key = lua.create_registry_value(table.clone())?;
-    lua.resources()
-        .fetch_mut::<Registry>()
-        .insert_template(&name, LuaTemplate { key })
-        .to_lua_err()?;
-
-    Ok(table)
-}
-
-inventory::submit! {
-    Module::parse("sludge.Template", |lua| {
-        Ok(LuaValue::Function(lua.create_function(sludge_template)?))
-    })
-}
-
-pub struct Templates;
-
-impl LuaUserData for Templates {
-    fn add_methods<'lua, M: LuaUserDataMethods<'lua, Self>>(methods: &mut M) {
-        methods.add_meta_method(LuaMetaMethod::Index, |lua, _, lua_name: LuaString<'lua>| {
-            let name = lua_name.to_str()?;
-            Ok(WrappedTemplate(
-                lua.resources()
-                    .fetch::<Registry>()
-                    .templates
-                    .get(name)
-                    .ok_or_else(|| anyhow!("no such template `{}`", name))
-                    .to_lua_err()?
-                    .clone(),
-            ))
-        });
-    }
-}
-
-inventory::submit! {
-    Module::parse("sludge.templates", |lua| {
-        Ok(LuaValue::UserData(lua.create_userdata(Templates)?))
-    })
-}
 
 /// A component providing special behavior to an entity through hooks in the Lua API,
 /// such as serialization/deserialization behavior.
@@ -603,12 +428,6 @@ pub fn spawn<'lua>(lua: LuaContext<'lua>, table: LuaTable<'lua>) -> LuaResult<Lu
     Ok(LuaEntity::from(world.spawn(builder.build())))
 }
 
-inventory::submit! {
-    Module::parse("sludge.spawn", |lua| {
-        Ok(LuaValue::Function(lua.create_function(spawn)?))
-    })
-}
-
 pub fn insert<'lua>(
     lua: LuaContext<'lua>,
     (entity, table): (LuaEntity, LuaTable<'lua>),
@@ -633,12 +452,6 @@ pub fn insert<'lua>(
     Ok(())
 }
 
-inventory::submit! {
-    Module::parse("sludge.insert", |lua| {
-        Ok(LuaValue::Function(lua.create_function(insert)?))
-    })
-}
-
 pub fn despawn<'lua>(lua: LuaContext<'lua>, entity: LuaEntity) -> LuaResult<Result<bool, String>> {
     Ok(lua
         .resources()
@@ -648,9 +461,85 @@ pub fn despawn<'lua>(lua: LuaContext<'lua>, entity: LuaEntity) -> LuaResult<Resu
         .map_err(|err| err.to_string()))
 }
 
+pub fn clear<'lua>(lua: LuaContext<'lua>, _: ()) -> LuaResult<()> {
+    lua.resources().fetch_mut::<World>().clear();
+    Ok(())
+}
+
 inventory::submit! {
-    Module::parse("sludge.despawn", |lua| {
-        Ok(LuaValue::Function(lua.create_function(despawn)?))
+    Module::parse("sludge", |lua| {
+        let table = lua.create_table_from(vec![
+            ("spawn", lua.create_function(spawn)?),
+            ("insert", lua.create_function(insert)?),
+            ("despawn", lua.create_function(despawn)?),
+            ("clear", lua.create_function(clear)?),
+        ])?;
+
+        Ok(LuaValue::Table(table))
+    })
+}
+
+/// Lua-exposed function for loading a module from sludge's `Filesystem`.
+///
+/// Similar to Lua's built-in `require`, this will search along paths found in
+/// `sludge.package.path`, which is expected to be a colon-separated list of
+/// paths to search, where any `?` characters found are replaced by the module
+/// path being searched for. The default value of `sludge.package.path` is "/?.lua",
+/// which will simply search for any Lua files found in the VFS.
+///
+/// The limitations of opening files through this `require` are the same as opening
+/// any file through the `Filesystem`.
+pub fn require<'lua>(lua: LuaContext<'lua>, module: String) -> LuaResult<LuaValue> {
+    let package = lua.named_registry_value::<_, LuaTable>(PACKAGE_REGISTRY_KEY)?;
+    let loaded_modules = package.get::<_, LuaTable>("modules")?;
+    if let Some(module) = loaded_modules.get::<_, Option<LuaValue>>(module.as_str())? {
+        Ok(module)
+    } else {
+        let resources = lua.resources();
+        let mut fs = resources.fetch_mut::<Filesystem>();
+        let package_path = package.get::<_, LuaString>("path")?;
+        let segments = package_path.to_str()?.split(":");
+
+        for segment in segments {
+            let path = segment.replace('?', &module);
+            let mut file = match fs.open(&path) {
+                Ok(file) => file,
+                Err(_) => continue,
+            };
+            let mut buf = String::new();
+            file.read_to_string(&mut buf)
+                .log_error_err(module_path!())
+                .to_lua_err()?;
+            let loaded = lua
+                .load(&buf)
+                .set_name(&module)?
+                .into_function()?
+                .call::<_, LuaValue>(())?;
+            loaded_modules.set(path.as_str(), loaded.clone())?;
+            return Ok(loaded);
+        }
+
+        // FIXME: better error reporting here; collect errors from individual module attempts
+        // and log them?
+        Err(anyhow!("module not found!")).to_lua_err()
+    }
+}
+
+inventory::submit! {
+    Module::parse("sludge.package", |lua| {
+        let table = lua.create_table()?;
+        table.set("path", DEFAULT_PACKAGE_PATH)?;
+
+        let req_fn = lua.create_function(require)?;
+        table.set("require", req_fn.clone())?;
+        lua.globals().set("require", req_fn)?;
+
+        let modules = lua.create_table()?;
+        table.set("modules", modules.clone())?;
+
+        lua.set_named_registry_value(PACKAGE_REGISTRY_KEY, table.clone())?;
+
+        Ok(LuaValue::Table(table))
     })
 }
 
@@ -669,14 +558,6 @@ impl<'lua> SludgeApiLuaContextExt<'lua> for LuaContext<'lua> {
         if ser_table.contains_key(value.clone())? {
             return Ok(());
         }
-
-        // let converted = self.load("return tostring(...)").into_function()?;
-        // let strung = converted.call::<_, LuaString>(value.clone())?;
-        // eprintln!(
-        //     "registering permanent: {} = {:?}",
-        //     key,
-        //     CStr::from_bytes_with_nul(strung.as_bytes_with_nul())
-        // );
 
         ser_table.set(value.clone(), key)?;
         de_table.set(key, value.clone())?;
@@ -703,9 +584,16 @@ impl<'lua> SludgeApiLuaContextExt<'lua> for LuaContext<'lua> {
 }
 
 pub fn load<'lua>(lua: LuaContext<'lua>) -> Result<()> {
-    ["print", "dofile", "load", "loadstring", "loadfile"]
-        .iter()
-        .try_for_each(|&s| lua.globals().set(s, LuaValue::Nil))?;
+    [
+        "dofile",
+        "load",
+        "loadfile",
+        "loadstring",
+        "print",
+        "require",
+    ]
+    .iter()
+    .try_for_each(|&s| lua.globals().set(s, LuaValue::Nil))?;
 
     lua.set_named_registry_value(PERMANENTS_SER_TABLE_REGISTRY_KEY, lua.create_table()?)?;
     lua.set_named_registry_value(PERMANENTS_DE_TABLE_REGISTRY_KEY, lua.create_table()?)?;
@@ -719,9 +607,16 @@ pub fn load<'lua>(lua: LuaContext<'lua>) -> Result<()> {
         }
     }
 
-    for module in inventory::iter::<Module> {
+    // Sort the modules by their paths in lexicographical order, so that parent modules
+    // are always loaded before their children and we don't end up with a parent thinking
+    // it's a duplicate because loading the child caused the parent's table to be created.
+    // Also avoids overwriting loaded children.
+    let mut modules = inventory::iter::<Module>.into_iter().collect::<Vec<_>>();
+    modules.sort_unstable_by_key(|m| &m.path);
+
+    for module in modules.iter() {
         let mut t = lua.globals();
-        let (&head, rest) = module
+        let (&last, rest) = module
             .path
             .split_last()
             .ok_or_else(|| anyhow!("empty module path!"))?;
@@ -745,13 +640,13 @@ pub fn load<'lua>(lua: LuaContext<'lua>) -> Result<()> {
         }
 
         ensure!(
-            !t.contains_key(head)?,
+            !t.contains_key(last)?,
             "name collision while loading modules: two modules have the same path `{}`",
             module.path.join(".")
         );
         let table = (module.load)(lua)?;
         lua.register_permanents(&module.path.join("."), table.clone())?;
-        t.set(head, table)?;
+        t.set(last, table)?;
     }
 
     lua.set_named_registry_value(
