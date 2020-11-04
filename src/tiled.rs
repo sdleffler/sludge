@@ -691,18 +691,36 @@ where
     }
 }
 
-pub struct TiledMapAccessor<L: LayerProperties, T: TileProperties>(Entity, PhantomData<(L, T)>);
+pub struct TiledMapAccessor<L, T, O>(Entity, PhantomData<(L, T, O)>)
+where
+    L: LayerProperties,
+    T: TileProperties,
+    O: ObjectProperties;
 
-impl<L: LayerProperties, T: TileProperties> LuaUserData for TiledMapAccessor<L, T> {}
+impl<L, T, O> LuaUserData for TiledMapAccessor<L, T, O>
+where
+    L: LayerProperties + Serialize,
+    T: TileProperties + Serialize,
+    O: ObjectProperties + Serialize,
+{
+    fn add_methods<'lua, M: LuaUserDataMethods<'lua, Self>>(methods: &mut M) {
+        methods.add_method("layers", |lua, this, ()| {
+            let resources = lua.resources();
+            let world = resources.fetch::<World>();
+            let map = world.get::<TiledMap<L, T, O>>(this.0.into()).to_lua_err()?;
+            rlua_serde::to_value(lua, &map.layers)
+        });
+    }
+}
 
 impl<L, T, O> LuaComponentInterface for TiledMap<L, T, O>
 where
-    L: LayerProperties + DeserializeOwned,
-    T: TileProperties + DeserializeOwned,
-    O: ObjectProperties + DeserializeOwned,
+    L: LayerProperties + DeserializeOwned + Serialize,
+    T: TileProperties + DeserializeOwned + Serialize,
+    O: ObjectProperties + DeserializeOwned + Serialize,
 {
     fn accessor<'lua>(lua: LuaContext<'lua>, entity: Entity) -> LuaResult<LuaValue<'lua>> {
-        TiledMapAccessor::<L, T>(entity, PhantomData).to_lua(lua)
+        TiledMapAccessor::<L, T, O>(entity, PhantomData).to_lua(lua)
     }
 
     fn bundler<'lua>(
