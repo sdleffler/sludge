@@ -184,15 +184,21 @@ impl<T> HashGrid<T> {
 
         let mut dirty = false;
 
-        for &bucket_id in object.buckets.iter() {
-            let bucket = &mut self.buckets[bucket_id.0];
-            if !bucket.bounds.intersects(&object.bounds) {
+        let buckets = &mut self.buckets;
+        let bounds = object.bounds;
+        object.buckets.retain(|&mut bucket_id| {
+            let bucket = &mut buckets[bucket_id.0];
+            if !bucket.bounds.intersects(&bounds) {
                 if let Ok(idx) = bucket.members.binary_search(&object_id) {
                     bucket.members.remove(idx);
                     dirty = true;
                 }
+
+                false
+            } else {
+                true
             }
-        }
+        });
 
         for coords in to_spatial_indices(self.bucket_size, aabb) {
             let bucket_id = get_or_insert_bucket(
@@ -220,6 +226,23 @@ impl<T> HashGrid<T> {
         to_spatial_indices(self.bucket_size, *aabb)
             .flat_map(move |coords| self.spatial_map.get(&coords).copied().into_iter())
             .flat_map(move |bucket_id| self.buckets[bucket_id.0].members.iter().copied())
+    }
+
+    /// Find all objects in the hash grid whose AABBs intersect with the subject and are not
+    /// the subject.
+    pub fn find_potential_collisions(
+        &self,
+        subject: SpatialIndex,
+    ) -> impl Iterator<Item = SpatialIndex> + '_ {
+        let objects = &self.objects;
+        let entry = &objects[subject.0];
+        let buckets = &self.buckets;
+        entry
+            .buckets
+            .iter()
+            .flat_map(move |&bucket| buckets[bucket.0].members.iter().copied())
+            .filter(move |&object| object != subject)
+            .filter(move |&object| entry.bounds.intersects(&objects[object.0].bounds))
     }
 }
 
