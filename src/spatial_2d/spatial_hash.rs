@@ -62,6 +62,10 @@ impl<T> ObjectEntry<T> {
     pub fn userdata_mut(&mut self) -> &mut T {
         &mut self.userdata
     }
+
+    pub fn buckets(&self) -> &[BucketIndex] {
+        &self.buckets
+    }
 }
 
 #[derive(Debug)]
