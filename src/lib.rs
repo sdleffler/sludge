@@ -72,7 +72,7 @@ pub use ::{anyhow, inventory, nalgebra, ncollide2d, rlua, rlua_serde, serde, slu
 pub mod sludge {
     #[doc(hidden)]
     pub use {
-        crate::ecs::{Entity, ScContext, SmartComponent},
+        crate::ecs::{Entity, FlaggedComponent, ScContext, SmartComponent},
         inventory,
         std::any::TypeId,
     };

@@ -40,7 +40,7 @@ pub fn derive_simple_component(input: proc_macro::TokenStream) -> proc_macro::To
     proc_macro::TokenStream::from(expanded)
 }
 
-#[proc_macro_derive(FlaggedComponent)]
+#[proc_macro_derive(TrackedComponent)]
 pub fn derive_flagged_component(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     // Parse the input tokens into a syntax tree.
     let input = parse_macro_input!(input as DeriveInput);
@@ -61,16 +61,16 @@ pub fn derive_flagged_component(input: proc_macro::TokenStream) -> proc_macro::T
 
     let expanded = quote! {
         // The generated impl.
-        impl #impl_generics #root::SmartComponent<#root::ScContext<#context_lifetime>>
+        impl #impl_generics #root::sludge::SmartComponent<#root::sludge::ScContext<#context_lifetime>>
             for #name #original_generics #where_clause {
-            fn on_borrow_mut(&mut self, entity: #root::Entity, context: #root::ScContext<#context_lifetime>) {
-                context[&#root::TypeId::of::<#name #original_generics>()].emit_modified_atomic(entity);
+            fn on_borrow_mut(&mut self, entity: #root::sludge::Entity, context: #root::sludge::ScContext<#context_lifetime>) {
+                context[&#root::sludge::TypeId::of::<#name #original_generics>()].emit_modified_atomic(entity);
             }
         }
 
         // Register the flagged component so that `World`s create a channel for it.
-        #root::inventory::submit! {
-            #root::FlaggedComponent::of::<#name #original_generics>()
+        #root::sludge::inventory::submit! {
+            #root::sludge::FlaggedComponent::of::<#name #original_generics>()
         }
     };
 
