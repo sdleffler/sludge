@@ -129,9 +129,7 @@ pub struct OwnedTexture {
 
 impl OwnedTexture {
     pub fn from_inner(texture: mq::Texture) -> Self {
-        Self {
-            texture,
-        }
+        Self { texture }
     }
 
     pub fn width(&self) -> u32 {
@@ -267,8 +265,11 @@ impl RenderPass {
         color_img: Texture,
         depth_img: impl Into<Option<Texture>>,
     ) -> Self {
-        let render_pass =
-            mq::RenderPass::new(&mut ctx.mq, color_img.texture, depth_img.into().map(|di| di.texture));
+        let render_pass = mq::RenderPass::new(
+            &mut ctx.mq,
+            color_img.texture,
+            depth_img.into().map(|di| di.texture),
+        );
         let this = Self {
             shared: Arc::new(render_pass),
         };
@@ -823,9 +824,12 @@ impl Graphics {
             },
         );
 
-        let null_texture = Texture::from_inner(
-            mq::Texture::from_rgba8(&mut mq, 1, 1, &[255, 255, 255, 255]),
-        );
+        let null_texture = Texture::from_inner(mq::Texture::from_rgba8(
+            &mut mq,
+            1,
+            1,
+            &[255, 255, 255, 255],
+        ));
 
         let quad_vertices =
             mq::Buffer::immutable(&mut mq, mq::BufferType::VertexBuffer, &quad_vertices());
@@ -1444,7 +1448,10 @@ impl SpriteBatch {
             .extend(self.sprites.iter().map(|(_, param)| {
                 param
                     .scale2(param.src.extents())
-                    .scale2(Vector2::new(texture.width() as f32, texture.height() as f32))
+                    .scale2(Vector2::new(
+                        texture.width() as f32,
+                        texture.height() as f32,
+                    ))
                     .to_instance_properties()
             }));
 
@@ -1522,31 +1529,27 @@ impl AsRef<RenderPass> for Canvas {
 
 impl Canvas {
     pub fn new(ctx: &mut Graphics, width: u32, height: u32) -> Self {
-        let color_img = Texture::from_inner(
-            mq::Texture::new_render_texture(
-                &mut ctx.mq,
-                mq::TextureParams {
-                    width,
-                    height,
-                    format: mq::TextureFormat::RGBA8,
-                    filter: mq::FilterMode::Nearest,
-                    ..Default::default()
-                },
-            ),
-        );
+        let color_img = Texture::from_inner(mq::Texture::new_render_texture(
+            &mut ctx.mq,
+            mq::TextureParams {
+                width,
+                height,
+                format: mq::TextureFormat::RGBA8,
+                filter: mq::FilterMode::Nearest,
+                ..Default::default()
+            },
+        ));
 
-        let depth_img = Texture::from_inner(
-            mq::Texture::new_render_texture(
-                &mut ctx.mq,
-                mq::TextureParams {
-                    width,
-                    height,
-                    format: mq::TextureFormat::Depth,
-                    filter: mq::FilterMode::Nearest,
-                    ..Default::default()
-                },
-            ),
-        );
+        let depth_img = Texture::from_inner(mq::Texture::new_render_texture(
+            &mut ctx.mq,
+            mq::TextureParams {
+                width,
+                height,
+                format: mq::TextureFormat::Depth,
+                filter: mq::FilterMode::Nearest,
+                ..Default::default()
+            },
+        ));
 
         let render_pass = RenderPass::new(ctx, color_img.clone(), depth_img.clone());
 

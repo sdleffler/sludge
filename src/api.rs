@@ -180,6 +180,13 @@ impl LuaUserData for LuaEntityUserData {
             Ok(format!("{:?}", Entity::from_bits(this.0)))
         });
 
+        methods.add_method("is_alive", |lua, this, ()| {
+            Ok(lua
+                .resources()
+                .fetch::<World>()
+                .contains(Entity::from(*this)))
+        });
+
         methods.add_meta_function(
             LuaMetaMethod::Eq,
             |lua, (this, other): (LuaValue, LuaValue)| {
@@ -365,6 +372,12 @@ inventory::collect!(Module);
 #[derive(Debug, SimpleComponent)]
 pub struct EntityTable {
     pub(crate) key: LuaRegistryKey,
+}
+
+impl EntityTable {
+    pub fn load<'lua>(&self, lua: LuaContext<'lua>) -> Result<LuaTable<'lua>> {
+        lua.registry_value(&self.key).map_err(Error::from)
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

@@ -119,6 +119,14 @@ impl LuaUserData for PositionAccessor {
             (x, y).to_lua_multi(lua)
         });
 
+        methods.add_method("set_coords", |lua, this, (x, y): (f32, f32)| {
+            let resources = lua.resources();
+            let world = resources.fetch::<World>();
+            let mut pos = world.get_mut::<Position>(this.0).to_lua_err()?;
+            pos.translation.vector = Vector2::new(x, y);
+            Ok(())
+        });
+
         methods.add_method("to_table", |lua, this, ()| {
             let resources = lua.resources();
             let world = resources.fetch::<World>();

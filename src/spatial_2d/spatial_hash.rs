@@ -252,6 +252,7 @@ pub struct SpatialHasher {
     shape_events: ReaderId<ComponentEvent>,
 
     grid: HashGrid<Entity>,
+    current_ids: HashMap<Entity, SpatialIndex>,
 
     added: HashSet<Entity>,
     modified: HashSet<Entity>,
@@ -268,6 +269,7 @@ impl SpatialHasher {
             shape_events,
 
             grid: HashGrid::new(bucket_size),
+            current_ids: HashMap::new(),
 
             added: HashSet::new(),
             modified: HashSet::new(),
@@ -329,6 +331,7 @@ impl SpatialHasher {
                     added,
                 );
                 cmds.insert(added, (index,));
+                self.current_ids.insert(added, index);
             }
         }
 
@@ -340,8 +343,14 @@ impl SpatialHasher {
         }
 
         for removed in self.removed.drain() {
+            // Just in case the entity wasn't despawned but instead had its `Position`
+            // or `Shape` removed. Unlikely, but possible.
             if let Ok(_index) = world.get::<SpatialIndex>(removed) {
                 cmds.remove::<(SpatialIndex,)>(removed);
+            }
+
+            if let Some(id) = self.current_ids.remove(&removed) {
+                self.grid.remove(id);
             }
         }
 
