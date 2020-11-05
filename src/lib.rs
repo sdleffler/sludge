@@ -125,15 +125,67 @@ impl<T, E: fmt::Debug> SludgeResultExt for Result<T, E> {
 
 const RESOURCES_REGISTRY_KEY: &'static str = "sludge.resources";
 
-pub trait SludgeLuaContextExt {
+pub trait SludgeLuaContextExt<'lua> {
     fn resources(self) -> UnifiedResources<'static>;
+    fn spawn<T: ToLua<'lua>>(self, task: T) -> LuaResult<()>;
+    fn broadcast<S: AsRef<str>, T: ToLuaMulti<'lua>>(self, event_name: S, args: T)
+        -> LuaResult<()>;
 }
 
-impl<'lua> SludgeLuaContextExt for LuaContext<'lua> {
+impl<'lua> SludgeLuaContextExt<'lua> for LuaContext<'lua> {
     fn resources(self) -> UnifiedResources<'static> {
         self.named_registry_value::<_, UnifiedResources>(RESOURCES_REGISTRY_KEY)
             .with_context(|| anyhow!("error while extracing resources from Lua registry"))
             .unwrap()
+    }
+
+    fn spawn<T: ToLua<'lua>>(self, task: T) -> LuaResult<()> {
+        let thread = match task.to_lua(self)? {
+            LuaValue::Function(f) => self.create_thread(f)?,
+            LuaValue::Thread(th) => th,
+            _ => {
+                return Err(LuaError::FromLuaConversionError {
+                    to: "thread or function",
+                    from: "lua value",
+                    message: None,
+                })
+            }
+        };
+
+        let key = self.create_registry_value(thread)?;
+        self.resources()
+            .fetch::<SchedulerQueueChannel>()
+            .spawn
+            .try_send(key)
+            .unwrap();
+        Ok(())
+    }
+
+    fn broadcast<S: AsRef<str>, T: ToLuaMulti<'lua>>(
+        self,
+        event_name: S,
+        args: T,
+    ) -> LuaResult<()> {
+        let args = args.to_lua_multi(self)?;
+        let event = Event {
+            name: EventName(Atom::from(event_name.as_ref())),
+            args: if args.is_empty() {
+                None
+            } else {
+                Some(
+                    args.into_iter()
+                        .map(|v| self.create_registry_value(v))
+                        .collect::<LuaResult<_>>()?,
+                )
+            },
+        };
+
+        self.resources()
+            .fetch::<SchedulerQueueChannel>()
+            .event
+            .try_send(event)
+            .unwrap();
+        Ok(())
     }
 }
 
