@@ -16,6 +16,7 @@ impl FmodPaths {
     pub fn new() -> Self {
         let api_root = if cfg!(target_os = "windows") {
             r#"C:\Program Files (x86)\FMOD SoundSystem\FMOD Studio API Windows\api\"#.to_owned()
+        // r#"C:\Program Files (x86)\FMOD SoundSystem\FMOD Studio API Universal Windows Platform\api\"#.to_owned()
         } else {
             panic!("unknown/unsupported target OS")
         };
