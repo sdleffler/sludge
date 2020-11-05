@@ -1,0 +1,12 @@
+[package]
+name = "sludge-fmod-sys"
+version = "0.1.0"
+authors = ["Sean Leffler <sean@errno.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+
+[build-dependencies]
+bindgen = "0.55.1"
