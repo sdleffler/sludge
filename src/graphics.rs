@@ -1728,13 +1728,6 @@ impl<T: AnyDrawable + ?Sized, C> Hash for DrawableId<T, C> {
     }
 }
 
-impl<'a, T, C> SmartComponent<ScContext<'a>> for DrawableId<T, C>
-where
-    T: AnyDrawable,
-    C: Send + Sync + 'static,
-{
-}
-
 impl<T: AnyDrawable + ?Sized, C> DrawableId<T, C> {
     pub(crate) fn new(index: Index) -> Self {
         Self(index, PhantomData, PhantomData)
@@ -1784,8 +1777,6 @@ impl<C> Hash for ErasedDrawableId<C> {
         self.0.hash(state);
     }
 }
-
-impl<'a, C> SmartComponent<ScContext<'a>> for ErasedDrawableId<C> where C: Send + Sync + 'static {}
 
 impl<C> ErasedDrawableId<C> {
     pub(crate) fn new(index: Index) -> Self {

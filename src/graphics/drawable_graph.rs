@@ -116,7 +116,7 @@ impl<T: AnyDrawable> ops::Index<DrawableNodeId<T>> for DrawableGraph {
         self[ErasedDrawableNodeId::from(i)]
             .as_any()
             .downcast_ref()
-            .unwrap()
+            .expect(std::any::type_name::<T>())
     }
 }
 
@@ -126,7 +126,7 @@ impl<T: AnyDrawable> ops::IndexMut<DrawableNodeId<T>> for DrawableGraph {
         self[ErasedDrawableNodeId::from(i)]
             .as_any_mut()
             .downcast_mut()
-            .unwrap()
+            .expect(std::any::type_name::<T>())
     }
 }
 

@@ -106,7 +106,7 @@ pub trait SludgeResultExt: Sized {
     }
 }
 
-impl<T, E> SludgeResultExt for Result<T, E> {
+impl<T, E: fmt::Debug> SludgeResultExt for Result<T, E> {
     type Ok = T;
     type Err = E;
 
@@ -116,7 +116,7 @@ impl<T, E> SludgeResultExt for Result<T, E> {
         E: fmt::Display,
     {
         if let Err(ref e) = &self {
-            log::log!(target: target, level, "{}", e);
+            log::log!(target: target, level, "{:#?}", e);
         }
 
         self
@@ -681,7 +681,6 @@ impl<'s, 'lua> SchedulerWithContext<'s, 'lua> {
                 scheduler.poll_events_and_queue_all_notified();
 
                 if scheduler.is_idle() {
-                    log::trace!("trampoline loop broken at index {}", i);
                     break;
                 } else if i == LOOP_CAP - 1 {
                     log::warn!("trampoline loop cap exceeded");

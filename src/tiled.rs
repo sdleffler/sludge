@@ -4,7 +4,7 @@ use {
     nalgebra as na,
     rlua::prelude::*,
     serde::{de::DeserializeOwned, Deserialize, Serialize},
-    serde_json::{Number, Value},
+    serde_json::{json, Number, Value},
     std::{
         marker::PhantomData,
         path::{Path, PathBuf},
@@ -23,24 +23,33 @@ use crate::{
 
 mod xml_parser;
 
-fn deserialize_properties<T: Properties>(properties: &xml_parser::Properties) -> Result<T> {
+fn unwrap_object(value: Value) -> serde_json::Map<String, Value> {
+    match value {
+        Value::Object(map) => map,
+        _ => panic!("not a map!"),
+    }
+}
+
+fn deserialize_properties<T: Properties>(
+    properties: &xml_parser::Properties,
+    initial: Option<serde_json::Map<String, Value>>,
+) -> Result<T> {
     use xml_parser::PropertyValue::*;
 
-    let json_map = properties
-        .iter()
-        .map(|(k, v)| {
-            let key = k.to_owned();
-            let value = match v {
-                BoolValue(b) => Value::Bool(*b),
-                FloatValue(f) => Value::Number(Number::from_f64(*f as f64).unwrap()),
-                IntValue(i) => Value::Number((*i).into()),
-                ColorValue(_) => bail!("Color property values not yet supported!"),
-                StringValue(s) => Value::String(s.to_owned()),
-            };
+    let mut json_map = initial.unwrap_or_default();
 
-            Ok((key, value))
-        })
-        .collect::<Result<serde_json::Map<String, Value>>>()?;
+    for (k, v) in properties {
+        let key = k.to_owned();
+        let value = match v {
+            BoolValue(b) => Value::Bool(*b),
+            FloatValue(f) => Value::Number(Number::from_f64(*f as f64).unwrap()),
+            IntValue(i) => Value::Number((*i).into()),
+            ColorValue(_) => bail!("Color property values not yet supported!"),
+            StringValue(s) => Value::String(s.to_owned()),
+        };
+
+        json_map.insert(key, value);
+    }
 
     serde_json::from_value(Value::Object(json_map)).map_err(Error::from)
 }
@@ -126,7 +135,12 @@ impl<T> TileSheet<T> {
                             })
                             .collect()
                     }),
-                    properties: deserialize_properties(&tile.properties)?,
+                    properties: deserialize_properties(
+                        &tile.properties,
+                        Some(unwrap_object(json!({
+                            "type": tile.tile_type,
+                        }))),
+                    )?,
                 };
 
                 Ok((tile.id, tile_data))
@@ -414,7 +428,14 @@ impl<L, T, O> TiledMap<L, T, O> {
                 visible: layer.visible,
                 opacity: layer.opacity,
                 chunks,
-                properties: deserialize_properties(&layer.properties).with_context(|| {
+                properties: deserialize_properties(
+                    &layer.properties,
+                    Some(unwrap_object(json!({
+                        "name": layer.name,
+                        "type": "Tile",
+                    }))),
+                )
+                .with_context(|| {
                     anyhow!(
                         "error deserializing properties for tile layer `{}`",
                         layer.name
@@ -436,7 +457,14 @@ impl<L, T, O> TiledMap<L, T, O> {
                 source: image.source.clone(),
                 image_width: image.width as u32,
                 image_height: image.height as u32,
-                properties: deserialize_properties(&layer.properties).with_context(|| {
+                properties: deserialize_properties(
+                    &layer.properties,
+                    Some(unwrap_object(json!({
+                        "type": "Image",
+                        "name": layer.name,
+                    }))),
+                )
+                .with_context(|| {
                     anyhow!(
                         "error deserializing layer properties for image layer `{}`",
                         layer.name
@@ -479,7 +507,10 @@ impl<L, T, O> TiledMap<L, T, O> {
                     rot: object.rotation,
                     visible: object.visible,
                     shape,
-                    properties: deserialize_properties(&object.properties).with_context(|| {
+                    properties: deserialize_properties(&object.properties, Some(unwrap_object(json!({
+                        "type": object.obj_type,
+                        "name": object.name,
+                    })))).with_context(|| {
                         anyhow!(
                             "error deserializing object properties for object `{}` (id #{}) from layer `{}`",
                             object.name,
@@ -497,7 +528,14 @@ impl<L, T, O> TiledMap<L, T, O> {
                 opacity: layer.opacity,
                 visible: layer.visible,
                 objects,
-                properties: deserialize_properties(&layer.properties).with_context(|| {
+                properties: deserialize_properties(
+                    &layer.properties,
+                    Some(unwrap_object(json!({
+                        "type": "Object",
+                        "name": layer.name,
+                    }))),
+                )
+                .with_context(|| {
                     anyhow!(
                         "error deserializing layer properties for object layer `{}`",
                         layer.name
@@ -662,6 +700,13 @@ where
         let mut tiled_map = resources
             .fetch_mut::<crate::assets::DefaultCache>()
             .get::<TiledMap<L, T, O>>(&Key::from_path(&map_path))
+            .with_context(|| {
+                anyhow!(
+                    "error loading {} from path {} while inserting into bundle from Lua",
+                    std::any::type_name::<TiledMap<L, T, O>>(),
+                    map_path
+                )
+            })
             .log_error_err(module_path!())
             .to_lua_err()?;
 
