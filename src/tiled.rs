@@ -23,7 +23,7 @@ use crate::{
 
 mod xml_parser;
 
-fn deserialize_properties<T: DeserializeOwned>(properties: &xml_parser::Properties) -> Result<T> {
+fn deserialize_properties<T: Properties>(properties: &xml_parser::Properties) -> Result<T> {
     use xml_parser::PropertyValue::*;
 
     let json_map = properties
@@ -45,81 +45,8 @@ fn deserialize_properties<T: DeserializeOwned>(properties: &xml_parser::Properti
     serde_json::from_value(Value::Object(json_map)).map_err(Error::from)
 }
 
-pub trait LayerProperties: Send + Sync + Clone + 'static {
-    fn is_solid(&self) -> bool {
-        false
-    }
-
-    fn index(&self) -> i32 {
-        -1
-    }
-}
-
-impl LayerProperties for Value {
-    fn is_solid(&self) -> bool {
-        #[derive(Deserialize)]
-        struct Extract {
-            #[serde(default)]
-            solid: bool,
-        }
-
-        serde_json::from_value::<Extract>(self.clone())
-            .map(|ext| ext.solid)
-            .unwrap_or_default()
-    }
-
-    fn index(&self) -> i32 {
-        #[derive(Deserialize)]
-        struct Extract {
-            #[serde(default)]
-            index: i32,
-        }
-
-        serde_json::from_value::<Extract>(self.clone())
-            .map(|ext| ext.index)
-            .unwrap_or(-1)
-    }
-}
-
-pub trait TileProperties: Send + Sync + Clone + 'static {
-    fn is_solid(&self) -> bool {
-        false
-    }
-}
-
-impl TileProperties for Value {
-    fn is_solid(&self) -> bool {
-        #[derive(Deserialize)]
-        struct Extract {
-            #[serde(default)]
-            solid: bool,
-        }
-
-        serde_json::from_value::<Extract>(self.clone())
-            .map(|ext| ext.solid)
-            .unwrap_or_default()
-    }
-}
-
-pub trait ObjectProperties: Send + Sync + Clone + 'static {
-    fn on_collide(&self) -> Option<String> {
-        None
-    }
-}
-
-impl ObjectProperties for Value {
-    fn on_collide(&self) -> Option<String> {
-        #[derive(Deserialize)]
-        struct Extract {
-            #[serde(default)]
-            on_collide: Option<String>,
-        }
-
-        serde_json::from_value::<Extract>(self.clone())
-            .ok()?
-            .on_collide
-    }
-}
+pub trait Properties: DeserializeOwned + Serialize + Send + Sync + Clone + 'static {}
+impl<T> Properties for T where T: DeserializeOwned + Serialize + Send + Sync + Clone + 'static {}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Frame {
@@ -128,18 +55,18 @@ pub struct Frame {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(bound(deserialize = "T: DeserializeOwned"))]
+#[serde(bound(deserialize = "T: Properties"))]
 pub struct TileData<T> {
     pub tile_type: Option<String>,
     pub local_id: u32,
     pub frames: Option<Vec<Frame>>,
 
-    #[serde(bound(deserialize = "T: DeserializeOwned"))]
+    #[serde(bound(deserialize = "T: Properties"))]
     pub properties: T,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(bound(deserialize = "T: DeserializeOwned"))]
+#[serde(bound(deserialize = "T: Properties"))]
 pub struct TileSheet<T> {
     name: String,
 
@@ -159,7 +86,7 @@ pub struct TileSheet<T> {
     spacing: u32,
 
     /// Mapping local IDs to tile data.
-    #[serde(bound(deserialize = "T: DeserializeOwned"))]
+    #[serde(bound(deserialize = "T: Properties"))]
     tile_data: HashMap<u32, TileData<T>>,
 }
 
@@ -175,7 +102,7 @@ pub struct TileSheetRegion {
 impl<T> TileSheet<T> {
     fn from_tiled(tiled: &xml_parser::Tileset) -> Result<Self>
     where
-        T: DeserializeOwned,
+        T: Properties,
     {
         ensure!(
             tiled.images.len() == 1,
@@ -325,7 +252,7 @@ impl Chunk {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(bound(deserialize = "L: DeserializeOwned"))]
+#[serde(bound(deserialize = "L: Properties"))]
 pub struct TileLayer<L> {
     pub name: Option<String>,
     pub opacity: f32,
@@ -355,7 +282,7 @@ impl<L> TileLayer<L> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(bound(deserialize = "L: DeserializeOwned"))]
+#[serde(bound(deserialize = "L: Properties"))]
 pub struct ImageLayer<L> {
     pub name: Option<String>,
     pub opacity: f32,
@@ -376,7 +303,7 @@ pub enum ObjectShape {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(bound(deserialize = "O: DeserializeOwned"))]
+#[serde(bound(deserialize = "O: Properties"))]
 pub struct Object<O> {
     pub id: u32,
     pub gid: u32,
@@ -393,7 +320,7 @@ pub struct Object<O> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(bound(deserialize = "L: DeserializeOwned, O: DeserializeOwned"))]
+#[serde(bound(deserialize = "L: Properties, O: Properties"))]
 pub struct ObjectLayer<L, O> {
     pub name: String,
     pub opacity: f32,
@@ -403,7 +330,7 @@ pub struct ObjectLayer<L, O> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(bound(deserialize = "L: DeserializeOwned, O: DeserializeOwned"))]
+#[serde(bound(deserialize = "L: Properties, O: Properties"))]
 pub enum Layer<L, O> {
     TileLayer(TileLayer<L>),
     ImageLayer(ImageLayer<L>),
@@ -411,7 +338,7 @@ pub enum Layer<L, O> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(bound(deserialize = "L: DeserializeOwned, T: DeserializeOwned, O: DeserializeOwned"))]
+#[serde(bound(deserialize = "L: Properties, T: Properties, O: Properties"))]
 pub struct TiledMap<L, T, O> {
     source: PathBuf,
 
@@ -433,9 +360,9 @@ impl<'a, L: Component, T: Component, O: Component> SmartComponent<ScContext<'a>>
 impl<L, T, O> TiledMap<L, T, O> {
     pub fn from_tiled(path: &Path, tiled: &xml_parser::Map) -> Result<Self>
     where
-        L: DeserializeOwned,
-        T: DeserializeOwned,
-        O: DeserializeOwned,
+        L: Properties,
+        T: Properties,
+        O: Properties,
     {
         let tile_sheets = tiled
             .tilesets
@@ -631,7 +558,7 @@ impl<L, T, O> TiledMap<L, T, O> {
 
 impl<T> Asset for TileSheet<T>
 where
-    T: DeserializeOwned + Send + Sync + 'static,
+    T: Properties,
 {
     fn load<'a, R: Resources<'a>>(
         key: &Key,
@@ -650,9 +577,9 @@ where
 
 impl<L, T, O> Asset for TiledMap<L, T, O>
 where
-    L: DeserializeOwned + Send + Sync + 'static,
-    T: DeserializeOwned + Send + Sync + 'static,
-    O: DeserializeOwned + Send + Sync + 'static,
+    L: Properties,
+    T: Properties,
+    O: Properties,
 {
     fn load<'a, R: Resources<'a>>(
         key: &Key,
@@ -693,15 +620,15 @@ where
 
 pub struct TiledMapAccessor<L, T, O>(Entity, PhantomData<(L, T, O)>)
 where
-    L: LayerProperties,
-    T: TileProperties,
-    O: ObjectProperties;
+    L: Properties,
+    T: Properties,
+    O: Properties;
 
 impl<L, T, O> LuaUserData for TiledMapAccessor<L, T, O>
 where
-    L: LayerProperties + Serialize,
-    T: TileProperties + Serialize,
-    O: ObjectProperties + Serialize,
+    L: Properties,
+    T: Properties,
+    O: Properties,
 {
     fn add_methods<'lua, M: LuaUserDataMethods<'lua, Self>>(methods: &mut M) {
         methods.add_method("layers", |lua, this, ()| {
@@ -715,9 +642,9 @@ where
 
 impl<L, T, O> LuaComponentInterface for TiledMap<L, T, O>
 where
-    L: LayerProperties + DeserializeOwned + Serialize,
-    T: TileProperties + DeserializeOwned + Serialize,
-    O: ObjectProperties + DeserializeOwned + Serialize,
+    L: Properties,
+    T: Properties,
+    O: Properties,
 {
     fn accessor<'lua>(lua: LuaContext<'lua>, entity: Entity) -> LuaResult<LuaValue<'lua>> {
         TiledMapAccessor::<L, T, O>(entity, PhantomData).to_lua(lua)
