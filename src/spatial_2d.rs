@@ -243,6 +243,14 @@ impl LuaUserData for VelocityAccessor {
             (x, y).to_lua_multi(lua)
         });
 
+        methods.add_method("set_linear", |lua, this, (x, y)| {
+            let resources = lua.resources();
+            let world = resources.fetch::<World>();
+            let mut velocity = world.get_mut::<Velocity>(this.0).to_lua_err()?;
+            velocity.linear = Vector2::new(x, y);
+            Ok(())
+        });
+
         methods.add_method("to_table", |lua, this, ()| {
             let resources = lua.resources();
             let world = resources.fetch::<World>();
