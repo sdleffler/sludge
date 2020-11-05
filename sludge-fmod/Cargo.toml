@@ -10,3 +10,5 @@ edition = "2018"
 sludge = { path = ".." }
 sludge-fmod-sys = { path = "../sludge-fmod-sys" }
 bitflags = "1.2.1"
+libc = "0.2.80"
+log = "0.4.11"
