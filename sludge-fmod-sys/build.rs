@@ -25,7 +25,7 @@ impl FmodPaths {
         let studio_inc = "-I".to_owned() + &api_root + r#"studio\inc"#;
 
         let suffix = if cfg!(target_os = "windows") {
-            if cfg!(debug) {
+            if cfg!(features = "debug") {
                 "L_vc"
             } else {
                 "_vc"

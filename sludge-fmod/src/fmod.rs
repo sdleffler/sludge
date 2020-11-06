@@ -105,7 +105,7 @@ impl Fmod {
         Bank::load_bank_file(self, filename, flags)
     }
 
-    pub fn get_event<T: AsRef<[u8]>>(&self, path: &str) -> Result<EventDescription> {
+    pub fn get_event<T: AsRef<[u8]> + ?Sized>(&self, path: &T) -> Result<EventDescription> {
         EventDescription::get_event(self, path)
     }
 }
