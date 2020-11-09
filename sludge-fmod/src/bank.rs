@@ -1,8 +1,7 @@
-use crate::{fmod::Fmod, CheckError};
+use crate::CheckError;
 use {
     sludge::{api::Module, prelude::*},
     sludge_fmod_sys::*,
-    std::{ffi::CString, ops, ptr, sync::Arc},
 };
 
 bitflags::bitflags! {
@@ -28,28 +27,18 @@ impl<'lua> FromLua<'lua> for LoadBankFlags {
     }
 }
 
-#[derive(Debug)]
-pub struct OwnedBank {
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct Bank {
     pub(crate) ptr: *mut FMOD_STUDIO_BANK,
 }
 
-unsafe impl Send for OwnedBank {}
-unsafe impl Sync for OwnedBank {}
+unsafe impl Send for Bank {}
+unsafe impl Sync for Bank {}
 
-impl OwnedBank {
-    pub(crate) fn load_bank_file<T: AsRef<[u8]>>(
-        fmod: &Fmod,
-        filename: T,
-        flags: LoadBankFlags,
-    ) -> Result<Self> {
-        let c_string = CString::new(filename.as_ref())?;
-        let mut ptr = ptr::null_mut();
-        unsafe {
-            FMOD_Studio_System_LoadBankFile(fmod.ptr, c_string.as_ptr(), flags.bits, &mut ptr)
-                .check_err()?;
-        }
-
-        Ok(Self { ptr })
+impl Bank {
+    pub(crate) unsafe fn from_ptr(ptr: *mut FMOD_STUDIO_BANK) -> Self {
+        Self { ptr }
     }
 
     pub fn is_valid(&self) -> bool {
@@ -69,28 +58,12 @@ impl OwnedBank {
         }
         Ok(())
     }
-}
 
-impl Drop for OwnedBank {
-    fn drop(&mut self) {
+    pub fn unload(&self) -> Result<()> {
         unsafe {
-            FMOD_Studio_Bank_Unload(self.ptr)
-                .check_err()
-                .expect("error while dropping FMOD bank");
+            FMOD_Studio_Bank_Unload(self.ptr).check_err()?;
         }
-    }
-}
-
-#[derive(Debug)]
-pub struct Bank {
-    pub(crate) inner: Arc<OwnedBank>,
-}
-
-impl ops::Deref for Bank {
-    type Target = OwnedBank;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
+        Ok(())
     }
 }
 

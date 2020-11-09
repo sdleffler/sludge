@@ -1,4 +1,4 @@
-use crate::{fmod::Fmod, CheckError};
+use crate::{CheckError, Fmod};
 use {
     enum_primitive_derive::*,
     libc::c_void,
@@ -665,16 +665,6 @@ unsafe impl Send for EventDescription {}
 unsafe impl Sync for EventDescription {}
 
 impl EventDescription {
-    pub(crate) fn get_event<T: AsRef<[u8]>>(fmod: &Fmod, id: T) -> Result<Self> {
-        let c_string = CString::new(id.as_ref())?;
-        let mut ptr = ptr::null_mut();
-        unsafe {
-            FMOD_Studio_System_GetEvent(fmod.ptr, c_string.as_ptr(), &mut ptr).check_err()?;
-        }
-
-        Ok(Self { ptr })
-    }
-
     pub fn is_valid(&self) -> bool {
         unsafe { FMOD_Studio_EventDescription_IsValid(self.ptr) != 0 }
     }
@@ -702,7 +692,7 @@ impl EventDescription {
         Ok(EventInstance { ptr })
     }
 
-    unsafe fn from_ptr(ptr: *mut FMOD_STUDIO_EVENTDESCRIPTION) -> Result<Self> {
+    pub(crate) unsafe fn from_ptr(ptr: *mut FMOD_STUDIO_EVENTDESCRIPTION) -> Result<Self> {
         let this = EventDescription { ptr };
 
         if let Some(ud_ptr) = this.get_userdata()? {
