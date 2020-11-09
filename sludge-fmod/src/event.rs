@@ -1,6 +1,8 @@
 use crate::{fmod::Fmod, CheckError};
 use {
+    enum_primitive_derive::*,
     libc::c_void,
+    num_traits::FromPrimitive,
     serde::*,
     sludge::{api::Module, prelude::*},
     sludge_fmod_sys::*,
@@ -10,6 +12,16 @@ use {
         sync::Arc,
     },
 };
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Primitive)]
+#[repr(i32)]
+pub enum PlaybackState {
+    Playing = FMOD_STUDIO_PLAYBACK_STATE_FMOD_STUDIO_PLAYBACK_PLAYING,
+    Sustaining = FMOD_STUDIO_PLAYBACK_STATE_FMOD_STUDIO_PLAYBACK_SUSTAINING,
+    Stopped = FMOD_STUDIO_PLAYBACK_STATE_FMOD_STUDIO_PLAYBACK_STOPPED,
+    Starting = FMOD_STUDIO_PLAYBACK_STATE_FMOD_STUDIO_PLAYBACK_STARTING,
+    Stopping = FMOD_STUDIO_PLAYBACK_STATE_FMOD_STUDIO_PLAYBACK_STOPPING,
+}
 
 bitflags::bitflags! {
     pub struct EventCallbackMask: u32 {
@@ -241,6 +253,47 @@ unsafe fn callback_shim(
     FMOD_RESULT_FMOD_OK
 }
 
+/// Combination of the "raw" value and "final"/modulated value produced by fetching
+/// the value of an event parameter.
+#[derive(Debug, Copy, Clone)]
+pub struct ParameterValue {
+    /// The parameter's value as set by the public API.
+    pub value: f32,
+
+    /// The parameter's value as calculated after modulation, automation, seek speed,
+    /// and parameter velocity.
+    pub final_value: f32,
+}
+
+/// An identifier for an event parameter.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(C)]
+pub struct ParameterId {
+    /// Opaque first half of the identifier.
+    pub data1: u32,
+
+    /// Opaque second half of the identifier.
+    pub data2: u32,
+}
+
+impl From<FMOD_STUDIO_PARAMETER_ID> for ParameterId {
+    fn from(id: FMOD_STUDIO_PARAMETER_ID) -> Self {
+        Self {
+            data1: id.data1,
+            data2: id.data2,
+        }
+    }
+}
+
+impl From<ParameterId> for FMOD_STUDIO_PARAMETER_ID {
+    fn from(id: ParameterId) -> Self {
+        Self {
+            data1: id.data1,
+            data2: id.data2,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct EventInstance {
     pub(crate) ptr: *mut FMOD_STUDIO_EVENTINSTANCE,
@@ -276,6 +329,14 @@ impl EventInstance {
         Ok(())
     }
 
+    pub fn get_playback_state(&self) -> Result<PlaybackState> {
+        let mut state = 0;
+        unsafe {
+            FMOD_Studio_EventInstance_GetPlaybackState(self.ptr, &mut state).check_err()?;
+        }
+        PlaybackState::from_i32(state).ok_or_else(|| anyhow!("bad playback state {}", state))
+    }
+
     pub fn is_paused(&self) -> Result<bool> {
         let mut is_paused = 0i32;
         unsafe {
@@ -298,12 +359,193 @@ impl EventInstance {
         Ok(())
     }
 
+    pub fn set_pitch(&self, pitch_multiplier: f32) -> Result<()> {
+        unsafe {
+            FMOD_Studio_EventInstance_SetPitch(self.ptr, pitch_multiplier).check_err()?;
+        }
+        Ok(())
+    }
+
+    pub fn get_pitch(&self) -> Result<ParameterValue> {
+        let mut pitch = ParameterValue {
+            value: 0.,
+            final_value: 0.,
+        };
+        unsafe {
+            FMOD_Studio_EventInstance_GetPitch(self.ptr, &mut pitch.value, &mut pitch.final_value)
+                .check_err()?;
+        }
+        Ok(pitch)
+    }
+
+    // TODO(sleffy)
+    // pub fn set_property(&self, index: EventProperty, value: f32) -> Result<()>;
+    // pub fn get_property(&self, index: EventProperty) -> Result<f32>;
+
+    /// Set the timeline cursor position in milliseconds.
+    // FIXME(sleffy): protect against overflow
+    pub fn set_timeline_position(&self, position: u32) -> Result<()> {
+        unsafe {
+            FMOD_Studio_EventInstance_SetTimelinePosition(self.ptr, position as i32).check_err()?;
+        }
+        Ok(())
+    }
+
+    /// Get the timeline cursor position in milliseconds.
+    // FIXME(sleffy): protect against overflow
+    pub fn get_timeline_position(&self) -> Result<u32> {
+        let mut out = 0;
+        unsafe {
+            FMOD_Studio_EventInstance_GetTimelinePosition(self.ptr, &mut out).check_err()?;
+        }
+        Ok(out as u32)
+    }
+
+    /// Set a unitless scaling factor for the event volume. This does not override any
+    /// FMOD Studio volume level or internal volume automation/modulation; it only
+    /// scales it.
+    pub fn set_volume(&self, volume: f32) -> Result<()> {
+        unsafe {
+            FMOD_Studio_EventInstance_SetVolume(self.ptr, volume).check_err()?;
+        }
+        Ok(())
+    }
+
+    /// The `value` field is the unitless scaling factor if set by `set_volume`, and
+    /// the `final_value` field is the final volume value as modified by automation/
+    /// modulation.
+    pub fn get_volume(&self) -> Result<ParameterValue> {
+        let mut out = ParameterValue {
+            value: 0.,
+            final_value: 0.,
+        };
+        unsafe {
+            FMOD_Studio_EventInstance_GetVolume(self.ptr, &mut out.value, &mut out.final_value)
+                .check_err()?;
+        }
+        Ok(out)
+    }
+
+    /// Check whether this instance has been "virtualized" due to exceeding the polyphony
+    /// limit.
+    pub fn is_virtual(&self) -> Result<bool> {
+        let mut out = 0;
+        unsafe {
+            FMOD_Studio_EventInstance_IsVirtual(self.ptr, &mut out).check_err()?;
+        }
+        Ok(out != 0)
+    }
+
     pub fn get_description(&self) -> Result<EventDescription> {
         let mut ptr = ptr::null_mut();
         unsafe {
             FMOD_Studio_EventInstance_GetDescription(self.ptr, &mut ptr).check_err()?;
             EventDescription::from_ptr(ptr)
         }
+    }
+
+    pub fn set_parameter_by_name<T: AsRef<[u8]> + ?Sized>(
+        &self,
+        name: &T,
+        value: f32,
+        ignore_seek_speed: bool,
+    ) -> Result<()> {
+        let c_string = CString::new(name.as_ref())?;
+        unsafe {
+            FMOD_Studio_EventInstance_SetParameterByName(
+                self.ptr,
+                c_string.as_ptr(),
+                value,
+                ignore_seek_speed as i32,
+            )
+            .check_err()?;
+        }
+
+        Ok(())
+    }
+
+    pub fn get_parameter_by_name<T: AsRef<[u8]> + ?Sized>(
+        &self,
+        name: &T,
+    ) -> Result<ParameterValue> {
+        let c_string = CString::new(name.as_ref())?;
+        let mut parameter_value = ParameterValue {
+            value: 0.,
+            final_value: 0.,
+        };
+        unsafe {
+            FMOD_Studio_EventInstance_GetParameterByName(
+                self.ptr,
+                c_string.as_ptr(),
+                &mut parameter_value.value,
+                &mut parameter_value.final_value,
+            )
+            .check_err()?;
+        }
+
+        Ok(parameter_value)
+    }
+
+    pub fn set_parameter_by_id(
+        &self,
+        id: ParameterId,
+        value: f32,
+        ignore_seek_speed: bool,
+    ) -> Result<()> {
+        unsafe {
+            FMOD_Studio_EventInstance_SetParameterByID(
+                self.ptr,
+                id.into(),
+                value,
+                ignore_seek_speed as i32,
+            )
+            .check_err()?;
+        }
+
+        Ok(())
+    }
+
+    pub fn get_parameter_by_id(&self, id: ParameterId) -> Result<ParameterValue> {
+        let mut parameter_value = ParameterValue {
+            value: 0.,
+            final_value: 0.,
+        };
+        unsafe {
+            FMOD_Studio_EventInstance_GetParameterByID(
+                self.ptr,
+                id.into(),
+                &mut parameter_value.value,
+                &mut parameter_value.final_value,
+            )
+            .check_err()?;
+        }
+
+        Ok(parameter_value)
+    }
+
+    pub fn set_parameters_by_ids(
+        &self,
+        ids: &[ParameterId],
+        values: &[f32],
+        ignore_seek_speed: bool,
+    ) -> Result<()> {
+        ensure!(
+            ids.len() == values.len(),
+            "length of ids slice and values slice do not match!"
+        );
+        let count = ids.len();
+        unsafe {
+            FMOD_Studio_EventInstance_SetParametersByIDs(
+                self.ptr,
+                ids.as_ptr() as *mut _,
+                values.as_ptr() as *mut _,
+                count as i32,
+                ignore_seek_speed as i32,
+            )
+            .check_err()?;
+        }
+
+        Ok(())
     }
 
     unsafe fn from_ptr(ptr: *mut FMOD_STUDIO_EVENTINSTANCE) -> Result<Self> {
@@ -590,4 +832,31 @@ fn load<'lua>(lua: LuaContext<'lua>) -> Result<LuaValue<'lua>> {
 
 inventory::submit! {
     Module::parse("fmod.EventCallbackMask", load)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::mem;
+
+    #[test]
+    fn parameter_id_size_and_layout() {
+        assert_eq!(
+            mem::size_of::<FMOD_STUDIO_PARAMETER_ID>(),
+            mem::size_of::<ParameterId>()
+        );
+
+        let c_param: FMOD_STUDIO_PARAMETER_ID;
+        let rust_param = ParameterId {
+            data1: 1234,
+            data2: 5678,
+        };
+
+        unsafe {
+            c_param = *(&rust_param as *const ParameterId as *const FMOD_STUDIO_PARAMETER_ID);
+        };
+
+        assert_eq!(rust_param.data1, c_param.data1);
+        assert_eq!(rust_param.data2, c_param.data2);
+    }
 }

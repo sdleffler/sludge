@@ -19,3 +19,5 @@ serde = "1.0.117"
 rlua_serde = { git = "https://github.com/sdleffler/rlua_serde" }
 thunderdome = "0.3.0"
 crossbeam-channel = "0.5.0"
+enum-primitive-derive = "0.2.1"
+num-traits = "0.2.14"
