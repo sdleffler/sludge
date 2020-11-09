@@ -2,7 +2,7 @@ use crate::{fmod::Fmod, CheckError};
 use {
     libc::c_void,
     serde::*,
-    sludge::prelude::*,
+    sludge::{api::Module, prelude::*},
     sludge_fmod_sys::*,
     std::{
         ffi::{CStr, CString},
@@ -32,6 +32,20 @@ bitflags::bitflags! {
         const VIRTUAL_TO_REAL          = FMOD_STUDIO_EVENT_CALLBACK_VIRTUAL_TO_REAL         ;
         const START_EVENT_COMMAND      = FMOD_STUDIO_EVENT_CALLBACK_START_EVENT_COMMAND     ;
         const ALL                      = FMOD_STUDIO_EVENT_CALLBACK_ALL                     ;
+    }
+}
+
+impl<'lua> ToLua<'lua> for EventCallbackMask {
+    fn to_lua(self, lua: LuaContext<'lua>) -> LuaResult<LuaValue<'lua>> {
+        self.bits().to_lua(lua)
+    }
+}
+
+impl<'lua> FromLua<'lua> for EventCallbackMask {
+    fn from_lua(lua_value: LuaValue<'lua>, lua: LuaContext<'lua>) -> LuaResult<Self> {
+        Self::from_bits(u32::from_lua(lua_value, lua)?)
+            .ok_or_else(|| anyhow!("invalid callback mask"))
+            .to_lua_err()
     }
 }
 
@@ -352,7 +366,7 @@ impl LuaUserData for EventInstance {
 
         methods.add_method(
             "set_callback",
-            |lua, this, (cb, _mask): (LuaFunction, ())| {
+            |lua, this, (cb, mask): (LuaFunction, Option<EventCallbackMask>)| {
                 let resources = lua.resources();
                 let fmod = resources.fetch::<Fmod>();
                 let cq_send = fmod.cq_send.clone();
@@ -363,7 +377,7 @@ impl LuaUserData for EventInstance {
                             .send((key.clone(), event_instance, event_info))
                             .map_err(|_| anyhow!("error while sending callback info"))
                     },
-                    EventCallbackMask::ALL,
+                    mask.unwrap_or(EventCallbackMask::ALL),
                 )
                 .to_lua_err()?;
 
@@ -503,7 +517,7 @@ impl LuaUserData for EventDescription {
 
         methods.add_method(
             "set_callback",
-            |lua, this, (cb, _mask): (LuaFunction, ())| {
+            |lua, this, (cb, mask): (LuaFunction, Option<EventCallbackMask>)| {
                 let resources = lua.resources();
                 let fmod = resources.fetch::<Fmod>();
                 let cq_send = fmod.cq_send.clone();
@@ -514,7 +528,7 @@ impl LuaUserData for EventDescription {
                             .send((key.clone(), event_instance, event_info))
                             .map_err(|_| anyhow!("error while sending callback info"))
                     },
-                    EventCallbackMask::ALL,
+                    mask.unwrap_or(EventCallbackMask::ALL),
                 )
                 .to_lua_err()?;
 
@@ -522,4 +536,43 @@ impl LuaUserData for EventDescription {
             },
         );
     }
+}
+
+fn load<'lua>(lua: LuaContext<'lua>) -> Result<LuaValue<'lua>> {
+    let table = lua.create_table_from(vec![
+        ("CREATED", EventCallbackMask::CREATED),
+        ("DESTROYED", EventCallbackMask::DESTROYED),
+        ("STARTING", EventCallbackMask::STARTING),
+        ("STARTED", EventCallbackMask::STARTED),
+        ("RESTARTED", EventCallbackMask::RESTARTED),
+        ("STOPPED", EventCallbackMask::STOPPED),
+        ("START_FAILED", EventCallbackMask::START_FAILED),
+        (
+            "CREATE_PROGRAMMER_SOUND",
+            EventCallbackMask::CREATE_PROGRAMMER_SOUND,
+        ),
+        (
+            "DESTROY_PROGRAMMER_SOUND",
+            EventCallbackMask::DESTROY_PROGRAMMER_SOUND,
+        ),
+        ("PLUGIN_CREATED", EventCallbackMask::PLUGIN_CREATED),
+        ("PLUGIN_DESTROYED", EventCallbackMask::PLUGIN_DESTROYED),
+        ("TIMELINE_MARKER", EventCallbackMask::TIMELINE_MARKER),
+        ("TIMELINE_BEAT", EventCallbackMask::TIMELINE_BEAT),
+        ("SOUND_PLAYED", EventCallbackMask::SOUND_PLAYED),
+        ("SOUND_STOPPED", EventCallbackMask::SOUND_STOPPED),
+        ("REAL_TO_VIRTUAL", EventCallbackMask::REAL_TO_VIRTUAL),
+        ("VIRTUAL_TO_REAL", EventCallbackMask::VIRTUAL_TO_REAL),
+        (
+            "START_EVENT_COMMAND",
+            EventCallbackMask::START_EVENT_COMMAND,
+        ),
+        ("ALL", EventCallbackMask::ALL),
+    ])?;
+
+    Ok(LuaValue::Table(table))
+}
+
+inventory::submit! {
+    Module::parse("fmod.EventCallbackMask", load)
 }
