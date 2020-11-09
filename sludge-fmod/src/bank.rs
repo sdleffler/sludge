@@ -2,7 +2,7 @@ use crate::{fmod::Fmod, CheckError};
 use {
     sludge::prelude::*,
     sludge_fmod_sys::*,
-    std::{ffi::CString, ptr},
+    std::{ffi::CString, ops, ptr, sync::Arc},
 };
 
 bitflags::bitflags! {
@@ -15,14 +15,14 @@ bitflags::bitflags! {
 }
 
 #[derive(Debug)]
-pub struct Bank {
+pub struct OwnedBank {
     pub(crate) ptr: *mut FMOD_STUDIO_BANK,
 }
 
-unsafe impl Send for Bank {}
-unsafe impl Sync for Bank {}
+unsafe impl Send for OwnedBank {}
+unsafe impl Sync for OwnedBank {}
 
-impl Bank {
+impl OwnedBank {
     pub(crate) fn load_bank_file<T: AsRef<[u8]>>(
         fmod: &Fmod,
         filename: T,
@@ -57,12 +57,41 @@ impl Bank {
     }
 }
 
-impl Drop for Bank {
+impl Drop for OwnedBank {
     fn drop(&mut self) {
         unsafe {
             FMOD_Studio_Bank_Unload(self.ptr)
                 .check_err()
                 .expect("error while dropping FMOD bank");
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct Bank {
+    pub(crate) inner: Arc<OwnedBank>,
+}
+
+impl ops::Deref for Bank {
+    type Target = OwnedBank;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl LuaUserData for Bank {
+    fn add_methods<'lua, T: LuaUserDataMethods<'lua, Self>>(methods: &mut T) {
+        methods.add_method("is_valid", |_lua, this, ()| Ok(this.is_valid()));
+
+        methods.add_method("load_sample_data", |_lua, this, ()| {
+            this.load_sample_data().to_lua_err()?;
+            Ok(())
+        });
+
+        methods.add_method("unload_sample_data", |_lua, this, ()| {
+            this.unload_sample_data().to_lua_err()?;
+            Ok(())
+        });
     }
 }

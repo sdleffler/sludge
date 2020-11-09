@@ -1,3 +1,5 @@
+#![feature(arc_mutate_strong_count)]
+
 use ::{sludge::prelude::*, sludge_fmod_sys::*};
 
 pub mod bank;

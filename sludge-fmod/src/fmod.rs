@@ -1,9 +1,14 @@
 use crate::{
-    bank::{Bank, LoadBankFlags},
-    event::EventDescription,
+    bank::{Bank, LoadBankFlags, OwnedBank},
+    event::{EventCallbackInfo, EventDescription, EventInstance},
     CheckError,
 };
-use {sludge::prelude::*, sludge_fmod_sys::*, std::ptr};
+use {
+    crossbeam_channel::{Receiver, Sender},
+    sludge::{api::Module, prelude::*},
+    sludge_fmod_sys::*,
+    std::{ptr, sync::Arc},
+};
 
 bitflags::bitflags! {
     pub struct FmodStudioInitFlags: u32 {
@@ -74,7 +79,13 @@ impl FmodSystemBuilder {
             .check_err()?;
         }
 
-        Ok(Fmod { ptr: self.system })
+        let (cq_send, cq_recv) = crossbeam_channel::unbounded();
+
+        Ok(Fmod {
+            ptr: self.system,
+            cq_recv,
+            cq_send,
+        })
     }
 }
 
@@ -82,6 +93,8 @@ impl FmodSystemBuilder {
 #[derive(Debug)]
 pub struct Fmod {
     pub(crate) ptr: *mut FMOD_STUDIO_SYSTEM,
+    pub(crate) cq_recv: Receiver<(Arc<LuaRegistryKey>, EventInstance, EventCallbackInfo)>,
+    pub(crate) cq_send: Sender<(Arc<LuaRegistryKey>, EventInstance, EventCallbackInfo)>,
 }
 
 // FMOD Studio API is thread safe by default, and we panic if we see something which
@@ -90,10 +103,47 @@ unsafe impl Send for Fmod {}
 unsafe impl Sync for Fmod {}
 
 impl Fmod {
-    pub fn update(&self) -> Result<()> {
+    pub fn update<'lua>(&self, lua: LuaContext<'lua>) -> Result<()> {
         unsafe {
             FMOD_Studio_System_Update(self.ptr).check_err()?;
         }
+
+        for (key, event_instance, event_info) in self.cq_recv.try_iter() {
+            let cb = lua.registry_value::<LuaFunction>(&key)?;
+
+            use EventCallbackInfo::*;
+            match event_info {
+                Created => cb.call((event_instance, "created"))?,
+                Destroyed => cb.call((event_instance, "destroyed"))?,
+                Starting => cb.call((event_instance, "starting"))?,
+                Started => cb.call((event_instance, "started"))?,
+                Restarted => cb.call((event_instance, "restarted"))?,
+                Stopped => cb.call((event_instance, "stopped"))?,
+                StartFailed => cb.call((event_instance, "start_failed"))?,
+                //CreateProgrammerSound(&'a Sound) => CreateProgrammerSound(&'a Sound),
+                //DestroyProgrammerSound(&'a Sound) => DestroyProgrammerSound(&'a Sound),
+                //PluginCreated(PluginInstanceProperties) => PluginCreated(PluginInstanceProperties),
+                //PluginDestroyed(PluginInstanceProperties) => PluginDestroyed(PluginInstanceProperties),
+                TimelineMarker(marker) => cb.call((
+                    event_instance,
+                    "timeline_marker",
+                    rlua_serde::to_value(lua, &marker)?,
+                ))?,
+                TimelineBeat(beat) => cb.call((
+                    event_instance,
+                    "timeline_beat",
+                    rlua_serde::to_value(lua, &beat)?,
+                ))?,
+                //SoundPlayed(&'a Sound) => SoundPlayed(&'a Sound),
+                //SoundStopped(&'a Sound) => SoundStopped(&'a Sound),
+                RealToVirtual => cb.call((event_instance, "real_to_virtual"))?,
+                VirtualToReal => cb.call((event_instance, "virtual_to_real"))?,
+                StartEventCommand(other_event_instance) => {
+                    cb.call((event_instance, "start_event_command", other_event_instance))?
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -102,7 +152,10 @@ impl Fmod {
         filename: T,
         flags: LoadBankFlags,
     ) -> Result<Bank> {
-        Bank::load_bank_file(self, filename, flags)
+        let owned = OwnedBank::load_bank_file(self, filename, flags)?;
+        Ok(Bank {
+            inner: Arc::new(owned),
+        })
     }
 
     pub fn get_event<T: AsRef<[u8]> + ?Sized>(&self, path: &T) -> Result<EventDescription> {
@@ -118,4 +171,36 @@ impl Drop for Fmod {
                 .expect("error dropping FMOD system");
         }
     }
+}
+
+fn load<'lua>(lua: LuaContext<'lua>) -> Result<LuaValue<'lua>> {
+    let table = lua.create_table_from(vec![
+        // TODO: support flags
+        (
+            "load_bank_file",
+            lua.create_function(|lua, (filename, _flags): (LuaString, Option<LuaTable>)| {
+                let resources = lua.resources();
+                let fmod = resources.fetch::<Fmod>();
+                let bank = fmod
+                    .load_bank_file(filename.as_bytes(), LoadBankFlags::NORMAL)
+                    .to_lua_err()?;
+                Ok(bank)
+            })?,
+        ),
+        (
+            "get_event",
+            lua.create_function(|lua, path: LuaString| {
+                let resources = lua.resources();
+                let fmod = resources.fetch::<Fmod>();
+                let event = fmod.get_event(path.as_bytes()).to_lua_err()?;
+                Ok(event)
+            })?,
+        ),
+    ])?;
+
+    Ok(LuaValue::Table(table))
+}
+
+inventory::submit! {
+    Module::parse("fmod", load)
 }
