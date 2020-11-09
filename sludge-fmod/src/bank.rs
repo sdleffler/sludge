@@ -1,6 +1,6 @@
 use crate::{fmod::Fmod, CheckError};
 use {
-    sludge::prelude::*,
+    sludge::{api::Module, prelude::*},
     sludge_fmod_sys::*,
     std::{ffi::CString, ops, ptr, sync::Arc},
 };
@@ -11,6 +11,20 @@ bitflags::bitflags! {
         const NONBLOCKING = FMOD_STUDIO_LOAD_BANK_NONBLOCKING;
         const DECOMPRESS_SAMPLES = FMOD_STUDIO_LOAD_BANK_DECOMPRESS_SAMPLES;
         const UNENCRYPTED = FMOD_STUDIO_LOAD_BANK_UNENCRYPTED;
+    }
+}
+
+impl<'lua> ToLua<'lua> for LoadBankFlags {
+    fn to_lua(self, lua: LuaContext<'lua>) -> LuaResult<LuaValue<'lua>> {
+        self.bits().to_lua(lua)
+    }
+}
+
+impl<'lua> FromLua<'lua> for LoadBankFlags {
+    fn from_lua(lua_value: LuaValue<'lua>, lua: LuaContext<'lua>) -> LuaResult<Self> {
+        Self::from_bits(u32::from_lua(lua_value, lua)?)
+            .ok_or_else(|| anyhow!("invalid bank load flags"))
+            .to_lua_err()
     }
 }
 
@@ -94,4 +108,19 @@ impl LuaUserData for Bank {
             Ok(())
         });
     }
+}
+
+fn load<'lua>(lua: LuaContext<'lua>) -> Result<LuaValue<'lua>> {
+    let table = lua.create_table_from(vec![
+        ("NORMAL", LoadBankFlags::NORMAL),
+        ("NONBLOCKING", LoadBankFlags::NONBLOCKING),
+        ("DECOMPRESS_SAMPLES", LoadBankFlags::DECOMPRESS_SAMPLES),
+        ("UNENCRYPTED", LoadBankFlags::UNENCRYPTED),
+    ])?;
+
+    Ok(LuaValue::Table(table))
+}
+
+inventory::submit! {
+    Module::parse("fmod.LoadBankFlags", load)
 }

@@ -178,14 +178,16 @@ fn load<'lua>(lua: LuaContext<'lua>) -> Result<LuaValue<'lua>> {
         // TODO: support flags
         (
             "load_bank_file",
-            lua.create_function(|lua, (filename, _flags): (LuaString, Option<LuaTable>)| {
-                let resources = lua.resources();
-                let fmod = resources.fetch::<Fmod>();
-                let bank = fmod
-                    .load_bank_file(filename.as_bytes(), LoadBankFlags::NORMAL)
-                    .to_lua_err()?;
-                Ok(bank)
-            })?,
+            lua.create_function(
+                |lua, (filename, flags): (LuaString, Option<LoadBankFlags>)| {
+                    let resources = lua.resources();
+                    let fmod = resources.fetch::<Fmod>();
+                    let bank = fmod
+                        .load_bank_file(filename.as_bytes(), flags.unwrap_or(LoadBankFlags::NORMAL))
+                        .to_lua_err()?;
+                    Ok(bank)
+                },
+            )?,
         ),
         (
             "get_event",
