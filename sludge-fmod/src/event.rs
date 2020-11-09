@@ -276,6 +276,21 @@ impl EventInstance {
         Ok(())
     }
 
+    pub fn is_paused(&self) -> Result<bool> {
+        let mut is_paused = 0i32;
+        unsafe {
+            FMOD_Studio_EventInstance_GetPaused(self.ptr, &mut is_paused as *mut _).check_err()?;
+        }
+        Ok(is_paused != 0)
+    }
+
+    pub fn set_paused(&self, paused: bool) -> Result<()> {
+        unsafe {
+            FMOD_Studio_EventInstance_SetPaused(self.ptr, paused as i32).check_err()?;
+        }
+        Ok(())
+    }
+
     pub fn trigger_cue(&self) -> Result<()> {
         unsafe {
             FMOD_Studio_EventInstance_TriggerCue(self.ptr).check_err()?;
