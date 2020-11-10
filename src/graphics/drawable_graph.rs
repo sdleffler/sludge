@@ -96,8 +96,8 @@ impl<'a, T: AnyDrawable> DrawableNodeBuilder<'a, T> {
         self
     }
 
-    pub fn parent(&mut self, index: Option<impl Into<ErasedDrawableNodeId>>) -> &mut Self {
-        let index = index.map(Into::into);
+    pub fn parent(&mut self, index: impl Into<Option<ErasedDrawableNodeId>>) -> &mut Self {
+        let index = index.into();
         if let Some(parent_idx) = index {
             let parent_node = &mut self.graph.objects[parent_idx.0];
             if let Err(i) = parent_node.children.binary_search(&self.index) {
