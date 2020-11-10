@@ -60,13 +60,9 @@ rlua_serde = { git = "https://github.com/sdleffler/rlua_serde" }
 approx = "0.3.2"
 rand = "0.7.3"
 rand_xorshift = "0.2.0"
-sludge-danmaku = { path = "sludge-danmaku" }
 
 [patch.crates-io]
 rlua = { git = "https://github.com/sdleffler/rlua" }
 
 [[example]]
 name = "bullets"
-
-[[example]]
-name = "danmaku"

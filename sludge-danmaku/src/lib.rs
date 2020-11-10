@@ -1342,6 +1342,13 @@ impl BulletType {
 
 inventory::collect!(BulletType);
 
+#[derive(Clone)]
+pub struct LuaBullet {
+    erased: sync::Arc<dyn ErasedBullet>,
+}
+
+impl LuaUserData for LuaBullet {}
+
 pub struct DanmakuSystem;
 
 impl System for DanmakuSystem {
@@ -1378,48 +1385,69 @@ pub fn load<'lua>(lua: LuaContext<'lua>) -> Result<LuaValue<'lua>> {
         })
         .collect::<HashMap<_, _>>();
 
-    let table = lua.create_table_from(vec![
-        (
-            "ring",
-            lua.create_function(|_, (radius, count)| -> LuaResult<RustPattern> {
-                Ok(RustPattern::new(Ring { radius, count }))
-            })?,
-        ),
-        (
-            "arc",
-            lua.create_function(|_, (radius, angle, count)| -> LuaResult<RustPattern> {
-                Ok(RustPattern::new(Arc {
-                    radius,
-                    angle,
-                    count,
-                }))
-            })?,
-        ),
-        (
-            "stack",
-            lua.create_function(|_, (x, y, angular, count)| -> LuaResult<RustPattern> {
-                Ok(RustPattern::new(Stack {
-                    delta: Velocity2::new(Vector2::new(x, y), angular),
-                    count,
-                }))
-            })?,
-        ),
-        (
-            "spawn",
-            lua.create_function(move |lua, (bullet_ty, closure): (LuaString, LuaFunction)| {
-                bullets[bullet_ty.to_str()?].batch_me(lua, closure)
-            })?,
-        ),
-        (
-            "set_bounds",
-            lua.create_function(|lua, bounds: Option<Box2<f32>>| {
-                let resources = lua.resources();
-                let mut danmaku = resources.fetch_mut::<Danmaku>();
-                danmaku.bounds = bounds;
-                Ok(())
-            })?,
-        ),
-    ])?;
+    let table = lua.create_table()?;
+    let key = lua.create_registry_value(table.clone())?;
+    table.set(
+        "ring",
+        lua.create_function(|_, (radius, count)| -> LuaResult<RustPattern> {
+            Ok(RustPattern::new(Ring { radius, count }))
+        })?,
+    )?;
+    table.set(
+        "arc",
+        lua.create_function(|_, (radius, angle, count)| -> LuaResult<RustPattern> {
+            Ok(RustPattern::new(Arc {
+                radius,
+                angle,
+                count,
+            }))
+        })?,
+    )?;
+    table.set(
+        "stack",
+        lua.create_function(|_, (x, y, angular, count)| -> LuaResult<RustPattern> {
+            Ok(RustPattern::new(Stack {
+                delta: Velocity2::new(Vector2::new(x, y), angular),
+                count,
+            }))
+        })?,
+    )?;
+    table.set(
+        "spawn",
+        lua.create_function(move |lua, (bullet_ty, closure): (LuaValue, LuaFunction)| {
+            match &bullet_ty {
+                LuaValue::String(ty_string) => {
+                    bullets[ty_string.to_str()?].batch_me(lua, closure)?;
+                }
+                LuaValue::UserData(ty_ud) => {
+                    ty_ud.borrow::<LuaBullet>()?.erased.batch_me(lua, closure)?;
+                }
+                _ => {
+                    return Err(LuaError::FromLuaConversionError {
+                        from: "lua value",
+                        to: "string or userdata",
+                        message: None,
+                    });
+                }
+            }
+
+            let table = lua.registry_value::<LuaTable>(&key)?;
+            if let Some(on_spawn) = table.get::<_, Option<LuaFunction>>("on_spawn")? {
+                on_spawn.call::<_, ()>(bullet_ty)?;
+            }
+
+            Ok(())
+        })?,
+    )?;
+    table.set(
+        "set_bounds",
+        lua.create_function(|lua, bounds: Option<Box2<f32>>| {
+            let resources = lua.resources();
+            let mut danmaku = resources.fetch_mut::<Danmaku>();
+            danmaku.bounds = bounds;
+            Ok(())
+        })?,
+    )?;
 
     Ok(LuaValue::Table(table))
 }

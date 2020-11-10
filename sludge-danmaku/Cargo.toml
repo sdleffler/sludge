@@ -15,3 +15,12 @@ atomic_refcell = "0.1.6"
 hashbrown = "0.9.1"
 rand = "0.7.3"
 hecs = { git = "https://github.com/sdleffler/hecs", features = ["macros"] }
+
+[dev-dependencies]
+shrev = "1.1.1"
+fern = "0.6.0"
+log = "0.4.11"
+chrono = "0.4.19"
+
+[[example]]
+name = "danmaku"

@@ -331,16 +331,27 @@ unsafe impl Sync for Fmod {}
 impl Fmod {
     /// This function should be called in your game's update loop.
     ///
-    /// As part of the Sludge-specific functionality of this crate, it requires a Lua context
-    /// in order to call Lua callbacks which have been deferred/put into the Lua callback
-    /// queue. Any callbacks which fired during the update will be run here, so you probably
-    /// want to run this before you run any other Lua code which updates on a per-frame basis,
-    /// like a Sludge `Scheduler`.
-    pub fn update<'lua>(&self, lua: LuaContext<'lua>) -> Result<()> {
+    /// Ideally, you should call `update` *after* your game might make FMOD API
+    /// calls, so that any calls are taken care of as quickly as possible.
+    /// However, you should note that any callbacks which are set through the Lua
+    /// API into things like FMOD event instances looking for beat callbacks or
+    /// timeline marker callbacks will only be fired when `flush_callbacks` is
+    /// called after the event occurs. As such, it's recommended that you call
+    /// `flush_callbacks` immediately before your game update, in order to receive
+    /// new callback events, and then `update` afterwards in order to flush any
+    /// newly recorded commands to FMOD's asynchronous processing system.
+    pub fn update<'lua>(&self) -> Result<()> {
         unsafe {
             FMOD_Studio_System_Update(self.ptr).check_err()?;
         }
+        Ok(())
+    }
 
+    /// If callbacks are registered through the Lua system, then their execution
+    /// is deferred by sending their parameters into a queue in the `Fmod` object
+    /// and then flushing the queue with this method and calling all the relevant
+    /// Lua closures.
+    pub fn flush_callbacks<'lua>(&self, lua: LuaContext<'lua>) -> Result<()> {
         for (key, event_instance, event_info) in self.cq_recv.try_iter() {
             let cb = lua.registry_value::<LuaFunction>(&key)?;
 
