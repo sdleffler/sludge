@@ -195,8 +195,9 @@ impl SpriteSheet {
                 let frame = Box2::new(fr.x, fr.y, fr.w, fr.h);
                 let frame_source = Box2::new(sb.x, sb.y, sb.w, sb.h);
                 let source_size = Vector2::new(ss.w, ss.h);
-                let offset = Vector2::new(sb.x as f32, sb.y as f32)
-                    - Vector2::new(ss.w as f32, ss.h as f32) / 2.;
+                let offset = (Vector2::new(sb.x as f32, sb.y as f32)
+                    - Vector2::new(ss.w as f32, ss.h as f32) / 2.)
+                    .map(f32::floor);
                 let uvs = Box2::new(
                     fr.x as f32 / size.x as f32,
                     fr.y as f32 / size.y as f32,
