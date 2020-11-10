@@ -117,11 +117,13 @@ impl Tag {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Frame {
     pub frame: Box2<u32>,
     pub frame_source: Box2<u32>,
     pub source_size: Vector2<u32>,
+    pub offset: Vector2<f32>,
+    pub uvs: Box2<f32>,
     pub duration: u32,
 }
 
@@ -159,6 +161,8 @@ impl SpriteSheet {
 
     pub fn from_json(s: &str) -> Result<Self> {
         let spritesheet_data = serde_json::from_str::<SpritesheetData>(s)?;
+        let dims = spritesheet_data.meta.size;
+        let size = Vector2::new(dims.w, dims.h);
 
         let tags = spritesheet_data
             .meta
@@ -182,21 +186,34 @@ impl SpriteSheet {
         let frames = spritesheet_data
             .frames
             .into_iter()
-            .map(|frame| {
-                let fr = frame.frame;
-                let sb = frame.sprite_source_size;
-                let ss = frame.source_size;
+            .map(|ase_frame| {
+                let fr = ase_frame.frame;
+                let sb = ase_frame.sprite_source_size;
+                let ss = ase_frame.source_size;
+
+                let duration = ase_frame.duration;
+                let frame = Box2::new(fr.x, fr.y, fr.w, fr.h);
+                let frame_source = Box2::new(sb.x, sb.y, sb.w, sb.h);
+                let source_size = Vector2::new(ss.w, ss.h);
+                let offset = Vector2::new(sb.x as f32, sb.y as f32)
+                    - Vector2::new(ss.w as f32, ss.h as f32) / 2.;
+                let uvs = Box2::new(
+                    fr.x as f32 / size.x as f32,
+                    fr.y as f32 / size.y as f32,
+                    fr.w as f32 / size.x as f32,
+                    fr.h as f32 / size.y as f32,
+                );
 
                 Frame {
-                    frame: Box2::new(fr.x, fr.y, fr.w, fr.h),
-                    frame_source: Box2::new(sb.x, sb.y, sb.w, sb.h),
-                    source_size: Vector2::new(ss.w, ss.h),
-                    duration: frame.duration,
+                    frame,
+                    frame_source,
+                    source_size,
+                    offset,
+                    uvs,
+                    duration,
                 }
             })
             .collect();
-
-        let dims = spritesheet_data.meta.size;
 
         Ok(Self {
             image: spritesheet_data
@@ -206,7 +223,7 @@ impl SpriteSheet {
             tag_ids,
             tags,
             frames,
-            size: Vector2::new(dims.w, dims.h),
+            size,
         })
     }
 
@@ -322,6 +339,22 @@ pub struct SpriteAnimation {
     pub frame: SpriteFrame,
     pub tag: SpriteTag,
     pub sheet: Cached<SpriteSheet>,
+}
+
+impl SpriteAnimation {
+    pub fn from_sheet(sheet: Cached<SpriteSheet>) -> Self {
+        Self {
+            frame: SpriteFrame::default(),
+            tag: SpriteTag::default(),
+            sheet,
+        }
+    }
+
+    pub fn update(&mut self, dt: f32) -> Frame {
+        let sheet = self.sheet.load_cached();
+        sheet.update_animation(dt, &mut self.tag, &mut self.frame);
+        sheet[self.frame.0]
+    }
 }
 
 impl<'a> SmartComponent<ScContext<'a>> for SpriteAnimation {}

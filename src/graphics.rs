@@ -1282,6 +1282,14 @@ impl InstanceParam {
     }
 
     #[inline]
+    pub fn prepend_transform(self, tx: &Transform3<f32>) -> Self {
+        Self {
+            tx: self.tx * tx,
+            ..self
+        }
+    }
+
+    #[inline]
     pub fn to_instance_properties(&self) -> InstanceProperties {
         let mins = self.src.mins;
         let extents = self.src.extents();
@@ -1787,6 +1795,12 @@ impl<C> ErasedDrawableId<C> {
 impl<T: AnyDrawable + ?Sized, C> From<DrawableId<T, C>> for ErasedDrawableId<C> {
     fn from(id: DrawableId<T, C>) -> ErasedDrawableId<C> {
         Self::new(id.0)
+    }
+}
+
+impl<T: AnyDrawable + ?Sized, C> From<DrawableId<T, C>> for Option<ErasedDrawableId<C>> {
+    fn from(id: DrawableId<T, C>) -> Option<ErasedDrawableId<C>> {
+        Some(ErasedDrawableId::new(id.0))
     }
 }
 
