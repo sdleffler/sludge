@@ -77,11 +77,7 @@ impl EventHandler for MainState {
 
         space.lua().context(|lua| {
             //while timer::check_update_time(ctx, 60) {
-            space
-                .fetch_mut::<Scheduler>()
-                .with_context(lua)
-                .update(1.0)
-                .unwrap();
+            space.fetch_mut::<Scheduler>().update(lua, 1.0).unwrap();
 
             let (w, h) = (320., 240.);
             {

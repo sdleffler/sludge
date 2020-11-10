@@ -96,11 +96,19 @@ pub fn record_scheduler_table<'lua>(
     for wakeup in scheduler.queue.iter() {
         let wakeup_table = lua.create_table()?;
         match wakeup {
-            Wakeup::Immediate(i) => {
+            Wakeup::Notify { thread: i, args } => {
                 wakeup_table.set("type", "immediate")?;
                 wakeup_table.set("thread", threads[i].clone())?;
+
+                if let Some(args_i) = *args {
+                    let tmp = scheduler.event_args[args_i]
+                        .iter()
+                        .map(|k| lua.registry_value::<LuaValue>(k))
+                        .collect::<LuaResult<Vec<_>>>()?;
+                    wakeup_table.set("args", tmp)?;
+                }
             }
-            Wakeup::Event {
+            Wakeup::Broadcast {
                 thread: i,
                 name,
                 args,
@@ -147,13 +155,31 @@ pub fn playback_scheduler_table<'lua>(
     scheduler: &mut Scheduler,
 ) -> Result<()> {
     let queue_table = scheduler_table.get::<_, LuaTable>("queue")?;
+    // FIXME(sleffy): persisting the scheduler table does not yet persist threads which
+    // exist outside the queue
+    let _slots_table = lua.registry_value::<LuaTable>(&scheduler.slots)?;
     for item in queue_table.sequence_values::<LuaTable>() {
         let table = item?;
-        let key = lua.create_registry_value(table.get::<_, LuaThread>("thread")?)?;
+        let thread = table.get::<_, LuaThread>("thread")?;
+        let key = lua.create_registry_value(thread.clone())?;
         let i = scheduler.threads.insert(key);
         match table.get::<_, LuaString>("type")?.to_str()? {
             "immediate" => {
-                scheduler.queue.push(Wakeup::Immediate(i));
+                let event_args =
+                    if let Some(args) = table.get::<_, Option<Vec<LuaValue>>>("args")? {
+                        let args_registered = args
+                            .into_iter()
+                            .map(|v| lua.create_registry_value(v))
+                            .collect::<LuaResult<EventArgs>>()?;
+                        let i = scheduler.event_args.insert(args_registered);
+                        Some(i)
+                    } else {
+                        None
+                    };
+                scheduler.queue.push(Wakeup::Notify {
+                    thread: i,
+                    args: event_args,
+                });
             }
             "event" => {
                 let event_name = EventName(table.get::<_, LuaString>("event")?.to_str()?.into());
@@ -168,7 +194,7 @@ pub fn playback_scheduler_table<'lua>(
                     } else {
                         None
                     };
-                scheduler.queue.push(Wakeup::Event {
+                scheduler.queue.push(Wakeup::Broadcast {
                     thread: i,
                     name: event_name,
                     args: event_args,

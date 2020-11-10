@@ -145,7 +145,7 @@ impl EventHandler for MainState {
         let scheduler = space.fetch_shared::<Scheduler>().unwrap();
         space
             .lua()
-            .context(|lua| scheduler.borrow_mut().with_context(lua).update(1.0))?;
+            .context(|lua| scheduler.borrow_mut().update(lua, 1.0))?;
 
         space.dispatch(dispatcher)?;
 

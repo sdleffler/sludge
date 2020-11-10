@@ -1,7 +1,8 @@
-use crate::CheckError;
+use crate::{event::EventDescription, CheckError};
 use {
     sludge::{api::Module, prelude::*},
     sludge_fmod_sys::*,
+    std::ptr,
 };
 
 bitflags::bitflags! {
@@ -59,7 +60,45 @@ impl Bank {
         Ok(())
     }
 
+    pub fn get_event_count(&self) -> Result<u32> {
+        let mut count = 0;
+        unsafe {
+            FMOD_Studio_Bank_GetEventCount(self.ptr, &mut count).check_err()?;
+        }
+        Ok(count as u32)
+    }
+
+    pub fn get_event_list(&self) -> Result<Vec<EventDescription>> {
+        let mut events;
+        let mut count = 0;
+        unsafe {
+            let null_desc = EventDescription {
+                ptr: ptr::null_mut(),
+            };
+            events = vec![null_desc; self.get_event_count()? as usize];
+            FMOD_Studio_Bank_GetEventList(
+                self.ptr,
+                events.as_mut_ptr() as *mut *mut FMOD_STUDIO_EVENTDESCRIPTION,
+                events.len() as i32,
+                &mut count,
+            )
+            .check_err()?;
+
+            // Properly initialize them while reusing the memory.
+            for event in &mut events {
+                *event = EventDescription::from_ptr(event.ptr)?;
+            }
+        }
+
+        events.truncate(count as usize);
+        Ok(events)
+    }
+
     pub fn unload(&self) -> Result<()> {
+        for event in self.get_event_list()? {
+            event.unset_callback()?;
+        }
+
         unsafe {
             FMOD_Studio_Bank_Unload(self.ptr).check_err()?;
         }

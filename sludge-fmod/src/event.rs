@@ -182,8 +182,20 @@ unsafe fn callback_shim(
 ) -> FMOD_RESULT {
     let parameters = parameters as *mut EventCallbackParameters;
     let result = match type_ {
-        FMOD_STUDIO_EVENT_CALLBACK_CREATED => cb(ev, EventCallbackInfo::Created),
-        FMOD_STUDIO_EVENT_CALLBACK_DESTROYED => cb(ev, EventCallbackInfo::Destroyed),
+        FMOD_STUDIO_EVENT_CALLBACK_CREATED => {
+            let fmod_result = cb(ev, EventCallbackInfo::Created);
+            if let Ok(Some(ud)) = ev.get_userdata() {
+                Arc::incr_strong_count(ud);
+            }
+            fmod_result
+        }
+        FMOD_STUDIO_EVENT_CALLBACK_DESTROYED => {
+            let fmod_result = cb(ev, EventCallbackInfo::Destroyed);
+            if let Ok(Some(ud)) = ev.get_userdata() {
+                Arc::decr_strong_count(ud);
+            }
+            fmod_result
+        }
         FMOD_STUDIO_EVENT_CALLBACK_STARTING => cb(ev, EventCallbackInfo::Starting),
         FMOD_STUDIO_EVENT_CALLBACK_STARTED => cb(ev, EventCallbackInfo::Started),
         FMOD_STUDIO_EVENT_CALLBACK_RESTARTED => cb(ev, EventCallbackInfo::Restarted),
@@ -294,21 +306,10 @@ impl From<ParameterId> for FMOD_STUDIO_PARAMETER_ID {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
 pub struct EventInstance {
     pub(crate) ptr: *mut FMOD_STUDIO_EVENTINSTANCE,
-}
-
-impl Clone for EventInstance {
-    fn clone(&self) -> Self {
-        unsafe {
-            if let Some(ud_ptr) = self.get_userdata().unwrap() {
-                Arc::incr_strong_count(ud_ptr);
-            }
-        }
-
-        Self { ptr: self.ptr }
-    }
 }
 
 unsafe impl Send for EventInstance {}
@@ -595,19 +596,22 @@ impl EventInstance {
         }
         Ok(())
     }
-}
 
-impl Drop for EventInstance {
-    fn drop(&mut self) {
+    pub fn unset_callback(&self) -> Result<()> {
         unsafe {
             if let Some(ud_ptr) = self.get_userdata().unwrap() {
                 Arc::decr_strong_count(ud_ptr);
             }
 
-            FMOD_Studio_EventInstance_Release(self.ptr)
-                .check_err()
-                .unwrap();
+            FMOD_Studio_EventInstance_SetUserData(self.ptr, ptr::null_mut()).check_err()?;
+            FMOD_Studio_EventInstance_SetCallback(
+                self.ptr,
+                None,
+                EventCallbackMask::empty().bits(),
+            )
+            .check_err()?;
         }
+        Ok(())
     }
 }
 
@@ -623,20 +627,24 @@ impl LuaUserData for EventInstance {
 
         methods.add_method(
             "set_callback",
-            |lua, this, (cb, mask): (LuaFunction, Option<EventCallbackMask>)| {
-                let resources = lua.resources();
-                let fmod = resources.fetch::<Fmod>();
-                let cq_send = fmod.cq_send.clone();
-                let key = Arc::new(lua.create_registry_value(cb)?);
-                this.set_callback(
-                    move |event_instance, event_info| {
-                        cq_send
-                            .send((key.clone(), event_instance, event_info))
-                            .map_err(|_| anyhow!("error while sending callback info"))
-                    },
-                    mask.unwrap_or(EventCallbackMask::ALL),
-                )
-                .to_lua_err()?;
+            |lua, this, (maybe_cb, mask): (Option<LuaFunction>, Option<EventCallbackMask>)| {
+                if let Some(cb) = maybe_cb {
+                    let resources = lua.resources();
+                    let fmod = resources.fetch::<Fmod>();
+                    let cq_send = fmod.cq_send.clone();
+                    let key = Arc::new(lua.create_registry_value(cb)?);
+                    this.set_callback(
+                        move |event_instance, event_info| {
+                            cq_send
+                                .send((key.clone(), event_instance, event_info))
+                                .map_err(|_| anyhow!("error while sending callback info"))
+                        },
+                        mask.unwrap_or(EventCallbackMask::ALL),
+                    )
+                    .to_lua_err()?;
+                } else {
+                    this.unset_callback().to_lua_err()?;
+                }
 
                 Ok(())
             },
@@ -644,21 +652,10 @@ impl LuaUserData for EventInstance {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
 pub struct EventDescription {
     pub(crate) ptr: *mut FMOD_STUDIO_EVENTDESCRIPTION,
-}
-
-impl Clone for EventDescription {
-    fn clone(&self) -> Self {
-        unsafe {
-            if let Some(ud_ptr) = self.get_userdata().unwrap() {
-                Arc::incr_strong_count(ud_ptr);
-            }
-        }
-
-        Self { ptr: self.ptr }
-    }
 }
 
 unsafe impl Send for EventDescription {}
@@ -740,19 +737,22 @@ impl EventDescription {
         }
         Ok(())
     }
-}
 
-impl Drop for EventDescription {
-    fn drop(&mut self) {
+    pub fn unset_callback(&self) -> Result<()> {
         unsafe {
             if let Some(ud_ptr) = self.get_userdata().unwrap() {
                 Arc::decr_strong_count(ud_ptr);
             }
 
-            FMOD_Studio_EventDescription_ReleaseAllInstances(self.ptr)
-                .check_err()
-                .unwrap();
+            FMOD_Studio_EventDescription_SetUserData(self.ptr, ptr::null_mut()).check_err()?;
+            FMOD_Studio_EventDescription_SetCallback(
+                self.ptr,
+                None,
+                EventCallbackMask::empty().bits(),
+            )
+            .check_err()?;
         }
+        Ok(())
     }
 }
 
@@ -764,20 +764,24 @@ impl LuaUserData for EventDescription {
 
         methods.add_method(
             "set_callback",
-            |lua, this, (cb, mask): (LuaFunction, Option<EventCallbackMask>)| {
-                let resources = lua.resources();
-                let fmod = resources.fetch::<Fmod>();
-                let cq_send = fmod.cq_send.clone();
-                let key = Arc::new(lua.create_registry_value(cb)?);
-                this.set_callback(
-                    move |event_instance, event_info| {
-                        cq_send
-                            .send((key.clone(), event_instance, event_info))
-                            .map_err(|_| anyhow!("error while sending callback info"))
-                    },
-                    mask.unwrap_or(EventCallbackMask::ALL),
-                )
-                .to_lua_err()?;
+            |lua, this, (maybe_cb, mask): (Option<LuaFunction>, Option<EventCallbackMask>)| {
+                if let Some(cb) = maybe_cb {
+                    let resources = lua.resources();
+                    let fmod = resources.fetch::<Fmod>();
+                    let cq_send = fmod.cq_send.clone();
+                    let key = Arc::new(lua.create_registry_value(cb)?);
+                    this.set_callback(
+                        move |event_instance, event_info| {
+                            cq_send
+                                .send((key.clone(), event_instance, event_info))
+                                .map_err(|_| anyhow!("error while sending callback info"))
+                        },
+                        mask.unwrap_or(EventCallbackMask::ALL),
+                    )
+                    .to_lua_err()?;
+                } else {
+                    this.unset_callback().to_lua_err()?;
+                }
 
                 Ok(())
             },

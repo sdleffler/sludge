@@ -30,8 +30,31 @@ pub fn load<'lua>(lua: LuaContext<'lua>) -> Result<LuaValue<'lua>> {
     })?;
 
     let broadcast = lua.create_function(|ctx, (string, args): (LuaString, LuaMultiValue)| {
-        let event = Event {
+        let event = Event::Broadcast {
             name: EventName(Atom::from(string.to_str()?)),
+            args: if args.is_empty() {
+                None
+            } else {
+                Some(
+                    args.into_iter()
+                        .map(|v| ctx.create_registry_value(v))
+                        .collect::<LuaResult<_>>()?,
+                )
+            },
+        };
+
+        ctx.resources()
+            .fetch::<SchedulerQueueChannel>()
+            .event
+            .try_send(event)
+            .unwrap();
+        Ok(())
+    })?;
+
+    let notify = lua.create_function(|ctx, (target, args): (LuaThread, LuaMultiValue)| {
+        let thread = ctx.create_registry_value(target)?;
+        let event = Event::Notify {
+            thread,
             args: if args.is_empty() {
                 None
             } else {
@@ -61,6 +84,7 @@ pub fn load<'lua>(lua: LuaContext<'lua>) -> Result<LuaValue<'lua>> {
     Ok(LuaValue::Table(lua.create_table_from(vec![
         ("spawn", spawn),
         ("broadcast", broadcast),
+        ("notify", notify),
         ("yield", yield_),
         ("create", create),
         ("wrap", wrap),

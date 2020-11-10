@@ -13,6 +13,7 @@ use {
         any::Any,
         cmp::Ordering,
         collections::BinaryHeap,
+        error::Error as StdError,
         fmt,
         io::{Read, Write},
         iter,
@@ -127,9 +128,10 @@ const RESOURCES_REGISTRY_KEY: &'static str = "sludge.resources";
 
 pub trait SludgeLuaContextExt<'lua> {
     fn resources(self) -> UnifiedResources<'static>;
-    fn spawn<T: ToLua<'lua>>(self, task: T) -> LuaResult<()>;
+    fn spawn<T: ToLua<'lua>>(self, task: T) -> LuaResult<LuaThread<'lua>>;
     fn broadcast<S: AsRef<str>, T: ToLuaMulti<'lua>>(self, event_name: S, args: T)
         -> LuaResult<()>;
+    fn notify<T: ToLuaMulti<'lua>>(self, thread: LuaThread<'lua>, args: T) -> LuaResult<()>;
 }
 
 impl<'lua> SludgeLuaContextExt<'lua> for LuaContext<'lua> {
@@ -139,7 +141,7 @@ impl<'lua> SludgeLuaContextExt<'lua> for LuaContext<'lua> {
             .unwrap()
     }
 
-    fn spawn<T: ToLua<'lua>>(self, task: T) -> LuaResult<()> {
+    fn spawn<T: ToLua<'lua>>(self, task: T) -> LuaResult<LuaThread<'lua>> {
         let thread = match task.to_lua(self)? {
             LuaValue::Function(f) => self.create_thread(f)?,
             LuaValue::Thread(th) => th,
@@ -152,13 +154,13 @@ impl<'lua> SludgeLuaContextExt<'lua> for LuaContext<'lua> {
             }
         };
 
-        let key = self.create_registry_value(thread)?;
+        let key = self.create_registry_value(thread.clone())?;
         self.resources()
             .fetch::<SchedulerQueueChannel>()
             .spawn
             .try_send(key)
             .unwrap();
-        Ok(())
+        Ok(thread)
     }
 
     fn broadcast<S: AsRef<str>, T: ToLuaMulti<'lua>>(
@@ -167,8 +169,32 @@ impl<'lua> SludgeLuaContextExt<'lua> for LuaContext<'lua> {
         args: T,
     ) -> LuaResult<()> {
         let args = args.to_lua_multi(self)?;
-        let event = Event {
+        let event = Event::Broadcast {
             name: EventName(Atom::from(event_name.as_ref())),
+            args: if args.is_empty() {
+                None
+            } else {
+                Some(
+                    args.into_iter()
+                        .map(|v| self.create_registry_value(v))
+                        .collect::<LuaResult<_>>()?,
+                )
+            },
+        };
+
+        self.resources()
+            .fetch::<SchedulerQueueChannel>()
+            .event
+            .try_send(event)
+            .unwrap();
+        Ok(())
+    }
+
+    fn notify<T: ToLuaMulti<'lua>>(self, thread: LuaThread<'lua>, args: T) -> LuaResult<()> {
+        let args = args.to_lua_multi(self)?;
+        let thread = self.create_registry_value(thread)?;
+        let event = Event::Notify {
+            thread,
             args: if args.is_empty() {
                 None
             } else {
@@ -234,7 +260,7 @@ impl Space {
         let mut local = OwnedResources::new();
 
         local.insert(World::new());
-        let (scheduler, queue_handle) = Scheduler::new();
+        let (scheduler, queue_handle) = lua.context(Scheduler::new)?;
         local.insert(scheduler);
         local.insert(queue_handle);
         local.insert(EntityUserDataRegistry::new());
@@ -373,8 +399,11 @@ impl Space {
 /// ignored.
 #[derive(Debug)]
 pub enum Wakeup {
-    Immediate(Index),
-    Event {
+    Notify {
+        thread: Index,
+        args: Option<Index>,
+    },
+    Broadcast {
         thread: Index,
         name: EventName,
         args: Option<Index>,
@@ -388,16 +417,16 @@ pub enum Wakeup {
 impl Wakeup {
     pub fn scheduled_for(&self) -> u64 {
         match self {
-            Self::Immediate(..) | Self::Event { .. } => 0,
+            Self::Notify { .. } | Self::Broadcast { .. } => 0,
             Self::Timed { scheduled_for, .. } => *scheduled_for,
         }
     }
 
     pub fn thread(&self) -> Index {
         match self {
-            Self::Immediate(thread) | Self::Event { thread, .. } | Self::Timed { thread, .. } => {
-                *thread
-            }
+            Self::Notify { thread, .. }
+            | Self::Broadcast { thread, .. }
+            | Self::Timed { thread, .. } => *thread,
         }
     }
 }
@@ -421,12 +450,12 @@ impl PartialOrd for Wakeup {
 /// result.
 impl Ord for Wakeup {
     fn cmp(&self, rhs: &Self) -> Ordering {
-        if matches!(self, Self::Immediate(..)) || matches!(rhs, Self::Immediate(..)) {
-            if matches!(self, Self::Immediate(..)) && matches!(rhs, Self::Immediate(..)) {
+        if matches!(self, Self::Notify{..}) || matches!(rhs, Self::Notify{..}) {
+            if matches!(self, Self::Notify{..}) && matches!(rhs, Self::Notify{..}) {
                 return Ordering::Equal;
-            } else if matches!(self, Self::Immediate(..)) {
+            } else if matches!(self, Self::Notify{..}) {
                 return Ordering::Greater;
-            } else if matches!(rhs, Self::Immediate(..)) {
+            } else if matches!(rhs, Self::Notify{..}) {
                 return Ordering::Less;
             }
         }
@@ -444,9 +473,15 @@ pub struct EventName(Atom);
 pub type EventArgs = SmallVec<[LuaRegistryKey; 3]>;
 
 #[derive(Debug)]
-pub struct Event {
-    name: EventName,
-    args: Option<EventArgs>,
+pub enum Event {
+    Broadcast {
+        name: EventName,
+        args: Option<EventArgs>,
+    },
+    Notify {
+        thread: LuaRegistryKey,
+        args: Option<EventArgs>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -509,6 +544,14 @@ pub struct Scheduler {
     /// get woken up multiple times.
     threads: Arena<LuaRegistryKey>,
 
+    /// On the Lua side, this table maps threads (coroutines) to slots
+    /// in the `threads` arena, *not* generational indices, so that
+    /// they're always valid indices as long as the thread is alive.
+    ///
+    /// Useful for waking threads "by name" (by the coroutine/thread
+    /// key itself.)
+    slots: LuaRegistryKey,
+
     /// `EventArgs` are bundles of Lua multivalues, and having them in
     /// an arena means they can be 1.) shared between different `Wakeup`s
     /// and 2.) we clear the entire arena all in one go later!
@@ -533,16 +576,18 @@ pub struct Scheduler {
 impl Scheduler {
     pub const CHANNEL_BOUND: usize = 4096;
 
-    pub(crate) fn new() -> (Self, SchedulerQueueChannel) {
+    pub(crate) fn new(lua: LuaContext) -> Result<(Self, SchedulerQueueChannel)> {
         let (spawn_sender, spawn_channel) = crossbeam_channel::bounded(Self::CHANNEL_BOUND);
         let (event_sender, event_channel) = crossbeam_channel::bounded(Self::CHANNEL_BOUND);
+        let slots = lua.create_registry_value(lua.create_table()?)?;
 
-        (
+        Ok((
             Self {
                 queue: BinaryHeap::new(),
                 waiting: HashMap::new(),
 
                 threads: Arena::new(),
+                slots,
                 event_args: Arena::new(),
 
                 event_channel,
@@ -555,31 +600,36 @@ impl Scheduler {
                 spawn: spawn_sender,
                 event: event_sender,
             },
-        )
-    }
-
-    pub fn with_context<'s, 'lua>(
-        &'s mut self,
-        lua: LuaContext<'lua>,
-    ) -> SchedulerWithContext<'s, 'lua> {
-        SchedulerWithContext::new(self, lua)
+        ))
     }
 
     pub fn is_idle(&self) -> bool {
         self.queue.is_empty() || self.queue.peek().unwrap().scheduled_for() > self.discrete
     }
 
-    pub(crate) fn queue_all_spawned(&mut self) {
+    pub(crate) fn queue_all_spawned<'lua>(
+        &mut self,
+        lua: LuaContext<'lua>,
+        slots: &LuaTable<'lua>,
+    ) -> Result<()> {
         for key in self.spawn_channel.try_iter() {
+            let thread = lua.registry_value::<LuaThread>(&key)?;
             let index = self.threads.insert(key);
+            slots.set(thread, index.slot())?;
             self.queue.push(Wakeup::Timed {
                 thread: index,
                 scheduled_for: 0,
             });
         }
+
+        Ok(())
     }
 
-    pub(crate) fn poll_events_and_queue_all_notified(&mut self) {
+    pub(crate) fn poll_events_and_queue_all_notified<'lua>(
+        &mut self,
+        lua: LuaContext<'lua>,
+        slots: &LuaTable<'lua>,
+    ) -> Result<()> {
         let Self {
             queue,
             threads,
@@ -590,26 +640,48 @@ impl Scheduler {
         } = self;
 
         for event in event_channel.try_iter() {
-            let event_index = event.args.map(|args| event_args.insert(args));
-
-            if let Some(running_threads) = waiting.get_mut(&event.name) {
-                for index in running_threads.drain(..) {
-                    // `None` will get returned here if the thread's already been rescheduled.
-                    // `threads.increment_gen` invalidates all of the indices which previously
-                    // pointed to this thread.
-                    if let Some(new_index) = threads.invalidate(index) {
-                        queue.push(Wakeup::Event {
-                            thread: new_index,
-                            name: event.name.clone(),
+            match event {
+                Event::Broadcast { name, args } => {
+                    let event_index = args.map(|args| event_args.insert(args));
+                    if let Some(running_threads) = waiting.get_mut(&name) {
+                        for index in running_threads.drain(..) {
+                            // `None` will get returned here if the thread's already been rescheduled.
+                            // `threads.increment_gen` invalidates all of the indices which previously
+                            // pointed to this thread.
+                            if let Some(new_index) = threads.invalidate(index) {
+                                queue.push(Wakeup::Broadcast {
+                                    thread: new_index,
+                                    name: name.clone(),
+                                    args: event_index,
+                                });
+                            }
+                        }
+                    }
+                }
+                Event::Notify { thread, args } => {
+                    let event_index = args.map(|args| event_args.insert(args));
+                    let value = lua.registry_value(&thread)?;
+                    let maybe_slot = slots.get::<LuaThread, Option<u32>>(value)?;
+                    // Thread may have died by the time we get around to notifying it.
+                    if let Some(slot) = maybe_slot {
+                        let index = threads.contains_slot(slot).unwrap();
+                        queue.push(Wakeup::Notify {
+                            thread: threads.invalidate(index).unwrap(),
                             args: event_index,
                         });
                     }
                 }
             }
         }
+
+        Ok(())
     }
 
-    pub(crate) fn run_all_queued(&mut self, lua: LuaContext) -> Result<()> {
+    pub(crate) fn run_all_queued<'lua>(
+        &mut self,
+        lua: LuaContext<'lua>,
+        slots: &LuaTable<'lua>,
+    ) -> Result<()> {
         while let Some(top) = self.queue.peek() {
             // If this thread isn't ready to wake up on this tick, then
             // none of the other threads in this queue are.
@@ -622,11 +694,20 @@ impl Scheduler {
                 let thread = lua.registry_value::<LuaThread>(key)?;
 
                 let resumed = match &sleeping {
-                    Wakeup::Immediate(..) => thread.resume::<_, LuaMultiValue>(()),
+                    Wakeup::Notify {
+                        args: Some(args), ..
+                    } => {
+                        let args_unpacked = self.event_args[*args]
+                            .iter()
+                            .map(|key| lua.registry_value(key))
+                            .collect::<Result<LuaMultiValue, _>>();
+                        args_unpacked.and_then(|xs| thread.resume::<_, LuaMultiValue>(xs))
+                    }
+                    Wakeup::Notify { args: None, .. } => thread.resume::<_, LuaMultiValue>(()),
                     Wakeup::Timed { scheduled_for, .. } => {
                         thread.resume::<_, LuaMultiValue>(*scheduled_for)
                     }
-                    Wakeup::Event {
+                    Wakeup::Broadcast {
                         name,
                         args: Some(args),
                         ..
@@ -641,7 +722,7 @@ impl Scheduler {
                                 .collect::<Result<LuaMultiValue, _>>();
                         args_unpacked.and_then(|xs| thread.resume::<_, LuaMultiValue>(xs))
                     }
-                    Wakeup::Event {
+                    Wakeup::Broadcast {
                         name, args: None, ..
                     } => thread.resume::<_, LuaMultiValue>(name.0.as_ref()),
                 };
@@ -652,6 +733,9 @@ impl Scheduler {
 
                         // Take the yielded values provided by the coroutine and turn
                         // them into events/wakeup times.
+                        //
+                        // If no values are provided, the thread will sleep until it is directly woken
+                        // by a `Notify`.
                         for value in mv.into_iter() {
                             match value {
                                 // If we see an integer, then treat it as ticks-until-next-wake.
@@ -686,13 +770,24 @@ impl Scheduler {
                             }
                         }
                     }
-                    Ok(_) => {}
+                    Ok(_) => {
+                        slots.set(thread, LuaValue::Nil)?;
+                    }
                     Err(lua_error) => {
-                        log::error!(
-                            "fatal error in Lua thread {:?}: {}",
-                            sleeping.thread().to_bits(),
-                            lua_error
-                        );
+                        slots.set(thread, LuaValue::Nil)?;
+                        self.threads.remove(sleeping.thread());
+                        match lua_error.source() {
+                            Some(src) => log::error!(
+                                "fatal error in Lua thread {:?}: {}",
+                                sleeping.thread(),
+                                src
+                            ),
+                            None => log::error!(
+                                "fatal error in Lua thread {:?}: {}",
+                                sleeping.thread(),
+                                lua_error
+                            ),
+                        }
                     }
                 }
             }
@@ -700,23 +795,11 @@ impl Scheduler {
 
         Ok(())
     }
-}
 
-pub struct SchedulerWithContext<'s, 'lua> {
-    scheduler: &'s mut Scheduler,
-    lua: LuaContext<'lua>,
-}
-
-impl<'s, 'lua> SchedulerWithContext<'s, 'lua> {
-    pub fn new(scheduler: &'s mut Scheduler, lua: LuaContext<'lua>) -> Self {
-        Self { scheduler, lua }
-    }
-
-    pub fn update(&mut self, dt: f32) -> Result<()> {
-        let Self { scheduler, lua } = self;
-
-        scheduler.continuous += dt;
-        while scheduler.continuous > 0. {
+    pub fn update(&mut self, lua: LuaContext, dt: f32) -> Result<()> {
+        self.continuous += dt;
+        let slots = lua.registry_value(&self.slots)?;
+        while self.continuous > 0. {
             // Our core update step consists of two steps:
             // 1. Run all threads scheduled to run on or before the current tick.
             // 2. Check for threads spawned/woken by newly run threads. If there are new
@@ -727,20 +810,20 @@ impl<'s, 'lua> SchedulerWithContext<'s, 'lua> {
             const LOOP_CAP: usize = 8;
 
             for i in 0..LOOP_CAP {
-                scheduler.run_all_queued(*lua)?;
-                scheduler.event_args.clear();
-                scheduler.queue_all_spawned();
-                scheduler.poll_events_and_queue_all_notified();
+                self.run_all_queued(lua, &slots)?;
+                self.event_args.clear();
+                self.queue_all_spawned(lua, &slots)?;
+                self.poll_events_and_queue_all_notified(lua, &slots)?;
 
-                if scheduler.is_idle() {
+                if self.is_idle() {
                     break;
                 } else if i == LOOP_CAP - 1 {
                     log::warn!("trampoline loop cap exceeded");
                 }
             }
 
-            scheduler.continuous -= 1.;
-            scheduler.discrete += 1;
+            self.continuous -= 1.;
+            self.discrete += 1;
         }
 
         lua.expire_registry_values();

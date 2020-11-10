@@ -917,7 +917,7 @@ impl Pattern for Arc {
     fn build<'lua>(&self, builder: &mut dyn PatternBuilder<'lua>) -> Result<()> {
         builder.push(None)?;
         let half_angle = self.angle / 2.;
-        let step = self.angle / (self.count as f32);
+        let step = self.angle / (self.count as f32 - 1.);
         builder.rotate(-half_angle)?;
         builder.translate(Vector2::x() * self.radius)?;
         builder.fire()?;

@@ -303,12 +303,13 @@ impl FmodSystemBuilder {
         }
 
         let (cq_send, cq_recv) = crossbeam_channel::unbounded();
-
-        Ok(Fmod {
+        let fmod = Fmod {
             ptr: self.system,
             cq_recv,
             cq_send,
-        })
+        };
+
+        Ok(fmod)
     }
 }
 
@@ -398,6 +399,15 @@ impl Fmod {
 
     /// Unload all currently loaded banks.
     pub fn unload_all(&self) -> Result<()> {
+        let banks = self.get_bank_list()?;
+        for event in banks
+            .into_iter()
+            .flat_map(|bank| bank.get_event_list())
+            .flatten()
+        {
+            event.unset_callback()?;
+        }
+
         unsafe {
             FMOD_Studio_System_UnloadAll(self.ptr).check_err()?;
         }
