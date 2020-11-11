@@ -144,10 +144,26 @@ impl ops::Index<TagId> for SpriteSheet {
     }
 }
 
+impl ops::Index<SpriteTag> for SpriteSheet {
+    type Output = Tag;
+
+    fn index(&self, sprite_tag: SpriteTag) -> &Self::Output {
+        &self[sprite_tag.tag_id]
+    }
+}
+
 impl ops::Index<FrameId> for SpriteSheet {
     type Output = Frame;
 
     fn index(&self, FrameId(id): FrameId) -> &Self::Output {
+        &self.frames[id as usize]
+    }
+}
+
+impl ops::Index<SpriteFrame> for SpriteSheet {
+    type Output = Frame;
+
+    fn index(&self, SpriteFrame(FrameId(id)): SpriteFrame) -> &Self::Output {
         &self.frames[id as usize]
     }
 }
