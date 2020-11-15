@@ -33,6 +33,7 @@ use {
 
 pub mod drawable_graph;
 pub mod sorted_layer;
+pub mod text;
 
 pub mod shader {
     use super::*;
@@ -1246,6 +1247,11 @@ impl InstanceParam {
     }
 
     #[inline]
+    pub fn color(self, color: Color) -> Self {
+        Self { color, ..self }
+    }
+
+    #[inline]
     pub fn rotate2(self, angle: f32) -> Self {
         Self {
             tx: self.tx
@@ -1343,6 +1349,7 @@ impl<'a> SmartComponent<ScContext<'a>> for SpriteId {}
 
 #[derive(Debug)]
 struct SpriteBatchInner {
+    // Used to store the result of converting InstanceParams to InstanceProperties
     instances: Vec<InstanceProperties>,
     /// Capacity is used to store the length of the buffers inside of mq::Bindings
     capacity: usize,
@@ -1500,6 +1507,7 @@ impl Drawable for SpriteBatch {
         ctx.push_multiplied_transform(instance.tx.to_homogeneous());
         ctx.mq.apply_bindings(&inner.bindings);
         ctx.apply_transforms();
+        // 6 here because a quad is 6 vertices
         ctx.mq.draw(0, 6, inner.instances.len() as i32);
         ctx.pop_transform();
         ctx.apply_transforms();
@@ -1815,7 +1823,8 @@ impl Asset for Texture {
                 let mut filesystem = resources.fetch_mut::<Filesystem>();
                 let mut gfx = resources.fetch_mut::<Graphics>();
                 let mut file = filesystem.open(path)?;
-                let texture = Texture::from_reader(&mut *gfx, &mut file)?;
+                let texture = Texture::from_reader(&mut *gfx, &mut file)
+                    .with_context(|| anyhow!("Failed to create a texture using {:?}", path))?;
                 Ok(Loaded::new(texture))
             } // _ => panic!("logical resources not supported (yet)"),
         }
