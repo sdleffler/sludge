@@ -8,6 +8,8 @@ use crate::{
 use {
     anyhow::*,
     derivative::*,
+    image::Rgba,
+    image::RgbaImage,
     lyon::{
         math::*,
         tessellation::{self as t, FillOptions, StrokeOptions},
@@ -15,6 +17,8 @@ use {
     miniquad as mq,
     rlua::prelude::*,
     serde::{Deserialize, Serialize},
+    im::HashMap,
+    std::io::Error as IoError,
     std::{
         any::{self, Any, TypeId},
         cmp::Ordering,
@@ -1343,6 +1347,7 @@ impl<'a> SmartComponent<ScContext<'a>> for SpriteId {}
 
 #[derive(Debug)]
 struct SpriteBatchInner {
+    // Used to store the result of converting InstanceParams to InstanceProperties
     instances: Vec<InstanceProperties>,
     /// Capacity is used to store the length of the buffers inside of mq::Bindings
     capacity: usize,
@@ -1500,6 +1505,7 @@ impl Drawable for SpriteBatch {
         ctx.push_multiplied_transform(instance.tx.to_homogeneous());
         ctx.mq.apply_bindings(&inner.bindings);
         ctx.apply_transforms();
+        // 6 here because a quad is 6 vertices
         ctx.mq.draw(0, 6, inner.instances.len() as i32);
         ctx.pop_transform();
         ctx.apply_transforms();
@@ -1625,6 +1631,263 @@ impl Drawable for Sprite {
                 texture_aabb.maxs.y * extents.y,
             ),
         ))
+    }
+}
+
+// AsciiSubset refers to the subset of ascii characters which give alphanumeric characters plus symbols
+pub enum CharacterListType {
+    AsciiSubset,
+    Ascii,
+    Cyrillic,
+    Thai,
+    Vietnamese,
+    Chinese,
+    Japanese,
+}
+
+#[derive(Debug, Clone)]
+struct CharInfo {
+    vertical_offset: i32,
+    width: f32,
+    uvs: Box2<f32>,
+}
+
+/// `FontTexture` is a texture generated using the *_character_list functions.
+/// It contains a texture representing all of the rasterized characters
+/// retrieved from the *_character_list function. `font_map` represents a
+/// a mapping between a character and its respective character texture
+/// located within `font_texture`.
+#[derive(Debug)]
+pub struct FontAtlas {
+    font_map: HashMap<char, CharInfo>,
+    font_texture: Cached<Texture>,
+}
+
+impl FontAtlas {
+    pub fn new<R: Read>(
+        ctx: &mut Graphics,
+        font: R,
+        font_size: f32,
+        char_list_type: CharacterListType,
+    ) -> Result<FontAtlas> {
+        let inval_bb = ::rusttype::Rect {
+            min: ::rusttype::Point { x: 0, y: 0 },
+            max: ::rusttype::Point {
+                x: (font_size / 4.0) as i32,
+                y: 0,
+            },
+        };
+        const MARGIN: usize = 3;
+        let char_list = Self::get_char_list(char_list_type)?;
+        println!("This many chars: {}", char_list.len());
+        let chars_per_row = ((char_list.len() as f32).sqrt() as usize) + 1;
+        let bytes_font = font.bytes().collect::<Result<Vec<u8>, IoError>>()?;
+        let rusttype_font = ::rusttype::Font::try_from_bytes(&bytes_font[..]).ok_or(anyhow!(
+            "Unable to create a rusttype::Font using bytes_font"
+        ))?;
+        let mut glyphs_and_chars = char_list
+            .iter()
+            .map(|c| {
+                (
+                    rusttype_font
+                        .glyph(*c)
+                        .scaled(::rusttype::Scale {
+                            x: font_size,
+                            y: font_size,
+                        })
+                        .positioned(::rusttype::Point { x: 0.0, y: 0.0 }),
+                    *c,
+                )
+            })
+            .collect::<Vec<(::rusttype::PositionedGlyph, char)>>();
+        glyphs_and_chars
+            .sort_unstable_by_key(|g| g.0.pixel_bounding_box().unwrap_or(inval_bb).height());
+
+        let mut texture_height: usize = glyphs_and_chars
+            .last()
+            .unwrap()
+            .0
+            .pixel_bounding_box()
+            .unwrap_or(inval_bb)
+            .height() as usize;
+        let mut current_row: usize = 0;
+        let mut widest_row: usize = 0;
+        let mut row_sum: usize = 0;
+
+        // Sort the glyphs by height so that we know how tall each row should be in the atlas
+        // Sums all the widths and heights of the bounding boxes so we know how large the atlas will be
+        let mut char_rows = Vec::new();
+        let mut cur_row = Vec::with_capacity(chars_per_row);
+
+        for (glyph, c) in glyphs_and_chars.iter().rev() {
+            let bb = glyph.pixel_bounding_box().unwrap_or(inval_bb);
+
+            if current_row > chars_per_row {
+                current_row = 0;
+                texture_height += bb.height() as usize;
+                if row_sum > widest_row {
+                    widest_row = row_sum;
+                }
+                row_sum = 0;
+                char_rows.push(cur_row.clone());
+                cur_row.clear();
+            }
+
+            cur_row.push((glyph, *c));
+            row_sum += bb.width() as usize;
+            current_row += 1;
+        }
+        // Push remaining chars
+        char_rows.push(cur_row);
+
+        let texture_width = widest_row + (chars_per_row * MARGIN);
+        texture_height += chars_per_row * MARGIN;
+
+        let mut texture = RgbaImage::new(texture_width as u32, texture_height as u32);
+
+        let mut texture_cursor: (usize, usize) = (0, 0);
+
+        let mut char_map: HashMap<char, CharInfo> = HashMap::new();
+
+        for row in char_rows {
+            let height = row
+                .first()
+                .unwrap()
+                .0
+                .pixel_bounding_box()
+                .unwrap_or(inval_bb)
+                .height() as usize;
+            for (glyph, c) in row {
+                let bb = glyph.pixel_bounding_box().unwrap_or(inval_bb);
+
+                char_map.insert(
+                    c,
+                    CharInfo {
+                        vertical_offset: bb.min.y,
+                        uvs: Box2::new(
+                            texture_cursor.0 as f32 / texture_width as f32,
+                            texture_cursor.1 as f32 / texture_height as f32,
+                            bb.width() as f32 / texture_width as f32,
+                            bb.height() as f32 / texture_height as f32,
+                        ),
+                        width: glyph.unpositioned().h_metrics().advance_width,
+                    },
+                );
+
+                glyph.draw(|x, y, v| {
+                    let x: u32 = texture_cursor.0 as u32 + x;
+                    let y: u32 = texture_cursor.1 as u32 + y;
+                    let c = (v * 255.0) as u8;
+                    let color = Rgba([255, 255, 255, c]);
+                    texture.put_pixel(x, y, color);
+                });
+
+                texture_cursor.0 += bb.width() as usize + MARGIN;
+            }
+            texture_cursor.1 += height + MARGIN;
+            texture_cursor.0 = 0;
+        }
+
+        texture.save("font_atlas.png")?;
+
+        Ok(FontAtlas {
+            font_map: char_map,
+            font_texture: Cached::new(Texture::from_rgba8(
+                ctx,
+                texture_width as u16,
+                texture_height as u16,
+                &texture,
+            )),
+        })
+    }
+
+    fn get_char_list(char_list_type: CharacterListType) -> Result<Vec<char>> {
+        let char_list = match char_list_type {
+            CharacterListType::AsciiSubset => [0x20..0x7F].iter(),
+            CharacterListType::Ascii => [0x00..0xFF].iter(),
+            CharacterListType::Cyrillic => [
+                0x0020u32..0x00FF, // Basic Latin + Latin Supplement
+                0x0400u32..0x052F, // Cyrillic + Cyrillic Supplement
+                0x2DE0u32..0x2DFF, // Cyrillic Extended-A
+                0xA640u32..0xA69F, // Cyrillic Extended-B
+            ]
+            .iter(),
+            CharacterListType::Thai => [
+                0x0020u32..0x00FF, // Basic Latin
+                0x2010u32..0x205E, // Punctuations
+                0x0E00u32..0x0E7F, // Thai
+            ]
+            .iter(),
+
+            CharacterListType::Vietnamese => [
+                0x0020u32..0x00FF, // Basic Latin
+                0x0102u32..0x0103,
+                0x0110u32..0x0111,
+                0x0128u32..0x0129,
+                0x0168u32..0x0169,
+                0x01A0u32..0x01A1,
+                0x01AFu32..0x01B0,
+                0x1EA0u32..0x1EF9,
+            ]
+            .iter(),
+            CharacterListType::Chinese => return Err(anyhow!("Chinese fonts not yet supported")),
+            CharacterListType::Japanese => return Err(anyhow!("Japanese fonts not yet supported")),
+        };
+        char_list
+            .cloned()
+            .flatten()
+            .map(|c| {
+                std::char::from_u32(c).ok_or(anyhow!("Unable to convert u32 \"{}\" into char", c))
+            })
+            .collect::<Result<Vec<char>>>()
+    }
+}
+
+impl Drawable for FontAtlas {
+    fn draw(&self, ctx: &mut Graphics, instance: InstanceParam) {
+        self.font_texture.load().draw(ctx, instance);
+    }
+
+    fn aabb(&self) -> Box2<f32> {
+        self.font_texture.load().aabb()
+    }
+}
+
+pub struct Text {
+    batch: SpriteBatch,
+    char_texture_map: HashMap<char, CharInfo>,
+}
+
+impl Text {
+    pub fn new(ctx: &mut Graphics, input_text: &str, font_atlas: &FontAtlas, color: Color) -> Self {
+        let mut text = Text {
+            batch: SpriteBatch::with_capacity(ctx, font_atlas.font_texture.clone(), input_text.len()),
+            char_texture_map: font_atlas.font_map.clone(),
+        };
+        text.set_text(input_text, color);
+        text
+    }
+
+    pub fn set_text(&mut self, new_text: &str, color: Color) {
+        self.batch.clear();
+        let mut width: f32 = 0.;
+        for c in new_text.chars() {
+            let c_info = self.char_texture_map.get(&c).unwrap_or(self.char_texture_map.get(&'a').unwrap());
+            let mut i_param = InstanceParam::new().src(c_info.uvs).translate2(Vector2::new(width, c_info.vertical_offset as f32));
+            i_param.color = color;
+            self.batch.insert(i_param);
+            width += c_info.width;
+        }
+    }
+}
+
+impl Drawable for Text {
+    fn draw(&self, ctx: &mut Graphics, instance: InstanceParam) {
+        self.batch.draw(ctx, instance);
+    }
+
+    fn aabb(&self) -> Box2<f32> {
+        self.batch.aabb()
     }
 }
 
@@ -1815,7 +2078,8 @@ impl Asset for Texture {
                 let mut filesystem = resources.fetch_mut::<Filesystem>();
                 let mut gfx = resources.fetch_mut::<Graphics>();
                 let mut file = filesystem.open(path)?;
-                let texture = Texture::from_reader(&mut *gfx, &mut file)?;
+                let texture = Texture::from_reader(&mut *gfx, &mut file)
+                    .with_context(|| format!("Failed to create a texture using {:?}", path))?;
                 Ok(Loaded::new(texture))
             } // _ => panic!("logical resources not supported (yet)"),
         }
