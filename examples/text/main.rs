@@ -3,7 +3,7 @@ extern crate sludge as sloodge;
 use {
     anyhow::*,
     sloodge::{
-        conf::Conf, event::EventHandler, graphics::*, prelude::*,
+        conf::Conf, event::EventHandler, graphics::*, prelude::*, graphics::text::*
     },
 };
 
