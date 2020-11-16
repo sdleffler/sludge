@@ -12,31 +12,30 @@ struct FmodPaths {
     studio_lib: String,
 }
 
+const WINDOWS_PATH: &str = r#"C:\Program Files (x86)\FMOD SoundSystem\FMOD Studio API Windows\api\"#;
+const LINUX_PATH: &str = "/opt/fmodstudioapi20105linux/api/";
+
 impl FmodPaths {
     pub fn new() -> Self {
-        let api_root = if cfg!(target_os = "windows") {
-            r#"C:\Program Files (x86)\FMOD SoundSystem\FMOD Studio API Windows\api\"#.to_owned()
-        // r#"C:\Program Files (x86)\FMOD SoundSystem\FMOD Studio API Universal Windows Platform\api\"#.to_owned()
-        } else {
-            panic!("unknown/unsupported target OS")
-        };
-
-        let core_inc = "-I".to_owned() + &api_root + r#"core\inc"#;
-        let studio_inc = "-I".to_owned() + &api_root + r#"studio\inc"#;
-
-        let suffix = if cfg!(target_os = "windows") {
-            if cfg!(features = "debug") {
+        let (api_root, path_delimiter, binary_extension, suffix) = if cfg!(target_os = "windows") {
+            let suffix = if cfg!(features = "debug") {
                 "L_vc"
             } else {
                 "_vc"
-            }
+            };
+            (WINDOWS_PATH.to_owned(), "\\", "64", suffix)
+        } else if cfg!(target_os = "linux") {
+            (LINUX_PATH.to_owned(), "/", "86_64", "")
         } else {
             panic!("unknown/unsupported target OS")
         };
 
-        let core_lib_path = api_root.clone() + r#"core\lib\x64"#;
+        let core_inc = "-I".to_owned() + &api_root + &format!(r#"core{}inc"#, path_delimiter);
+        let studio_inc = "-I".to_owned() + &api_root + &format!(r#"studio{}inc"#, path_delimiter);
+
+        let core_lib_path = api_root.to_owned() + &format!("core{}lib{}x{}", path_delimiter, path_delimiter, binary_extension);
         let core_lib = "fmod".to_owned() + suffix;
-        let studio_lib_path = api_root.clone() + r#"studio\lib\x64"#;
+        let studio_lib_path = api_root.to_owned() + &format!("studio{}lib{}x{}", path_delimiter, path_delimiter, binary_extension);
         let studio_lib = "fmodstudio".to_owned() + suffix;
 
         Self {

@@ -16,11 +16,11 @@ use {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Primitive)]
 #[repr(i32)]
 pub enum PlaybackState {
-    Playing = FMOD_STUDIO_PLAYBACK_STATE_FMOD_STUDIO_PLAYBACK_PLAYING,
-    Sustaining = FMOD_STUDIO_PLAYBACK_STATE_FMOD_STUDIO_PLAYBACK_SUSTAINING,
-    Stopped = FMOD_STUDIO_PLAYBACK_STATE_FMOD_STUDIO_PLAYBACK_STOPPED,
-    Starting = FMOD_STUDIO_PLAYBACK_STATE_FMOD_STUDIO_PLAYBACK_STARTING,
-    Stopping = FMOD_STUDIO_PLAYBACK_STATE_FMOD_STUDIO_PLAYBACK_STOPPING,
+    Playing = FMOD_STUDIO_PLAYBACK_STATE_FMOD_STUDIO_PLAYBACK_PLAYING as i32,
+    Sustaining = FMOD_STUDIO_PLAYBACK_STATE_FMOD_STUDIO_PLAYBACK_SUSTAINING as i32,
+    Stopped = FMOD_STUDIO_PLAYBACK_STATE_FMOD_STUDIO_PLAYBACK_STOPPED as i32,
+    Starting = FMOD_STUDIO_PLAYBACK_STATE_FMOD_STUDIO_PLAYBACK_STARTING as i32,
+    Stopping = FMOD_STUDIO_PLAYBACK_STATE_FMOD_STUDIO_PLAYBACK_STOPPING as i32,
 }
 
 bitflags::bitflags! {
@@ -335,7 +335,7 @@ impl EventInstance {
         unsafe {
             FMOD_Studio_EventInstance_GetPlaybackState(self.ptr, &mut state).check_err()?;
         }
-        PlaybackState::from_i32(state).ok_or_else(|| anyhow!("bad playback state {}", state))
+        PlaybackState::from_i32(state as i32).ok_or_else(|| anyhow!("bad playback state {}", state))
     }
 
     pub fn is_paused(&self) -> Result<bool> {
