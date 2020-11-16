@@ -4,9 +4,13 @@ use ::{
     atomic_refcell::AtomicRefCell,
     hashbrown::HashMap,
     hibitset::{BitSet, DrainableBitSet},
+    im::Vector,
     rand::{RngCore, SeedableRng},
     rand_xorshift::XorShiftRng,
-    sludge::{api::Module, prelude::*},
+    sludge::{
+        api::{LuaComponent, LuaComponentInterface, Module},
+        prelude::*,
+    },
     std::{f32, marker::PhantomData, sync},
 };
 
@@ -48,32 +52,64 @@ impl<R: RngCore> RngCore for SharedRng<R> {
 #[derive(Debug, Clone, Copy, SimpleComponent)]
 pub struct Projectile {
     pub position: Isometry2<f32>,
-}
-
-#[derive(Debug, Clone, Copy, SimpleComponent)]
-pub struct QuadraticMotion {
     pub velocity: Velocity2<f32>,
     pub acceleration: Velocity2<f32>,
 }
 
-impl QuadraticMotion {
-    pub fn linear(vel: Velocity2<f32>) -> Self {
-        Self::new(vel, Velocity2::zero())
+#[derive(Debug, Clone, Copy)]
+pub struct ProjectileAccessor(Entity);
+
+impl LuaUserData for ProjectileAccessor {
+    fn add_methods<'lua, T: LuaUserDataMethods<'lua, Self>>(methods: &mut T) {
+        methods.add_method("position", |lua, this, ()| {
+            let resources = lua.resources();
+            let world = resources.fetch::<World>();
+            let projectile = world.get::<Projectile>(this.0).to_lua_err()?;
+            let v = projectile.position.translation.vector;
+            Ok((v.x, v.y, projectile.position.rotation.angle()))
+        });
+
+        methods.add_method("velocity", |lua, this, ()| {
+            let resources = lua.resources();
+            let world = resources.fetch::<World>();
+            let projectile = world.get::<Projectile>(this.0).to_lua_err()?;
+            let v = projectile.velocity.linear;
+            Ok((v.x, v.y, projectile.velocity.angular))
+        });
+
+        methods.add_method("acceleration", |lua, this, ()| {
+            let resources = lua.resources();
+            let world = resources.fetch::<World>();
+            let projectile = world.get::<Projectile>(this.0).to_lua_err()?;
+            let v = projectile.acceleration.linear;
+            Ok((v.x, v.y, projectile.acceleration.angular))
+        });
+    }
+}
+
+impl LuaComponentInterface for Projectile {
+    fn accessor<'lua>(lua: LuaContext<'lua>, entity: Entity) -> LuaResult<LuaValue<'lua>> {
+        ProjectileAccessor(entity).to_lua(lua)
     }
 
-    pub fn new(vel: Velocity2<f32>, acc: Velocity2<f32>) -> Self {
-        QuadraticMotion {
-            velocity: vel,
-            acceleration: acc,
-        }
+    fn bundler<'lua>(
+        _lua: LuaContext<'lua>,
+        _args: LuaValue<'lua>,
+        _builder: &mut EntityBuilder,
+    ) -> LuaResult<()> {
+        todo!()
     }
+}
+
+inventory::submit! {
+    LuaComponent::new::<Projectile>("Projectile")
 }
 
 #[derive(Debug, Clone, Copy, SimpleComponent)]
-pub struct DirectionalMotion {
-    pub velocity: Velocity2<f32>,
-    pub acceleration: Velocity2<f32>,
-}
+pub struct QuadraticMotion;
+
+#[derive(Debug, Clone, Copy, SimpleComponent)]
+pub struct DirectionalMotion;
 
 #[derive(Debug, Clone, Copy, SimpleComponent)]
 pub struct Circle {
@@ -112,11 +148,12 @@ impl QuadraticShot {
 
     pub fn new(at: Isometry2<f32>, vel: Velocity2<f32>, acc: Velocity2<f32>) -> Self {
         QuadraticShot {
-            projectile: Projectile { position: at },
-            motion: QuadraticMotion {
+            projectile: Projectile {
+                position: at,
                 velocity: vel,
                 acceleration: acc,
             },
+            motion: QuadraticMotion,
         }
     }
 }
@@ -140,11 +177,12 @@ impl Shot {
 
     pub fn quadratic(at: Isometry2<f32>, vel: Velocity2<f32>, acc: Velocity2<f32>) -> Self {
         Self::Quadratic(QuadraticShot {
-            projectile: Projectile { position: at },
-            motion: QuadraticMotion {
+            projectile: Projectile {
+                position: at,
                 velocity: vel,
                 acceleration: acc,
             },
+            motion: QuadraticMotion,
         })
     }
 }
@@ -298,13 +336,11 @@ pub enum Op {
     Translate(Vector2<f32>),
     Rotate(UnitComplex<f32>),
     RotateVelocity(UnitComplex<f32>),
-    AddLinearVelocity(Vector2<f32>),
-    AddAngularVelocity(f32),
+    AddVelocity(Velocity2<f32>),
     MulVelocity(f32),
-    RotateAccel(UnitComplex<f32>),
-    AddLinearAccel(Vector2<f32>),
-    AddAngularAccel(f32),
-    MulAccel(f32),
+    RotateAcceleration(UnitComplex<f32>),
+    AddAcceleration(Velocity2<f32>),
+    MulAcceleration(f32),
     AimAt(Point2<f32>),
     Pop,
     Fire,
@@ -339,13 +375,15 @@ impl<'lua> ToLuaMulti<'lua> for Op {
             Op::Translate(v) => ("translate", v.x, v.y).to_lua_multi(lua),
             Op::Rotate(r) => ("rotate", r.re, r.im).to_lua_multi(lua),
             Op::RotateVelocity(r) => ("rotate_velocity", r.re, r.im).to_lua_multi(lua),
-            Op::AddLinearVelocity(v) => ("add_linear_velocity", v.x, v.y).to_lua_multi(lua),
-            Op::AddAngularVelocity(theta) => ("add_angular_velocity", theta).to_lua_multi(lua),
+            Op::AddVelocity(v) => {
+                ("add_velocity", v.linear.x, v.linear.y, v.angular).to_lua_multi(lua)
+            }
             Op::MulVelocity(m) => ("mul_velocity", m).to_lua_multi(lua),
-            Op::RotateAccel(r) => ("rotate_accel", r.re, r.im).to_lua_multi(lua),
-            Op::AddLinearAccel(v) => ("add_linear_accel", v.x, v.y).to_lua_multi(lua),
-            Op::AddAngularAccel(theta) => ("add_angular_accel", theta).to_lua_multi(lua),
-            Op::MulAccel(m) => ("mul_accel", m).to_lua_multi(lua),
+            Op::RotateAcceleration(r) => ("rotate_acceleration", r.re, r.im).to_lua_multi(lua),
+            Op::AddAcceleration(v) => {
+                ("add_acceleration", v.linear.x, v.linear.y, v.angular).to_lua_multi(lua)
+            }
+            Op::MulAcceleration(m) => ("mul_acceleration", m).to_lua_multi(lua),
             Op::AimAt(pt) => ("aim_at", pt.x, pt.y).to_lua_multi(lua),
             Op::Pop => ("pop",).to_lua_multi(lua),
             Op::Fire => ("fire",).to_lua_multi(lua),
@@ -422,36 +460,35 @@ impl<'lua> FromLuaMulti<'lua> for Op {
                     re, im,
                 ))))
             }
-            "add_linear_velocity" => {
+            "add_velocity" => {
                 let x = f32::from_lua(vec.next().unwrap(), lua)?;
                 let y = f32::from_lua(vec.next().unwrap(), lua)?;
-                Ok(Op::AddLinearVelocity(Vector2::new(x, y)))
-            }
-            "add_angular_velocity" => {
-                let theta = f32::from_lua(vec.next().unwrap(), lua)?;
-                Ok(Op::AddAngularVelocity(theta))
+                let angular = f32::from_lua(vec.next().unwrap(), lua)?;
+                Ok(Op::AddVelocity(Velocity2::new(Vector2::new(x, y), angular)))
             }
             "mul_velocity" => {
                 let m = f32::from_lua(vec.next().unwrap(), lua)?;
                 Ok(Op::MulVelocity(m))
             }
-            "rotate_accel" => {
+            "rotate_acceleration" => {
                 let re = f32::from_lua(vec.next().unwrap(), lua)?;
                 let im = f32::from_lua(vec.next().unwrap(), lua)?;
-                Ok(Op::RotateAccel(Unit::new_unchecked(Complex::new(re, im))))
+                Ok(Op::RotateAcceleration(Unit::new_unchecked(Complex::new(
+                    re, im,
+                ))))
             }
-            "add_linear_accel" => {
+            "add_acceleration" => {
                 let x = f32::from_lua(vec.next().unwrap(), lua)?;
                 let y = f32::from_lua(vec.next().unwrap(), lua)?;
-                Ok(Op::AddLinearAccel(Vector2::new(x, y)))
+                let angular = f32::from_lua(vec.next().unwrap(), lua)?;
+                Ok(Op::AddAcceleration(Velocity2::new(
+                    Vector2::new(x, y),
+                    angular,
+                )))
             }
-            "add_angular_accel" => {
-                let theta = f32::from_lua(vec.next().unwrap(), lua)?;
-                Ok(Op::AddAngularAccel(theta))
-            }
-            "mul_accel" => {
+            "mul_acceleration" => {
                 let m = f32::from_lua(vec.next().unwrap(), lua)?;
-                Ok(Op::MulAccel(m))
+                Ok(Op::MulAcceleration(m))
             }
             "aim_at" => {
                 let x = f32::from_lua(vec.next().unwrap(), lua)?;
@@ -460,7 +497,7 @@ impl<'lua> FromLuaMulti<'lua> for Op {
             }
             "pop" => Ok(Op::Pop),
             "fire" => Ok(Op::Fire),
-            _ => panic!("invalid op"),
+            bad_op => return Err(anyhow!("invalid op `{}`", bad_op)).to_lua_err(),
         }
     }
 }
@@ -493,12 +530,17 @@ pub trait PatternBuilder<'lua> {
 
     #[inline]
     fn add_linear_velocity(&mut self, v: Vector2<f32>) -> Result<()> {
-        self.op(Op::AddLinearVelocity(v))
+        self.add_velocity(Velocity2::new(v, 0.))
     }
 
     #[inline]
     fn add_angular_velocity(&mut self, theta: f32) -> Result<()> {
-        self.op(Op::AddAngularVelocity(theta))
+        self.add_velocity(Velocity2::angular(theta))
+    }
+
+    #[inline]
+    fn add_velocity(&mut self, velocity: Velocity2<f32>) -> Result<()> {
+        self.op(Op::AddVelocity(velocity))
     }
 
     #[inline]
@@ -507,23 +549,28 @@ pub trait PatternBuilder<'lua> {
     }
 
     #[inline]
-    fn rotate_accel(&mut self, angle: f32) -> Result<()> {
-        self.op(Op::RotateAccel(UnitComplex::new(angle)))
+    fn rotate_acceleration(&mut self, angle: f32) -> Result<()> {
+        self.op(Op::RotateAcceleration(UnitComplex::new(angle)))
     }
 
     #[inline]
-    fn add_linear_accel(&mut self, v: Vector2<f32>) -> Result<()> {
-        self.op(Op::AddLinearVelocity(v))
+    fn add_linear_acceleration(&mut self, v: Vector2<f32>) -> Result<()> {
+        self.add_acceleration(Velocity2::new(v, 0.))
     }
 
     #[inline]
-    fn add_angular_accel(&mut self, theta: f32) -> Result<()> {
-        self.op(Op::AddAngularAccel(theta))
+    fn add_angular_acceleration(&mut self, theta: f32) -> Result<()> {
+        self.add_acceleration(Velocity2::angular(theta))
+    }
+
+    #[inline]
+    fn add_acceleration(&mut self, acceleration: Velocity2<f32>) -> Result<()> {
+        self.op(Op::AddAcceleration(acceleration))
     }
 
     #[inline]
     fn mul_accel(&mut self, m: f32) -> Result<()> {
-        self.op(Op::MulAccel(m))
+        self.op(Op::MulAcceleration(m))
     }
 
     #[inline]
@@ -703,15 +750,15 @@ impl LuaUserData for LuaPatternBuilderUserData {
             "add_linear_velocity",
             |_lua, (this, x, y): (LuaAnyUserData, f32, f32)| {
                 this.get_user_value::<LuaFunction>()?
-                    .call::<_, ()>(("add_linear_velocity", x, y))
+                    .call::<_, ()>(("add_velocity", x, y, 0.))
             },
         );
 
         methods.add_function(
-            "add_linear_accel",
+            "add_linear_acceleration",
             |_lua, (this, x, y): (LuaAnyUserData, f32, f32)| {
                 this.get_user_value::<LuaFunction>()?
-                    .call::<_, ()>(("add_linear_accel", x, y))
+                    .call::<_, ()>(("add_acceleration", x, y, 0.))
             },
         );
 
@@ -733,7 +780,7 @@ impl LuaUserData for LuaPatternBuilderUserData {
 
         methods.add_meta_method(
             LuaMetaMethod::Index,
-            |_lua, _this, (key, _): (LuaString, LuaMultiValue)| -> LuaResult<()> {
+            |_lua, _this, key: LuaString| -> LuaResult<()> {
                 Err(anyhow!(
                     "no such method `{}` for PatternBuilder",
                     key.to_str()?
@@ -1027,58 +1074,52 @@ impl Danmaku {
     }
 
     pub fn update(&mut self, world: &mut World, dt: f32) {
-        for (_e, (mut proj, mut motion, maximum)) in world
-            .query::<(
-                &mut Projectile,
-                &mut QuadraticMotion,
-                Option<&MaximumVelocity>,
-            )>()
+        for (_e, (mut proj, maximum)) in world
+            .query::<(&mut Projectile, Option<&MaximumVelocity>)>()
+            .with::<QuadraticMotion>()
             .iter()
         {
-            let (proj, motion) = (&mut *proj, &mut *motion);
-            motion.velocity += motion.acceleration * dt;
+            let proj = &mut *proj;
+            proj.velocity += proj.acceleration * dt;
 
             if let Some(max_vel) = maximum {
-                let cur_vel = motion.velocity.linear.norm();
+                let cur_vel = proj.velocity.linear.norm();
                 if cur_vel > max_vel.linear {
-                    motion.velocity.linear *= max_vel.linear / cur_vel;
+                    proj.velocity.linear *= max_vel.linear / cur_vel;
                 }
 
-                let cur_ang = motion.velocity.angular.abs();
+                let cur_ang = proj.velocity.angular.abs();
                 if cur_ang > max_vel.angular {
-                    motion.velocity.angular *= max_vel.angular / cur_ang;
+                    proj.velocity.angular *= max_vel.angular / cur_ang;
                 }
             }
 
-            let integrated = motion.velocity.integrate(dt);
+            let integrated = proj.velocity.integrate(dt);
             proj.position.translation.vector += integrated.translation.vector;
             proj.position.rotation *= integrated.rotation;
         }
 
-        for (_e, (mut proj, mut motion, maximum)) in world
-            .query::<(
-                &mut Projectile,
-                &mut DirectionalMotion,
-                Option<&MaximumVelocity>,
-            )>()
+        for (_e, (mut proj, maximum)) in world
+            .query::<(&mut Projectile, Option<&MaximumVelocity>)>()
+            .with::<DirectionalMotion>()
             .iter()
         {
-            let (proj, motion) = (&mut *proj, &mut *motion);
-            motion.velocity += motion.acceleration * dt;
+            let proj = &mut *proj;
+            proj.velocity += proj.acceleration * dt;
 
             if let Some(max_vel) = maximum {
-                let cur_vel = motion.velocity.linear.norm();
+                let cur_vel = proj.velocity.linear.norm();
                 if cur_vel > max_vel.linear {
-                    motion.velocity.linear *= max_vel.linear / cur_vel;
+                    proj.velocity.linear *= max_vel.linear / cur_vel;
                 }
 
-                let cur_ang = motion.velocity.angular.abs();
+                let cur_ang = proj.velocity.angular.abs();
                 if cur_ang > max_vel.angular {
-                    motion.velocity.angular *= max_vel.angular / cur_ang;
+                    proj.velocity.angular *= max_vel.angular / cur_ang;
                 }
             }
 
-            proj.position *= motion.velocity.integrate(dt);
+            proj.position *= proj.velocity.integrate(dt);
         }
 
         if let Some(bounds) = self.bounds {
@@ -1138,15 +1179,16 @@ impl Bullet for QuadraticShot {
 
     fn to_bundled(&self, parameters: &Parameters) -> Self::Bundled {
         let position = parameters.apply_to_position(&self.projectile.position);
-        let velocity = parameters.apply_to_velocity(&self.motion.velocity);
-        let acceleration = parameters.apply_to_acceleration(&self.motion.acceleration);
+        let velocity = parameters.apply_to_velocity(&self.projectile.velocity);
+        let acceleration = parameters.apply_to_acceleration(&self.projectile.acceleration);
 
         Self {
-            projectile: Projectile { position },
-            motion: QuadraticMotion {
+            projectile: Projectile {
+                position,
                 velocity,
                 acceleration,
             },
+            motion: QuadraticMotion,
         }
     }
 }
@@ -1156,15 +1198,16 @@ impl Bullet for DirectionalShot {
 
     fn to_bundled(&self, parameters: &Parameters) -> Self::Bundled {
         let position = parameters.apply_to_position(&self.projectile.position);
-        let velocity = parameters.apply_to_velocity(&self.motion.velocity);
-        let acceleration = parameters.apply_to_acceleration(&self.motion.acceleration);
+        let velocity = parameters.apply_to_velocity(&self.projectile.velocity);
+        let acceleration = parameters.apply_to_acceleration(&self.projectile.acceleration);
 
         Self {
-            projectile: Projectile { position },
-            motion: DirectionalMotion {
+            projectile: Projectile {
+                position,
                 velocity,
                 acceleration,
             },
+            motion: DirectionalMotion,
         }
     }
 }
@@ -1240,31 +1283,23 @@ where
                 let top = self.stack.last_mut().unwrap();
                 top.speed = top.speed.rotated(&r.to_rotation_matrix());
             }
-            Op::AddLinearVelocity(v) => {
+            Op::AddVelocity(v) => {
                 let top = self.stack.last_mut().unwrap();
-                top.speed.linear += v;
-            }
-            Op::AddAngularVelocity(theta) => {
-                let top = self.stack.last_mut().unwrap();
-                top.speed.angular += theta;
+                top.speed += v;
             }
             Op::MulVelocity(m) => {
                 let top = self.stack.last_mut().unwrap();
                 top.speed *= m;
             }
-            Op::RotateAccel(r) => {
+            Op::RotateAcceleration(r) => {
                 let top = self.stack.last_mut().unwrap();
                 top.accel = top.accel.rotated(&r.to_rotation_matrix());
             }
-            Op::AddLinearAccel(v) => {
+            Op::AddAcceleration(v) => {
                 let top = self.stack.last_mut().unwrap();
-                top.accel.linear += v;
+                top.accel += v;
             }
-            Op::AddAngularAccel(theta) => {
-                let top = self.stack.last_mut().unwrap();
-                top.accel.angular += theta;
-            }
-            Op::MulAccel(m) => {
+            Op::MulAcceleration(m) => {
                 let top = self.stack.last_mut().unwrap();
                 top.accel *= m;
             }
@@ -1306,7 +1341,11 @@ pub struct BulletType {
 }
 
 trait ErasedBullet: Send + Sync {
-    fn batch_me<'lua>(&self, lua: LuaContext<'lua>, closure: LuaFunction<'lua>) -> LuaResult<()>;
+    fn batch_me<'lua>(
+        &self,
+        lua: LuaContext<'lua>,
+        closure: LuaFunction<'lua>,
+    ) -> LuaResult<Vec<Entity>>;
 }
 
 struct BulletSlug<B: Bullet + Clone> {
@@ -1314,20 +1353,23 @@ struct BulletSlug<B: Bullet + Clone> {
 }
 
 impl<B: Bullet + Clone> ErasedBullet for BulletSlug<B> {
-    fn batch_me<'lua>(&self, lua: LuaContext<'lua>, closure: LuaFunction<'lua>) -> LuaResult<()> {
+    fn batch_me<'lua>(
+        &self,
+        lua: LuaContext<'lua>,
+        closure: LuaFunction<'lua>,
+    ) -> LuaResult<Vec<Entity>> {
         let mut batch = Batch::new(lua, self.bullet.clone()).to_lua_err()?;
         lua.scope(|scope| -> LuaResult<()> {
             let emit_closure =
                 scope.create_function_mut(|_lua, op: Op| batch.op(op).to_lua_err())?;
             let lua_builder = LuaPatternBuilder::new(lua, emit_closure)?;
-            LuaFunction::call(&closure, lua_builder)
+            LuaFunction::call(&closure, lua_builder)?;
+            Ok(())
         })?;
 
         let resources = lua.resources();
         let world = &mut *resources.fetch_mut::<World>();
-        world.spawn_batch(batch.to_vec()).for_each(|_| {});
-
-        Ok(())
+        Ok(world.spawn_batch(batch.to_vec()))
     }
 }
 
@@ -1348,6 +1390,55 @@ pub struct LuaBullet {
 }
 
 impl LuaUserData for LuaBullet {}
+
+#[derive(Debug, Clone)]
+pub struct LuaGroup {
+    entities: Vector<Entity>,
+}
+
+impl LuaUserData for LuaGroup {
+    fn add_methods<'lua, T: LuaUserDataMethods<'lua, Self>>(methods: &mut T) {
+        methods.add_method_mut("cancel", |lua, this, ()| {
+            let resources = lua.resources();
+            let world = resources.fetch::<World>();
+            let mut buf = world.get_buffer();
+
+            for &e in &this.entities {
+                buf.despawn(e);
+            }
+
+            world.queue_buffer(buf);
+            this.entities.clear();
+
+            Ok(())
+        });
+
+        methods.add_method("to_pattern", |_lua, this, ()| {
+            Ok(RustPattern::new(this.clone()))
+        });
+    }
+}
+
+impl Pattern for LuaGroup {
+    fn build<'lua>(&self, builder: &mut dyn PatternBuilder<'lua>) -> Result<()> {
+        let resources = builder.lua().resources();
+        let world = resources.fetch::<World>();
+
+        for &entity in &self.entities {
+            let proj = match world.get::<Projectile>(entity) {
+                Ok(p) => p,
+                Err(_) => continue,
+            };
+
+            builder.push(None)?;
+            builder.transform(proj.position)?;
+            builder.fire()?;
+            builder.pop()?;
+        }
+
+        Ok(())
+    }
+}
 
 pub struct DanmakuSystem;
 
@@ -1388,6 +1479,26 @@ pub fn load<'lua>(lua: LuaContext<'lua>) -> Result<LuaValue<'lua>> {
     let table = lua.create_table()?;
     let key = lua.create_registry_value(table.clone())?;
     table.set(
+        "group",
+        lua.create_function(|_, ()| {
+            Ok(LuaGroup {
+                entities: Vector::new(),
+            })
+        })?,
+    )?;
+    table.set(
+        "pattern",
+        lua.create_function(|_, pattern: LuaPattern| Ok(RustPattern::new(pattern)))?,
+    )?;
+    table.set(
+        "aimed",
+        lua.create_function(|_, (x, y)| {
+            Ok(RustPattern::new(Aimed {
+                target: Point2::new(x, y),
+            }))
+        })?,
+    )?;
+    table.set(
         "ring",
         lua.create_function(|_, (radius, count)| -> LuaResult<RustPattern> {
             Ok(RustPattern::new(Ring { radius, count }))
@@ -1414,30 +1525,46 @@ pub fn load<'lua>(lua: LuaContext<'lua>) -> Result<LuaValue<'lua>> {
     )?;
     table.set(
         "spawn",
-        lua.create_function(move |lua, (bullet_ty, closure): (LuaValue, LuaFunction)| {
-            match &bullet_ty {
-                LuaValue::String(ty_string) => {
-                    bullets[ty_string.to_str()?].batch_me(lua, closure)?;
-                }
-                LuaValue::UserData(ty_ud) => {
-                    ty_ud.borrow::<LuaBullet>()?.erased.batch_me(lua, closure)?;
-                }
-                _ => {
-                    return Err(LuaError::FromLuaConversionError {
-                        from: "lua value",
-                        to: "string or userdata",
-                        message: None,
-                    });
-                }
-            }
+        lua.create_function(
+            move |lua,
+                  (bullet_ty, closure, maybe_lua_group): (
+                LuaValue,
+                LuaFunction,
+                Option<LuaAnyUserData>,
+            )| {
+                let mut maybe_group = maybe_lua_group
+                    .as_ref()
+                    .map(LuaAnyUserData::borrow_mut::<LuaGroup>)
+                    .transpose()?;
 
-            let table = lua.registry_value::<LuaTable>(&key)?;
-            if let Some(on_spawn) = table.get::<_, Option<LuaFunction>>("on_spawn")? {
-                on_spawn.call::<_, ()>(bullet_ty)?;
-            }
+                let entities = match &bullet_ty {
+                    LuaValue::String(ty_string) => {
+                        bullets[ty_string.to_str()?].batch_me(lua, closure)?
+                    }
+                    LuaValue::UserData(ty_ud) => {
+                        ty_ud.borrow::<LuaBullet>()?.erased.batch_me(lua, closure)?
+                    }
+                    _ => {
+                        return Err(LuaError::FromLuaConversionError {
+                            from: "lua value",
+                            to: "string or userdata",
+                            message: None,
+                        });
+                    }
+                };
 
-            Ok(())
-        })?,
+                let table = lua.registry_value::<LuaTable>(&key)?;
+                if let Some(on_spawn) = table.get::<_, Option<LuaFunction>>("on_spawn")? {
+                    on_spawn.call::<_, ()>(bullet_ty)?;
+                }
+
+                if let Some(group) = maybe_group.as_deref_mut() {
+                    group.entities.extend(entities);
+                }
+
+                Ok(())
+            },
+        )?,
     )?;
     table.set(
         "set_bounds",

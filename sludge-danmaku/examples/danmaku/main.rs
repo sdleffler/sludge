@@ -36,12 +36,12 @@ impl Bullet for TestBullet {
 
     fn to_bundled(&self, parameters: &Parameters) -> Self::Bundled {
         let position = parameters.apply_to_position(&self.projectile.position);
-        let velocity = parameters.apply_to_velocity(&self.motion.velocity);
-        let acceleration = parameters.apply_to_acceleration(&self.motion.acceleration);
+        let velocity = parameters.apply_to_velocity(&self.projectile.velocity);
+        let acceleration = parameters.apply_to_acceleration(&self.projectile.acceleration);
 
         Self {
-            projectile: Projectile { position },
-            motion: QuadraticMotion {
+            projectile: Projectile {
+                position,
                 velocity,
                 acceleration,
             },
@@ -54,8 +54,10 @@ inventory::submit! {
     BulletType::new::<TestBullet>("TestBullet", TestBullet {
         projectile: Projectile {
             position: Isometry2::identity(),
+            velocity: Velocity2::zero(),
+            acceleration: Velocity2::zero(),
         },
-        motion: QuadraticMotion::new(Velocity2::zero(), Velocity2::zero()),
+        motion: QuadraticMotion,
         sprite_idx: SpriteIndex { idx: None },
         hitbox: Circle { radius: 1.0 },
     })

@@ -3,13 +3,14 @@ local th = sludge.thread
 function spiral()
     th.spawn(function()
         local ring = danmaku.ring(8, 2)
+        local group = danmaku.group()
     
         for t=1,32 do
             n = sludge.math.tanh(math.sin(t / 128 * 6 * math.pi))
     
             danmaku.spawn("TestBullet", function(builder)
                 builder:add_linear_velocity(30, 0)
-                builder:add_linear_accel(-5, 0)
+                builder:add_linear_acceleration(-5, 0)
 
                 builder:translate(320 / 2, 240 / 2)
                 builder:rotate(t / (81 * 3) * math.pi * 2 * 6)
@@ -24,10 +25,19 @@ function spiral()
                     builder:rotate(-theta)
                     ring:build(builder)
                 builder:pop()
-            end)
+            end, group)
             
             th.yield(5)
         end
+
+        th.yield(180)
+
+        local pattern = group:to_pattern():of(danmaku.aimed(50, 50))
+        danmaku.spawn("TestBullet", function(builder)
+            builder:add_linear_velocity(60, 0)
+            pattern:build(builder)
+        end)
+        group:cancel()
     end)
 end
 
