@@ -1,3 +1,5 @@
 /target
 Cargo.lock
 .vscode/
+sludge-fmod-sys/target
+sludge-fmod/target
