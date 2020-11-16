@@ -2,6 +2,7 @@
 
 use ::{
     atomic_refcell::AtomicRefCell,
+    easer::functions::*,
     hashbrown::HashMap,
     hibitset::{BitSet, DrainableBitSet},
     im::Vector,
@@ -11,6 +12,7 @@ use ::{
         api::{LuaComponent, LuaComponentInterface, Module},
         prelude::*,
     },
+    smallbox::SmallBox,
     std::{f32, marker::PhantomData, sync},
 };
 
@@ -110,6 +112,101 @@ pub struct QuadraticMotion;
 
 #[derive(Debug, Clone, Copy, SimpleComponent)]
 pub struct DirectionalMotion;
+
+pub trait ParametricMotionFunction: Send + Sync {
+    fn calculate(&self, dt: f32) -> Isometry2<f32>;
+    fn clone_smallboxed(&self) -> SmallBox<dyn ParametricMotionFunction, ParametricMotionSpace>;
+}
+
+impl<F> ParametricMotionFunction for F
+where
+    F: Fn(f32) -> Isometry2<f32> + Send + Sync + Clone + 'static,
+{
+    fn calculate(&self, dt: f32) -> Isometry2<f32> {
+        (*self)(dt)
+    }
+
+    fn clone_smallboxed(&self) -> SmallBox<dyn ParametricMotionFunction, ParametricMotionSpace> {
+        SmallBox::new(self.clone())
+    }
+}
+
+// Assume that the vast majority of parametric motion functions will be
+// under 256 bytes in size.
+//
+// 8 * u64 = 16 * u32 = 16 * f32 = four Isometry2<f32>s (x + y + re + im)
+type ParametricMotionSpace = [u64; 8];
+
+#[derive(SimpleComponent)]
+pub struct ParametricMotion {
+    time: f32,
+    initial: Isometry2<f32>,
+    function: SmallBox<dyn ParametricMotionFunction, ParametricMotionSpace>,
+}
+
+impl Clone for ParametricMotion {
+    fn clone(&self) -> Self {
+        Self {
+            time: self.time,
+            initial: self.initial,
+            function: self.function.clone_smallboxed(),
+        }
+    }
+}
+
+impl ParametricMotion {
+    pub fn new<F>(initial: Isometry2<f32>, function: F) -> Self
+    where
+        F: ParametricMotionFunction + 'static,
+    {
+        Self {
+            time: 0.,
+            initial,
+            function: SmallBox::new(function),
+        }
+    }
+
+    pub fn clone_with_transform(&self, tx: &Isometry2<f32>) -> Self {
+        Self {
+            time: self.time,
+            initial: tx * self.initial,
+            function: self.function.clone_smallboxed(),
+        }
+    }
+
+    pub fn lerp_expo_out(duration: f32, from: Isometry2<f32>, to: Isometry2<f32>) -> Self {
+        Self::lerp_eased(Expo::ease_out, duration, from, to)
+    }
+
+    pub fn lerp_eased(
+        easer: fn(f32, f32, f32, f32) -> f32,
+        duration: f32,
+        from: Isometry2<f32>,
+        to: Isometry2<f32>,
+    ) -> Self {
+        let between = Velocity2::between_positions(&from, &to, 1.);
+        let function = move |t| {
+            let eased_time = easer(t, 0., 1., duration);
+            let integrated = between.integrate(eased_time);
+            Isometry2::from_parts(
+                Translation2::from(from.translation.vector + integrated.translation.vector),
+                from.rotation * integrated.rotation,
+            )
+        };
+
+        Self {
+            time: 0.,
+            initial: Isometry2::identity(),
+            function: SmallBox::new(function),
+        }
+    }
+
+    pub fn update(&mut self, dt: f32) -> Isometry2<f32> {
+        let current = self.function.calculate(self.time);
+        self.time += dt;
+        self.initial * current
+    }
+}
 
 #[derive(Debug, Clone, Copy, SimpleComponent)]
 pub struct Circle {
@@ -1120,6 +1217,14 @@ impl Danmaku {
             }
 
             proj.position *= proj.velocity.integrate(dt);
+        }
+
+        for (_e, (mut proj, mut motion)) in world
+            .query::<(&mut Projectile, &mut ParametricMotion)>()
+            .iter()
+        {
+            let (proj, motion) = (&mut *proj, &mut *motion);
+            proj.position = motion.update(dt);
         }
 
         if let Some(bounds) = self.bounds {

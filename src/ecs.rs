@@ -340,7 +340,7 @@ impl World {
         entity
     }
 
-    pub fn spawn_batch<I>(&mut self, iter: I) -> impl Iterator<Item = Entity> + '_
+    pub fn spawn_batch<I>(&mut self, iter: I) -> Vec<Entity>
     where
         I: IntoIterator,
         I::Item: Bundle,
@@ -354,7 +354,7 @@ impl World {
             }
         });
 
-        batched.into_iter()
+        batched
     }
 
     pub fn despawn(&mut self, entity: Entity) -> Result<(), NoSuchEntity> {

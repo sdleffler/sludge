@@ -23,6 +23,32 @@ struct SpriteIndex {
     idx: Option<SpriteId>,
 }
 
+#[derive(Clone, Bundle)]
+pub struct EasedBullet {
+    projectile: Projectile,
+    motion: ParametricMotion,
+    sprite_idx: SpriteIndex,
+    hitbox: Circle,
+}
+
+impl Bullet for EasedBullet {
+    type Bundled = Self;
+
+    fn to_bundled(&self, parameters: &Parameters) -> Self::Bundled {
+        let position = parameters.apply_to_position(&self.projectile.position);
+
+        Self {
+            projectile: Projectile {
+                position,
+                velocity: Velocity2::zero(),
+                acceleration: Velocity2::zero(),
+            },
+            motion: self.motion.clone_with_transform(&position),
+            ..*self
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Bundle)]
 pub struct TestBullet {
     projectile: Projectile,
@@ -58,6 +84,23 @@ inventory::submit! {
             acceleration: Velocity2::zero(),
         },
         motion: QuadraticMotion,
+        sprite_idx: SpriteIndex { idx: None },
+        hitbox: Circle { radius: 1.0 },
+    })
+}
+
+inventory::submit! {
+    BulletType::new::<EasedBullet>("EasedBullet", EasedBullet {
+        projectile: Projectile {
+            position: Isometry2::identity(),
+            velocity: Velocity2::zero(),
+            acceleration: Velocity2::zero(),
+        },
+        motion: ParametricMotion::lerp_expo_out(
+            5.,
+            Isometry2::identity(),
+            Isometry2::new(Vector2::new(96., 0.), 0.),
+        ),
         sprite_idx: SpriteIndex { idx: None },
         hitbox: Circle { radius: 1.0 },
     })
