@@ -6,13 +6,16 @@ use ::{
     hashbrown::HashMap,
     hibitset::{BitSet, DrainableBitSet},
     im::Vector,
+    ncollide2d as nc,
     rand::{RngCore, SeedableRng},
     rand_xorshift::XorShiftRng,
     sludge::{
         api::{LuaComponent, LuaComponentInterface, Module},
         prelude::*,
     },
+    sludge_2d::math::*,
     smallbox::SmallBox,
+    stack_dst::Value as StackDst,
     std::{f32, marker::PhantomData, sync},
 };
 
@@ -116,7 +119,7 @@ pub struct DirectionalMotion;
 pub trait ParametricMotionFunction: Send + Sync {
     fn set_endpoints(&mut self, start: &Isometry2<f32>, end: &Isometry2<f32>);
     fn transform_by(&mut self, tx: &Isometry2<f32>);
-    fn calculate(&self, t: f32) -> Isometry2<f32>;
+    fn calculate(&self, t: f32) -> Option<Isometry2<f32>>;
 }
 
 trait PmfClone: ParametricMotionFunction {
@@ -171,13 +174,17 @@ impl ParametricMotionFunction for ParametricEased {
         self.displacement = self.displacement.transformed(tx);
     }
 
-    fn calculate(&self, t: f32) -> Isometry2<f32> {
-        let eased = (self.easer)(t, 0., 1., self.duration);
-        let mut interpolated = self.origin;
-        let integrated = self.displacement.integrate(eased);
-        interpolated.translation *= integrated.translation;
-        interpolated.rotation *= integrated.rotation;
-        interpolated
+    fn calculate(&self, t: f32) -> Option<Isometry2<f32>> {
+        if t < self.duration {
+            let eased = (self.easer)(t, 0., 1., self.duration);
+            let mut interpolated = self.origin;
+            let integrated = self.displacement.integrate(eased);
+            interpolated.translation *= integrated.translation;
+            interpolated.rotation *= integrated.rotation;
+            Some(interpolated)
+        } else {
+            None
+        }
     }
 }
 
@@ -190,6 +197,7 @@ type ParametricMotionSpace = [u64; 8];
 #[derive(SimpleComponent)]
 pub struct ParametricMotion {
     time: f32,
+    despawn_after_duration: bool,
     function: SmallBox<dyn PmfClone, ParametricMotionSpace>,
 }
 
@@ -197,18 +205,20 @@ impl Clone for ParametricMotion {
     fn clone(&self) -> Self {
         Self {
             time: self.time,
+            despawn_after_duration: self.despawn_after_duration,
             function: self.function.clone_smallboxed(),
         }
     }
 }
 
 impl ParametricMotion {
-    pub fn new<F>(function: F) -> Self
+    pub fn new<F>(despawn_after_duration: bool, function: F) -> Self
     where
         F: ParametricMotionFunction + Clone + 'static,
     {
         Self {
             time: 0.,
+            despawn_after_duration,
             function: SmallBox::new(function),
         }
     }
@@ -223,11 +233,17 @@ impl ParametricMotion {
     //     self.function.transform_by(tx);
     // }
 
-    pub fn lerp_expo_out(duration: f32, start: &Isometry2<f32>, end: &Isometry2<f32>) -> Self {
-        Self::lerp_eased(duration, start, end, Expo::ease_out)
+    pub fn lerp_expo_out(
+        despawn_after_duration: bool,
+        duration: f32,
+        start: &Isometry2<f32>,
+        end: &Isometry2<f32>,
+    ) -> Self {
+        Self::lerp_eased(despawn_after_duration, duration, start, end, Expo::ease_out)
     }
 
     pub fn lerp_eased(
+        despawn_after_duration: bool,
         duration: f32,
         start: &Isometry2<f32>,
         end: &Isometry2<f32>,
@@ -235,25 +251,64 @@ impl ParametricMotion {
     ) -> Self {
         Self {
             time: 0.,
+            despawn_after_duration,
             function: SmallBox::new(ParametricEased::new(duration, start, end, easer)),
         }
     }
 
-    pub fn update(&mut self, dt: f32) -> Isometry2<f32> {
+    pub fn update(&mut self, dt: f32) -> Option<Isometry2<f32>> {
         let calculated = self.function.calculate(self.time);
         self.time += dt;
         calculated
     }
 }
 
-#[derive(Debug, Clone, Copy, SimpleComponent)]
-pub struct Circle {
-    pub radius: f32,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Proximity {
+    Intersecting,
+    WithinMargin,
+    Disjoint,
 }
 
 #[derive(Debug, Clone, Copy, SimpleComponent)]
-pub struct Rectangle {
-    pub half_extents: Vector2<f32>,
+pub enum Collision {
+    Circle { radius: f32 },
+    Rectangle { radii: Vector2<f32> },
+}
+
+impl Collision {
+    pub fn circle(radius: f32) -> Self {
+        Self::Circle { radius }
+    }
+
+    pub fn rectangle(radii: Vector2<f32>) -> Self {
+        Self::Rectangle { radii }
+    }
+
+    pub(crate) fn to_shape(&self) -> StackDst<dyn nc::shape::Shape<f32>> {
+        match *self {
+            Self::Circle { radius } => StackDst::new(nc::shape::Ball::new(radius)).unwrap(),
+            Self::Rectangle { radii } => StackDst::new(nc::shape::Cuboid::new(radii)).unwrap(),
+        }
+    }
+
+    pub fn proximity(
+        m1: &Isometry2<f32>,
+        c1: &Collision,
+        m2: &Isometry2<f32>,
+        c2: &Collision,
+        margin: f32,
+    ) -> Proximity {
+        let s1 = c1.to_shape();
+        let s2 = c2.to_shape();
+
+        use nc::query::Proximity as NcProximity;
+        match nc::query::proximity(m1, &*s1, m2, &*s2, margin) {
+            NcProximity::Intersecting => Proximity::Intersecting,
+            NcProximity::WithinMargin => Proximity::WithinMargin,
+            NcProximity::Disjoint => Proximity::Disjoint,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, SimpleComponent)]
@@ -1320,38 +1375,36 @@ impl Danmaku {
             proj.position *= proj.velocity.integrate(dt);
         }
 
-        for (_e, (mut proj, mut motion)) in world
+        for (e, (mut proj, mut motion)) in world
             .query::<(&mut Projectile, &mut ParametricMotion)>()
             .iter()
         {
             let (proj, motion) = (&mut *proj, &mut *motion);
-            proj.position = motion.update(dt);
+            if let Some(iso) = motion.update(dt) {
+                proj.position = iso;
+            } else if motion.despawn_after_duration {
+                self.to_despawn.add(e.id());
+            }
         }
 
         if let Some(bounds) = self.bounds {
-            for (e, (proj, circle, _)) in world
-                .query::<(&Projectile, &Circle, &DespawnOutOfBounds)>()
+            for (e, (proj, collision, _)) in world
+                .query::<(&Projectile, &Collision, &DespawnOutOfBounds)>()
                 .iter()
             {
-                let circle_bb = Box2::from_half_extents(
-                    Point2::from(proj.position.translation.vector),
-                    Vector2::repeat(circle.radius),
-                );
+                let bb = match *collision {
+                    Collision::Circle { radius } => Box2::from_half_extents(
+                        Point2::from(proj.position.translation.vector),
+                        Vector2::repeat(radius),
+                    ),
+                    Collision::Rectangle { radii } => {
+                        let homogeneous = homogeneous_mat3_to_mat4(&proj.position.to_homogeneous());
+                        Box2::from_half_extents(Point2::origin(), radii)
+                            .transformed_by(&homogeneous)
+                    }
+                };
 
-                if !bounds.intersects(&circle_bb) {
-                    self.to_despawn.add(e.id());
-                }
-            }
-
-            for (e, (proj, rect, _)) in world
-                .query::<(&Projectile, &Rectangle, &DespawnOutOfBounds)>()
-                .iter()
-            {
-                let homogeneous = homogeneous_mat3_to_mat4(&proj.position.to_homogeneous());
-                let rect_bb = Box2::from_half_extents(Point2::origin(), rect.half_extents)
-                    .transformed_by(&homogeneous);
-
-                if !bounds.intersects(&rect_bb) {
+                if !bounds.intersects(&bb) {
                     self.to_despawn.add(e.id());
                 }
             }

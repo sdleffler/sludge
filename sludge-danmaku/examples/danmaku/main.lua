@@ -10,7 +10,7 @@ function spiral()
     
             danmaku.spawn("EasedBullet", function(builder)
                 builder:duration(5)
-                builder:destination(100, 0)
+                builder:destination(32, 0)
 
                 builder:translate(320 / 2, 240 / 2)
                 builder:rotate(t / (81 * 3) * math.pi * 2 * 6)

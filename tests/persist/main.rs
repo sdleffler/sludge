@@ -1,4 +1,7 @@
-use sludge::{components::Persistent, math::*, prelude::*, spatial_2d::Position};
+use {
+    sludge::{components::Persistent, math::*, prelude::*},
+    sludge_2d::Position,
+};
 
 fn roundtrip(space: &Space) -> Result<Space> {
     let mut bytes = Vec::<u8>::new();

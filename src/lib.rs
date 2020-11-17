@@ -42,7 +42,6 @@ pub mod path_clean;
 pub mod persist;
 pub mod resources;
 pub mod scene;
-pub mod spatial_2d;
 pub mod sprite;
 pub mod systems;
 pub mod tiled;

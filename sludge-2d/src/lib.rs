@@ -1,13 +1,11 @@
-use crate::{
-    api::{LuaComponent, LuaComponentInterface},
-    ecs::*,
-    math::*,
-    Resources, SludgeLuaContextExt,
-};
 use {
-    anyhow::*,
-    rlua::prelude::*,
     serde::{Deserialize, Serialize},
+    sludge::{
+        api::{LuaComponent, LuaComponentInterface},
+        ecs::*,
+        math::*,
+        prelude::*,
+    },
     std::ops,
 };
 
@@ -18,7 +16,10 @@ pub use ncollide2d::{
     shape::{Ball, Cuboid, ShapeHandle},
 };
 
+pub mod math;
 pub mod spatial_hash;
+
+use crate::math::Velocity2;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(from = "PositionProxy", into = "PositionProxy")]

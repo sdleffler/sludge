@@ -7,6 +7,15 @@ use {
 
 pub const DEFAULT_CHUNK_SIZE: u16 = 64;
 
+fn to_grid_indices(grid_size: f32, aabb: &Box2<f32>) -> impl Iterator<Item = (i32, i32)> {
+    let x_start = (aabb.mins.x / grid_size).floor() as i32;
+    let x_end = (aabb.maxs.x / grid_size).ceil() as i32;
+    let y_start = (aabb.mins.y / grid_size).floor() as i32;
+    let y_end = (aabb.maxs.y / grid_size).ceil() as i32;
+
+    (x_start..x_end).flat_map(move |i| (y_start..y_end).map(move |j| (i, j)))
+}
+
 fn to_chunk_and_subindices(chunk_size: u16, (x, y): (i32, i32)) -> ((i32, i32), usize) {
     let chunk_size = chunk_size as i32;
     let chunk_index = (x.div_euclid(chunk_size), y.div_euclid(chunk_size));
@@ -158,7 +167,7 @@ impl ChunkedBitGrid {
     }
 
     pub fn query<'a>(&'a self, aabb: &Box2<f32>) -> impl Iterator<Item = (i32, i32)> + 'a {
-        coords_2d::to_grid_indices(self.scale, aabb).filter(move |&c| self.get(c))
+        to_grid_indices(self.scale, aabb).filter(move |&c| self.get(c))
     }
 
     pub fn bounds_at(&self, (x, y): (i32, i32)) -> Box2<f32> {

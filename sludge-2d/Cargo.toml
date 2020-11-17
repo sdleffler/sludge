@@ -1,0 +1,19 @@
+[package]
+name = "sludge-2d"
+version = "0.1.0"
+authors = ["Sean Leffler <sean@errno.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+sludge = { path = ".." }
+nalgebra = { version = "0.22.0", features = ["mint", "serde-serialize"] }
+ncollide2d = "0.24.0"
+serde = "1.0.117"
+hecs = { git = "https://github.com/sdleffler/hecs", features = ["macros"] }
+shrev = "1.1.1"
+hashbrown = "0.9.1"
+smallvec = "1.4.2"
+thunderdome = { git = "https://github.com/sdleffler/thunderdome", branch = "main" }
+rlua_serde = { git = "https://github.com/sdleffler/rlua_serde" }

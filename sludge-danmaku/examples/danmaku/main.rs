@@ -28,7 +28,7 @@ pub struct EasedBullet {
     projectile: Projectile,
     motion: ParametricMotion,
     sprite_idx: SpriteIndex,
-    hitbox: Circle,
+    collision: Collision,
 }
 
 impl Bullet for EasedBullet {
@@ -44,6 +44,7 @@ impl Bullet for EasedBullet {
                 acceleration: Velocity2::zero(),
             },
             motion: ParametricMotion::lerp_expo_out(
+                false,
                 parameters.duration,
                 &position,
                 &parameters.destination,
@@ -58,7 +59,7 @@ pub struct TestBullet {
     projectile: Projectile,
     motion: QuadraticMotion,
     sprite_idx: SpriteIndex,
-    hitbox: Circle,
+    collision: Collision,
 }
 
 impl Bullet for TestBullet {
@@ -89,7 +90,7 @@ inventory::submit! {
         },
         motion: QuadraticMotion,
         sprite_idx: SpriteIndex { idx: None },
-        hitbox: Circle { radius: 1.0 },
+        collision: Collision::Circle { radius: 1.0 },
     })
 }
 
@@ -101,12 +102,13 @@ inventory::submit! {
             acceleration: Velocity2::zero(),
         },
         motion: ParametricMotion::lerp_expo_out(
+            false,
             5.,
             &Isometry2::identity(),
             &Isometry2::identity(),
         ),
         sprite_idx: SpriteIndex { idx: None },
-        hitbox: Circle { radius: 1.0 },
+        collision: Collision::Circle { radius: 1.0 },
     })
 }
 

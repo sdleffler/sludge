@@ -20,6 +20,10 @@ im = "15.0.0"
 easer = "0.2.1"
 smallbox = { version = "0.8", features = ["coerce"] }
 log = "0.4.11"
+stack_dst = { version = "0.6.0", features = ["unsize"] }
+nalgebra = { version = "0.22.0", features = ["mint", "serde-serialize"] }
+ncollide2d = "0.24.0"
+sludge-2d = { git = "https://github.com/sdleffler/sludge", branch = "main" }
 
 [dev-dependencies]
 shrev = "1.1.1"
