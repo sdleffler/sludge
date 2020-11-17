@@ -43,7 +43,11 @@ impl Bullet for EasedBullet {
                 velocity: Velocity2::zero(),
                 acceleration: Velocity2::zero(),
             },
-            motion: self.motion.clone_with_transform(&position),
+            motion: ParametricMotion::lerp_expo_out(
+                parameters.duration,
+                &position,
+                &parameters.destination,
+            ),
             ..*self
         }
     }
@@ -98,8 +102,8 @@ inventory::submit! {
         },
         motion: ParametricMotion::lerp_expo_out(
             5.,
-            Isometry2::identity(),
-            Isometry2::new(Vector2::new(96., 0.), 0.),
+            &Isometry2::identity(),
+            &Isometry2::identity(),
         ),
         sprite_idx: SpriteIndex { idx: None },
         hitbox: Circle { radius: 1.0 },

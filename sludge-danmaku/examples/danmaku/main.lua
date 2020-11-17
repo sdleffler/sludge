@@ -9,8 +9,8 @@ function spiral()
             n = sludge.math.tanh(math.sin(t / 128 * 6 * math.pi))
     
             danmaku.spawn("EasedBullet", function(builder)
-                builder:add_linear_velocity(30, 0)
-                builder:add_linear_acceleration(-5, 0)
+                builder:duration(5)
+                builder:destination(100, 0)
 
                 builder:translate(320 / 2, 240 / 2)
                 builder:rotate(t / (81 * 3) * math.pi * 2 * 6)

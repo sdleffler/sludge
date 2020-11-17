@@ -114,20 +114,70 @@ pub struct QuadraticMotion;
 pub struct DirectionalMotion;
 
 pub trait ParametricMotionFunction: Send + Sync {
-    fn calculate(&self, dt: f32) -> Isometry2<f32>;
-    fn clone_smallboxed(&self) -> SmallBox<dyn ParametricMotionFunction, ParametricMotionSpace>;
+    fn set_endpoints(&mut self, start: &Isometry2<f32>, end: &Isometry2<f32>);
+    fn transform_by(&mut self, tx: &Isometry2<f32>);
+    fn calculate(&self, t: f32) -> Isometry2<f32>;
 }
 
-impl<F> ParametricMotionFunction for F
-where
-    F: Fn(f32) -> Isometry2<f32> + Send + Sync + Clone + 'static,
-{
-    fn calculate(&self, dt: f32) -> Isometry2<f32> {
-        (*self)(dt)
+trait PmfClone: ParametricMotionFunction {
+    fn as_pmf(&self) -> &dyn ParametricMotionFunction;
+    fn clone_smallboxed(&self) -> SmallBox<dyn PmfClone, ParametricMotionSpace>;
+}
+
+impl<T: ParametricMotionFunction + Clone + 'static> PmfClone for T {
+    fn as_pmf(&self) -> &dyn ParametricMotionFunction {
+        self
     }
 
-    fn clone_smallboxed(&self) -> SmallBox<dyn ParametricMotionFunction, ParametricMotionSpace> {
+    fn clone_smallboxed(&self) -> SmallBox<dyn PmfClone, ParametricMotionSpace> {
         SmallBox::new(self.clone())
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct ParametricEased {
+    pub origin: Isometry2<f32>,
+    pub displacement: Velocity2<f32>,
+    pub duration: f32,
+    pub easer: fn(f32, f32, f32, f32) -> f32,
+}
+
+impl ParametricEased {
+    pub fn new(
+        duration: f32,
+        start: &Isometry2<f32>,
+        end: &Isometry2<f32>,
+        easer: fn(f32, f32, f32, f32) -> f32,
+    ) -> Self {
+        let linear = (end.translation / start.translation).vector;
+        let angular = start.rotation.angle_to(&end.rotation);
+        Self {
+            origin: *start,
+            displacement: Velocity2::new(linear, angular),
+            duration,
+            easer,
+        }
+    }
+}
+
+impl ParametricMotionFunction for ParametricEased {
+    fn set_endpoints(&mut self, start: &Isometry2<f32>, end: &Isometry2<f32>) {
+        self.origin = *start;
+        self.displacement = Velocity2::between_positions(start, end, 1.);
+    }
+
+    fn transform_by(&mut self, tx: &Isometry2<f32>) {
+        self.origin = tx * self.origin;
+        self.displacement = self.displacement.transformed(tx);
+    }
+
+    fn calculate(&self, t: f32) -> Isometry2<f32> {
+        let eased = (self.easer)(t, 0., 1., self.duration);
+        let mut interpolated = self.origin;
+        let integrated = self.displacement.integrate(eased);
+        interpolated.translation *= integrated.translation;
+        interpolated.rotation *= integrated.rotation;
+        interpolated
     }
 }
 
@@ -140,71 +190,59 @@ type ParametricMotionSpace = [u64; 8];
 #[derive(SimpleComponent)]
 pub struct ParametricMotion {
     time: f32,
-    initial: Isometry2<f32>,
-    function: SmallBox<dyn ParametricMotionFunction, ParametricMotionSpace>,
+    function: SmallBox<dyn PmfClone, ParametricMotionSpace>,
 }
 
 impl Clone for ParametricMotion {
     fn clone(&self) -> Self {
         Self {
             time: self.time,
-            initial: self.initial,
             function: self.function.clone_smallboxed(),
         }
     }
 }
 
 impl ParametricMotion {
-    pub fn new<F>(initial: Isometry2<f32>, function: F) -> Self
+    pub fn new<F>(function: F) -> Self
     where
-        F: ParametricMotionFunction + 'static,
+        F: ParametricMotionFunction + Clone + 'static,
     {
         Self {
             time: 0.,
-            initial,
             function: SmallBox::new(function),
         }
     }
 
-    pub fn clone_with_transform(&self, tx: &Isometry2<f32>) -> Self {
-        Self {
-            time: self.time,
-            initial: tx * self.initial,
-            function: self.function.clone_smallboxed(),
-        }
-    }
+    // pub fn transformed(&self, tx: &Isometry2<f32>) -> Self {
+    //     let mut this = self.clone();
+    //     this.function.transform_by(tx);
+    //     this
+    // }
 
-    pub fn lerp_expo_out(duration: f32, from: Isometry2<f32>, to: Isometry2<f32>) -> Self {
-        Self::lerp_eased(Expo::ease_out, duration, from, to)
+    // pub fn transform_by(&mut self, tx: &Isometry2<f32>) {
+    //     self.function.transform_by(tx);
+    // }
+
+    pub fn lerp_expo_out(duration: f32, start: &Isometry2<f32>, end: &Isometry2<f32>) -> Self {
+        Self::lerp_eased(duration, start, end, Expo::ease_out)
     }
 
     pub fn lerp_eased(
-        easer: fn(f32, f32, f32, f32) -> f32,
         duration: f32,
-        from: Isometry2<f32>,
-        to: Isometry2<f32>,
+        start: &Isometry2<f32>,
+        end: &Isometry2<f32>,
+        easer: fn(f32, f32, f32, f32) -> f32,
     ) -> Self {
-        let between = Velocity2::between_positions(&from, &to, 1.);
-        let function = move |t| {
-            let eased_time = easer(t, 0., 1., duration);
-            let integrated = between.integrate(eased_time);
-            Isometry2::from_parts(
-                Translation2::from(from.translation.vector + integrated.translation.vector),
-                from.rotation * integrated.rotation,
-            )
-        };
-
         Self {
             time: 0.,
-            initial: Isometry2::identity(),
-            function: SmallBox::new(function),
+            function: SmallBox::new(ParametricEased::new(duration, start, end, easer)),
         }
     }
 
     pub fn update(&mut self, dt: f32) -> Isometry2<f32> {
-        let current = self.function.calculate(self.time);
+        let calculated = self.function.calculate(self.time);
         self.time += dt;
-        self.initial * current
+        calculated
     }
 }
 
@@ -285,77 +323,35 @@ impl Shot {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct SpeedParameters {
-    pub coeff: f32,
-    pub linear_bias: f32,
-    pub angular_bias: f32,
-}
-
-impl Default for SpeedParameters {
-    fn default() -> Self {
-        Self {
-            coeff: 1.,
-            linear_bias: 0.,
-            angular_bias: 0.,
-        }
-    }
-}
-
-impl SpeedParameters {
-    pub fn new(coeff: f32, linear_bias: f32, angular_bias: f32) -> Self {
-        Self {
-            coeff,
-            linear_bias,
-            angular_bias,
-        }
-    }
-
-    pub fn linear_bias(linear_bias: f32) -> Self {
-        Self {
-            linear_bias,
-            ..Self::default()
-        }
-    }
-
-    pub fn angular_bias(angular_bias: f32) -> Self {
-        Self {
-            angular_bias,
-            ..Self::default()
-        }
-    }
-
-    pub fn coeff(coeff: f32) -> Self {
-        Self {
-            coeff,
-            ..Self::default()
-        }
-    }
-
-    pub fn apply_linear(&self, speed: f32) -> f32 {
-        self.coeff * speed + self.linear_bias
-    }
-
-    pub fn apply_angular(&self, speed: f32) -> f32 {
-        self.coeff * speed + self.angular_bias
-    }
-
-    // Application:
-    //    coeff1 * (coeff2 * x + bias2) + bias1
-    // => coeff1 * coeff2 * x + (coeff1 * bias2 + bias1)
-    pub fn after(&self, of: &SpeedParameters) -> SpeedParameters {
-        SpeedParameters {
-            coeff: self.coeff * of.coeff,
-            linear_bias: self.coeff * of.linear_bias + self.linear_bias,
-            angular_bias: self.coeff * of.angular_bias + self.angular_bias,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
 pub struct Parameters {
+    /// Position should be used to position the fired bullets.
     pub position: Isometry2<f32>,
+
+    /// Speed should be used to adjust the velocity of fired bullets which
+    /// rely on linear/angular velocity to update themselves, for example
+    /// bullets with the `QuadraticMotion` or `DirectionalMotion` components.
     pub speed: Velocity2<f32>,
+
+    /// Acceleration should be used similarly to speed.
     pub accel: Velocity2<f32>,
+
+    /// Destination is a parameter intended for working with bullets
+    /// with parameterized movement, likely with the `ParametricMotion`
+    /// component. It should be transformed according to `position` as
+    /// the parameters are manipulated, allowing it to function similarly
+    /// in usage to `aim_at`; if destination is set before transforms,
+    /// then those transforms should correctly manipulate the destination.
+    /// If it is set afterwards, they should not.
+    pub destination: Isometry2<f32>,
+
+    /// Duration is a parameter intended for working with bullets with
+    /// parameterized movement or other movement which requires duration
+    /// information. For something like a `ParametricMotion` component,
+    /// duration will be interpreted as the total time of the parameterized
+    /// motion, for example.
+    ///
+    /// Duration is in seconds.
+    pub duration: f32,
 }
 
 impl Default for Parameters {
@@ -364,6 +360,8 @@ impl Default for Parameters {
             position: Isometry2::identity(),
             speed: Velocity2::zero(),
             accel: Velocity2::zero(),
+            destination: Isometry2::identity(),
+            duration: 0.,
         }
     }
 }
@@ -377,6 +375,7 @@ impl Parameters {
     #[inline]
     pub fn transformed(mut self, tx: &Isometry2<f32>) -> Self {
         self.position = self.position * tx;
+        self.destination = self.destination * tx;
         self
     }
 
@@ -388,12 +387,27 @@ impl Parameters {
     #[inline]
     pub fn rotated(mut self, rot: &UnitComplex<f32>) -> Self {
         self.position.append_rotation_mut(rot);
+        self.destination.append_rotation_mut(rot);
         self
     }
 
     #[inline]
     pub fn rotated_wrt_center(mut self, rot: &UnitComplex<f32>) -> Self {
         self.position.append_rotation_wrt_center_mut(rot);
+        self.destination
+            .append_rotation_wrt_point_mut(rot, &Point2::from(self.position.translation.vector));
+        self
+    }
+
+    #[inline]
+    pub fn destination(mut self, destination: &Isometry2<f32>) -> Self {
+        self.destination = *destination;
+        self
+    }
+
+    #[inline]
+    pub fn duration(mut self, duration: f32) -> Self {
+        self.duration = duration;
         self
     }
 
@@ -405,19 +419,6 @@ impl Parameters {
     #[inline]
     pub fn apply_to_velocity(&self, dx: &Velocity2<f32>) -> Velocity2<f32> {
         (*dx + self.speed).transformed(&self.position)
-        // let mut dx = dx.transformed(&self.position);
-
-        // let speed = dx.linear.norm();
-        // if speed != 0. {
-        //     let adjusted_speed = self.speed.apply_linear(speed);
-        //     dx.linear *= adjusted_speed / speed;
-        // } else {
-        //     let adjusted_speed = self.speed.apply_linear(1.);
-        //     dx.linear += Vector2::x() * adjusted_speed;
-        // }
-        // dx.angular = self.speed.apply_angular(dx.angular);
-
-        // dx
     }
 
     #[inline]
@@ -439,6 +440,8 @@ pub enum Op {
     AddAcceleration(Velocity2<f32>),
     MulAcceleration(f32),
     AimAt(Point2<f32>),
+    Destination(Isometry2<f32>),
+    Duration(f32),
     Pop,
     Fire,
 }
@@ -458,6 +461,11 @@ impl<'lua> ToLuaMulti<'lua> for Op {
                 ps.accel.linear.x,
                 ps.accel.linear.y,
                 ps.accel.angular,
+                ps.destination.translation.x,
+                ps.destination.translation.y,
+                ps.destination.rotation.re,
+                ps.destination.rotation.im,
+                ps.duration,
             )
                 .to_lua_multi(lua),
             Op::Push(None) => ("push",).to_lua_multi(lua),
@@ -482,6 +490,15 @@ impl<'lua> ToLuaMulti<'lua> for Op {
             }
             Op::MulAcceleration(m) => ("mul_acceleration", m).to_lua_multi(lua),
             Op::AimAt(pt) => ("aim_at", pt.x, pt.y).to_lua_multi(lua),
+            Op::Destination(iso) => (
+                "destination",
+                iso.translation.x,
+                iso.translation.y,
+                iso.rotation.re,
+                iso.rotation.im,
+            )
+                .to_lua_multi(lua),
+            Op::Duration(t) => ("duration", t).to_lua_multi(lua),
             Op::Pop => ("pop",).to_lua_multi(lua),
             Op::Fire => ("fire",).to_lua_multi(lua),
         }
@@ -496,10 +513,16 @@ impl<'lua> FromLuaMulti<'lua> for Op {
         match op_name.to_str()? {
             "push" => {
                 if !vec.is_empty() {
-                    let x = f32::from_lua(vec.next().unwrap(), lua)?;
-                    let y = f32::from_lua(vec.next().unwrap(), lua)?;
-                    let re = f32::from_lua(vec.next().unwrap(), lua)?;
-                    let im = f32::from_lua(vec.next().unwrap(), lua)?;
+                    let position = {
+                        let x = f32::from_lua(vec.next().unwrap(), lua)?;
+                        let y = f32::from_lua(vec.next().unwrap(), lua)?;
+                        let re = f32::from_lua(vec.next().unwrap(), lua)?;
+                        let im = f32::from_lua(vec.next().unwrap(), lua)?;
+                        Isometry2::from_parts(
+                            Translation2::new(x, y),
+                            Unit::new_unchecked(Complex::new(re, im)),
+                        )
+                    };
                     let speed = {
                         let x = f32::from_lua(vec.next().unwrap(), lua)?;
                         let y = f32::from_lua(vec.next().unwrap(), lua)?;
@@ -518,13 +541,23 @@ impl<'lua> FromLuaMulti<'lua> for Op {
                             angular,
                         }
                     };
-                    Ok(Op::Push(Some(Parameters {
-                        position: Isometry2::from_parts(
+                    let destination = {
+                        let x = f32::from_lua(vec.next().unwrap(), lua)?;
+                        let y = f32::from_lua(vec.next().unwrap(), lua)?;
+                        let re = f32::from_lua(vec.next().unwrap(), lua)?;
+                        let im = f32::from_lua(vec.next().unwrap(), lua)?;
+                        Isometry2::from_parts(
                             Translation2::new(x, y),
                             Unit::new_unchecked(Complex::new(re, im)),
-                        ),
+                        )
+                    };
+                    let duration = f32::from_lua(vec.next().unwrap(), lua)?;
+                    Ok(Op::Push(Some(Parameters {
+                        position,
                         speed,
                         accel,
+                        destination,
+                        duration,
                     })))
                 } else {
                     Ok(Op::Push(None))
@@ -591,6 +624,26 @@ impl<'lua> FromLuaMulti<'lua> for Op {
                 let x = f32::from_lua(vec.next().unwrap(), lua)?;
                 let y = f32::from_lua(vec.next().unwrap(), lua)?;
                 Ok(Op::AimAt(Point2::new(x, y)))
+            }
+            "destination" => {
+                let destination = {
+                    let x = f32::from_lua(vec.next().unwrap(), lua)?;
+                    let y = f32::from_lua(vec.next().unwrap(), lua)?;
+                    let rot = if !vec.is_empty() {
+                        let re = f32::from_lua(vec.next().unwrap(), lua)?;
+                        let im = f32::from_lua(vec.next().unwrap(), lua)?;
+                        UnitComplex::new_unchecked(Complex::new(re, im))
+                    } else {
+                        UnitComplex::identity()
+                    };
+
+                    Isometry2::from_parts(Translation2::new(x, y), rot)
+                };
+                Ok(Op::Destination(destination))
+            }
+            "duration" => {
+                let duration = f32::from_lua(vec.next().unwrap(), lua)?;
+                Ok(Op::Duration(duration))
             }
             "pop" => Ok(Op::Pop),
             "fire" => Ok(Op::Fire),
@@ -673,6 +726,16 @@ pub trait PatternBuilder<'lua> {
     #[inline]
     fn aim_at(&mut self, pt: Point2<f32>) -> Result<()> {
         self.op(Op::AimAt(pt))
+    }
+
+    #[inline]
+    fn destination(&mut self, dest: Isometry2<f32>) -> Result<()> {
+        self.op(Op::Destination(dest))
+    }
+
+    #[inline]
+    fn duration(&mut self, duration: f32) -> Result<()> {
+        self.op(Op::Duration(duration))
     }
 
     #[inline]
@@ -866,6 +929,27 @@ impl LuaUserData for LuaPatternBuilderUserData {
                     .call::<_, ()>(("aim_at", x, y))
             },
         );
+
+        methods.add_function(
+            "destination",
+            |_lua, (this, x, y, angle): (LuaAnyUserData, f32, f32, Option<f32>)| {
+                let rot = angle
+                    .map(UnitComplex::new)
+                    .unwrap_or(UnitComplex::identity());
+                this.get_user_value::<LuaFunction>()?.call::<_, ()>((
+                    "destination",
+                    x,
+                    y,
+                    rot.re,
+                    rot.im,
+                ))
+            },
+        );
+
+        methods.add_function("duration", |_lua, (this, t): (LuaAnyUserData, f32)| {
+            this.get_user_value::<LuaFunction>()?
+                .call::<_, ()>(("duration", t))
+        });
 
         methods.add_function("pop", |_lua, this: LuaAnyUserData| {
             this.get_user_value::<LuaFunction>()?.call::<_, ()>("pop")
@@ -1113,6 +1197,23 @@ impl Pattern for Aimed {
     fn build<'lua>(&self, builder: &mut dyn PatternBuilder<'lua>) -> Result<()> {
         builder.push(None)?;
         builder.aim_at(self.target)?;
+        builder.fire()?;
+        builder.pop()?;
+
+        Ok(())
+    }
+}
+
+pub struct Destination {
+    pub destination: Isometry2<f32>,
+    pub duration: f32,
+}
+
+impl Pattern for Destination {
+    fn build<'lua>(&self, builder: &mut dyn PatternBuilder<'lua>) -> Result<()> {
+        builder.push(None)?;
+        builder.destination(self.destination)?;
+        builder.duration(self.duration)?;
         builder.fire()?;
         builder.pop()?;
 
@@ -1416,6 +1517,14 @@ where
                 let rot = UnitComplex::scaled_rotation_between(&u, &v, 1.);
                 *ps = ps.rotated_wrt_center(&rot);
             }
+            Op::Destination(iso) => {
+                let top = self.stack.last_mut().unwrap();
+                top.destination = iso;
+            }
+            Op::Duration(t) => {
+                let top = self.stack.last_mut().unwrap();
+                top.duration = t;
+            }
             Op::Pop => {
                 self.stack.pop().unwrap();
             }
@@ -1600,6 +1709,19 @@ pub fn load<'lua>(lua: LuaContext<'lua>) -> Result<LuaValue<'lua>> {
         lua.create_function(|_, (x, y)| {
             Ok(RustPattern::new(Aimed {
                 target: Point2::new(x, y),
+            }))
+        })?,
+    )?;
+    table.set(
+        "destination",
+        lua.create_function(|_, (duration, x, y, angle): (f32, f32, f32, Option<f32>)| {
+            let destination = match angle {
+                Some(angle) => Isometry2::new(Vector2::new(x, y), angle),
+                None => Isometry2::translation(x, y),
+            };
+            Ok(RustPattern::new(Destination {
+                destination,
+                duration,
             }))
         })?,
     )?;

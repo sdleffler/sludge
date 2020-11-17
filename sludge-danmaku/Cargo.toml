@@ -19,6 +19,7 @@ serde = "1.0.117"
 im = "15.0.0"
 easer = "0.2.1"
 smallbox = { version = "0.8", features = ["coerce"] }
+log = "0.4.11"
 
 [dev-dependencies]
 shrev = "1.1.1"
