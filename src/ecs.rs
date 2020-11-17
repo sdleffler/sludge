@@ -13,7 +13,7 @@ use {
 
 pub use hecs::{
     Archetype, ArchetypesGeneration, Bundle, Component, ComponentError, DynamicBundle, Entity,
-    EntityBuilder, EntityRef, NoSuchEntity, Query, QueryBorrow, QueryOne, Ref, RefMut,
+    EntityBuilder, EntityRef, Iter, NoSuchEntity, Query, QueryBorrow, QueryOne, Ref, RefMut,
     SmartComponent, SpawnBatchIter,
 };
 
@@ -439,6 +439,10 @@ impl World {
 
     pub fn entity_raw(&self, entity: Entity) -> Result<EntityRef<'_>, NoSuchEntity> {
         self.ecs.entity_with_context(entity, ())
+    }
+
+    pub fn iter(&self) -> Iter<'_> {
+        self.ecs.iter()
     }
 
     pub fn insert(

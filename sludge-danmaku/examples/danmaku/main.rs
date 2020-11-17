@@ -10,6 +10,7 @@ use ::{
         assets::DefaultCache, conf::Conf, dispatcher::Dispatcher, event::EventHandler,
         filesystem::Filesystem, graphics::*, prelude::*,
     },
+    sludge_2d::math::*,
     sludge_danmaku::*,
     std::{env, path::PathBuf},
 };

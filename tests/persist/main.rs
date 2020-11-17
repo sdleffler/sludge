@@ -1,6 +1,6 @@
-use {
-    sludge::{components::Persistent, math::*, prelude::*},
-    sludge_2d::Position,
+use sludge::{
+    components::{Name, Persistent},
+    prelude::*,
 };
 
 fn roundtrip(space: &Space) -> Result<Space> {
@@ -27,7 +27,7 @@ fn persist_empty() -> Result<()> {
 
 #[derive(Bundle)]
 pub struct Fish {
-    position: Position,
+    name: Name,
     persistent: Persistent,
 }
 
@@ -41,7 +41,7 @@ fn persist_simple() -> Result<()> {
             for j in 0..100 {
                 let (x, y) = (i as f32, j as f32);
                 w.spawn(Fish {
-                    position: Position(Isometry2::translation(x, y)),
+                    name: Name(format!("Fish ({}, {})", x, y)),
                     persistent: Persistent,
                 });
             }
@@ -52,7 +52,7 @@ fn persist_simple() -> Result<()> {
     let count = space
         .world()
         .query::<()>()
-        .with::<Position>()
+        .with::<Name>()
         .with::<Persistent>()
         .iter()
         .count();
