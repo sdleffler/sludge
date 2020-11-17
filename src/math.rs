@@ -74,6 +74,13 @@ impl<N: Numeric> Box2<N> {
         }
     }
 
+    pub fn huge() -> Self {
+        Self {
+            mins: Vector2::repeat(N::min_value()).into(),
+            maxs: Vector2::repeat(N::max_value()).into(),
+        }
+    }
+
     #[inline]
     pub fn is_valid(&self) -> bool {
         na::partial_le(&self.mins, &self.maxs)

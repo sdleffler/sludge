@@ -1,14 +1,9 @@
-use crate::{
-    assets::Cached,
-    graphics::*,
-};
+use crate::{assets::Cached, graphics::*};
 
 use {
     im::HashMap,
     image::{Rgba, RgbaImage},
-    std:: {
-        io
-    },
+    std::io,
 };
 
 // AsciiSubset refers to the subset of ascii characters which give alphanumeric characters plus symbols
@@ -224,8 +219,8 @@ impl Drawable for FontAtlas {
         self.font_texture.load().draw(ctx, instance);
     }
 
-    fn aabb(&self) -> Box2<f32> {
-        self.font_texture.load().aabb()
+    fn aabb2(&self) -> Box2<f32> {
+        self.font_texture.load().aabb2()
     }
 }
 
@@ -272,7 +267,7 @@ impl Drawable for Text {
         self.batch.draw(ctx, instance);
     }
 
-    fn aabb(&self) -> Box2<f32> {
-        self.batch.aabb()
+    fn aabb2(&self) -> Box2<f32> {
+        self.batch.aabb2()
     }
 }

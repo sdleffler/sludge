@@ -156,7 +156,7 @@ impl Drawable for OwnedTexture {
         ctx.mq.draw(0, 6, 1);
     }
 
-    fn aabb(&self) -> Box2<f32> {
+    fn aabb2(&self) -> Box2<f32> {
         Box2::from_corners(
             Point2::origin(),
             Point2::new(self.width() as f32, self.height() as f32),
@@ -229,8 +229,8 @@ impl Drawable for Texture {
         self.shared.draw(ctx, param);
     }
 
-    fn aabb(&self) -> Box2<f32> {
-        self.shared.aabb()
+    fn aabb2(&self) -> Box2<f32> {
+        self.shared.aabb2()
     }
 }
 
@@ -985,7 +985,7 @@ impl Drawable for Mesh {
         ctx.mq.draw(0, self.len, 1);
     }
 
-    fn aabb(&self) -> Box2<f32> {
+    fn aabb2(&self) -> Box2<f32> {
         self.aabb
     }
 }
@@ -1428,7 +1428,7 @@ impl SpriteBatch {
                 &self
                     .texture
                     .load_cached()
-                    .aabb()
+                    .aabb2()
                     .transformed_by(param.tx.matrix()),
             );
         }
@@ -1513,14 +1513,14 @@ impl Drawable for SpriteBatch {
         ctx.apply_transforms();
     }
 
-    fn aabb(&self) -> Box2<f32> {
+    fn aabb2(&self) -> Box2<f32> {
         if let Some(aabb) = self.inner.read().unwrap().aabb {
             return aabb;
         }
 
         let mut inner = self.inner.write().unwrap();
         let mut initial = Box2::invalid();
-        let image_aabb = self.texture.load().aabb();
+        let image_aabb = self.texture.load().aabb2();
         for (_, param) in self.sprites.iter() {
             initial.merge(&param.transform_aabb(&image_aabb));
         }
@@ -1582,7 +1582,7 @@ impl Drawable for Canvas {
         self.color_buffer.draw(ctx, instance);
     }
 
-    fn aabb(&self) -> Box2<f32> {
+    fn aabb2(&self) -> Box2<f32> {
         Box2::from_corners(
             Point2::new(0., 0.),
             Point2::new(
@@ -1623,8 +1623,8 @@ impl Drawable for Sprite {
         self.texture.load().draw(ctx, params);
     }
 
-    fn aabb(&self) -> Box2<f32> {
-        let texture_aabb = self.texture.load().aabb();
+    fn aabb2(&self) -> Box2<f32> {
+        let texture_aabb = self.texture.load().aabb2();
         let extents = self.params.src.extents();
         self.params.transform_aabb(&Box2::from_corners(
             texture_aabb.mins,
@@ -1638,12 +1638,16 @@ impl Drawable for Sprite {
 
 pub trait Drawable: 'static {
     fn draw(&self, ctx: &mut Graphics, instance: InstanceParam);
-    fn aabb(&self) -> Box2<f32>;
+
+    fn aabb2(&self) -> Box2<f32> {
+        Box2::huge()
+    }
 }
 
 impl Drawable for () {
     fn draw(&self, _ctx: &mut Graphics, _instance: InstanceParam) {}
-    fn aabb(&self) -> Box2<f32> {
+
+    fn aabb2(&self) -> Box2<f32> {
         Box2::invalid()
     }
 }

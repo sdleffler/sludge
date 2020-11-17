@@ -392,12 +392,12 @@ impl DrawableGraph {
                     let (obj_a, obj_b) = (&objects[a], &objects[b]);
                     obj_a.layer.cmp(&obj_b.layer).then_with(|| {
                         let a_y = *y_cache.entry(a).or_insert_with(|| {
-                            let aabb = obj_a.entry.value.as_drawable().aabb();
+                            let aabb = obj_a.entry.value.as_drawable().aabb2();
                             OrderedFloat(aabb.transformed_by(tx_a.matrix()).maxs.y)
                         });
 
                         let b_y = *y_cache.entry(b).or_insert_with(|| {
-                            let aabb = obj_b.entry.value.as_drawable().aabb();
+                            let aabb = obj_b.entry.value.as_drawable().aabb2();
                             OrderedFloat(aabb.transformed_by(tx_b.matrix()).maxs.y)
                         });
 
@@ -445,10 +445,10 @@ impl Drawable for DrawableGraph {
         }
     }
 
-    fn aabb(&self) -> Box2<f32> {
+    fn aabb2(&self) -> Box2<f32> {
         let mut aabb = Box2::invalid();
         for (drawable, tx) in self.sorted() {
-            aabb.merge(&drawable.aabb().transformed_by(&tx.matrix()));
+            aabb.merge(&drawable.aabb2().transformed_by(&tx.matrix()));
         }
         aabb
     }

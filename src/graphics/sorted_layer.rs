@@ -75,7 +75,7 @@ impl SortedLayer {
 
         sorted.retain(|&id| self.objects.get(id).is_some());
         sorted.sort_by_cached_key(|&index| {
-            OrderedFloat(self.objects[index].as_drawable().aabb().maxs.y)
+            OrderedFloat(self.objects[index].as_drawable().aabb2().maxs.y)
         });
     }
 
@@ -110,10 +110,10 @@ impl Drawable for SortedLayer {
         }
     }
 
-    fn aabb(&self) -> Box2<f32> {
+    fn aabb2(&self) -> Box2<f32> {
         let mut aabb = Box2::invalid();
         for drawable in self.objects.iter().map(|(_, obj)| obj.as_drawable()) {
-            aabb.merge(&drawable.aabb());
+            aabb.merge(&drawable.aabb2());
         }
         aabb
     }

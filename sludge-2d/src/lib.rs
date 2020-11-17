@@ -19,6 +19,11 @@ pub use ncollide2d::{
 pub mod math;
 pub mod spatial_hash;
 
+pub mod prelude {
+    pub use crate::math::*;
+    pub use sludge::prelude::*;
+}
+
 use crate::math::Velocity2;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
