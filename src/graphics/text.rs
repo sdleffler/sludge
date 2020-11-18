@@ -1,13 +1,23 @@
-use crate::{assets::Cached, graphics::*};
+use crate::{
+    assets::{Asset, Cache, Cached, Key, Loaded},
+    filesystem::Filesystem,
+    graphics::*,
+    Resources,
+};
 
 use {
     im::HashMap,
     image::{Rgba, RgbaImage},
-    std::io,
+    std::{borrow::Cow, ffi::OsStr, path::Path},
 };
 
+#[derive(Debug, Clone)]
+pub struct Font {
+    inner: rusttype::Font<'static>,
+}
+
 // AsciiSubset refers to the subset of ascii characters which give alphanumeric characters plus symbols
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum CharacterListType {
     AsciiSubset,
     Ascii,
@@ -26,6 +36,27 @@ struct CharInfo {
     uvs: Box2<f32>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FontAtlasKey<'a> {
+    pub path: Cow<'a, Path>,
+    pub size: u32,
+    pub char_list_type: CharacterListType,
+}
+
+impl<'a> FontAtlasKey<'a> {
+    pub fn new<S: AsRef<OsStr> + ?Sized>(
+        path: &'a S,
+        size: u32,
+        char_list_type: CharacterListType,
+    ) -> Self {
+        Self {
+            path: Cow::Borrowed(Path::new(path)),
+            size,
+            char_list_type,
+        }
+    }
+}
+
 /// `FontTexture` is a texture generated using the *_character_list functions.
 /// It contains a texture representing all of the rasterized characters
 /// retrieved from the *_character_list function. `font_map` represents a
@@ -38,9 +69,9 @@ pub struct FontAtlas {
 }
 
 impl FontAtlas {
-    pub fn new<R: Read>(
+    pub(crate) fn from_rusttype_font(
         ctx: &mut Graphics,
-        font: R,
+        rusttype_font: &rusttype::Font,
         font_size: f32,
         char_list_type: CharacterListType,
     ) -> Result<FontAtlas> {
@@ -56,10 +87,6 @@ impl FontAtlas {
         const MARGIN: u32 = 3;
         let char_list = Self::get_char_list(char_list_type)?;
         let chars_per_row = ((char_list.len() as f32).sqrt() as u32) + 1;
-        let bytes_font = font.bytes().collect::<Result<Vec<u8>, io::Error>>()?;
-        let rusttype_font = rt::Font::try_from_bytes(&bytes_font[..]).ok_or(anyhow!(
-            "Unable to create a rusttype::Font using bytes_font"
-        ))?;
         let mut glyphs_and_chars = char_list
             .iter()
             .map(|c| {
@@ -175,6 +202,23 @@ impl FontAtlas {
         })
     }
 
+    pub fn from_reader<R: Read>(
+        ctx: &mut Graphics,
+        mut font: R,
+        font_size: f32,
+        char_list_type: CharacterListType,
+    ) -> Result<FontAtlas> {
+        use rusttype as rt;
+
+        let mut bytes_font = Vec::new();
+        font.read_to_end(&mut bytes_font)?;
+        let rusttype_font = rt::Font::try_from_bytes(&bytes_font[..]).ok_or(anyhow!(
+            "Unable to create a rusttype::Font using bytes_font"
+        ))?;
+
+        Self::from_rusttype_font(ctx, &rusttype_font, font_size, char_list_type)
+    }
+
     fn get_char_list(char_list_type: CharacterListType) -> Result<Vec<char>> {
         let char_list = match char_list_type {
             CharacterListType::AsciiSubset => [0x20..0x7F].iter(),
@@ -275,5 +319,44 @@ impl Drawable for Text {
 
     fn aabb2(&self) -> Box2<f32> {
         self.batch.aabb2()
+    }
+}
+
+impl Asset for Font {
+    fn load<'a, R: Resources<'a>>(
+        key: &Key,
+        _cache: &Cache<'a, R>,
+        resources: &R,
+    ) -> Result<Loaded<Self>> {
+        use rusttype as rt;
+        let path = key.to_path()?;
+        let mut fs = resources.fetch_mut::<Filesystem>();
+        let mut file = fs.open(path)?;
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf)?;
+        let font = rt::Font::try_from_vec(buf).ok_or_else(|| anyhow!("error parsing font"))?;
+        Ok(Loaded::new(Font { inner: font }))
+    }
+}
+
+impl Asset for FontAtlas {
+    fn load<'a, R: Resources<'a>>(
+        key: &Key,
+        cache: &Cache<'a, R>,
+        resources: &R,
+    ) -> Result<Loaded<Self>> {
+        let key = key.to_rust::<FontAtlasKey>()?;
+        let mut font = cache.get::<Font>(&Key::from_path(&key.path))?;
+        let gfx = &mut *resources.fetch_mut::<Graphics>();
+        let atlas = FontAtlas::from_rusttype_font(
+            gfx,
+            &font.load_cached().inner,
+            key.size as f32,
+            key.char_list_type,
+        )?;
+        Ok(Loaded::with_deps(
+            atlas,
+            vec![Key::from(key.path.into_owned())],
+        ))
     }
 }

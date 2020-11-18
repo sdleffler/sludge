@@ -339,15 +339,12 @@ impl Asset for SpriteSheet {
         key: &Key,
         _cache: &Cache<'a, R>,
         resources: &R,
-    ) -> Result<Loaded<'static, Self>> {
-        match key {
-            Key::Path(path) => {
-                let mut fh = resources.fetch_mut::<Filesystem>().open(&path)?;
-                let mut buf = String::new();
-                fh.read_to_string(&mut buf)?;
-                Ok(SpriteSheet::from_json(&buf)?.into())
-            } //_ => bail!("can only load from logical"),
-        }
+    ) -> Result<Loaded<Self>> {
+        let path = key.to_path()?;
+        let mut fh = resources.fetch_mut::<Filesystem>().open(&path)?;
+        let mut buf = String::new();
+        fh.read_to_string(&mut buf)?;
+        Ok(SpriteSheet::from_json(&buf)?.into())
     }
 }
 

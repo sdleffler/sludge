@@ -1,10 +1,16 @@
 extern crate sludge as sloodge;
 
 use {
-    anyhow::*,
     sloodge::{
-        conf::Conf, event::EventHandler, graphics::*, prelude::*, graphics::text::*
+        assets::{DefaultCache, Key},
+        conf::Conf,
+        event::EventHandler,
+        filesystem::Filesystem,
+        graphics::text::*,
+        graphics::*,
+        prelude::*,
     },
+    std::{env, path::PathBuf},
 };
 
 mod sludge {
@@ -12,19 +18,51 @@ mod sludge {
 }
 
 struct MainState {
-    gfx: Graphics,
+    space: Space,
     text: Text,
 }
 
 impl MainState {
-    pub fn new(mut gfx: Graphics) -> Result<MainState> {
-        let atlas = FontAtlas::new(&mut gfx, &include_bytes!("font.ttf")[..], 40.0, CharacterListType::Ascii)?;
-        let text = Text::new(&mut gfx, "Hello World!", &atlas, Color::GREEN);
+    pub fn new(gfx: Graphics) -> Result<MainState> {
+        let global = {
+            let mut resources = OwnedResources::new();
 
-        Ok(MainState {
-            gfx,
-            text,
-        })
+            let mut fs = Filesystem::new("text-example", "Maxim Veligan, Sean Leffler")?;
+            if let Ok(manifest_dir) = env::var("CARGO_MANIFEST_DIR") {
+                let mut path = PathBuf::from(manifest_dir);
+                path.push("resources");
+                log::info!("Adding resource path {}", path.display());
+                fs.mount(&path, true);
+            }
+
+            resources.insert(fs);
+            resources.insert(gfx);
+
+            SharedResources::from(resources)
+        };
+
+        let space = Space::with_global_resources(global)?;
+        space
+            .resources()
+            .borrow_mut()
+            .insert(DefaultCache::new(space.resources().clone()));
+
+        let font_atlas_key = Key::from_structured(&FontAtlasKey::new(
+            "/font.ttf",
+            40,
+            CharacterListType::Ascii,
+        ))?;
+        let atlas = space
+            .fetch_mut::<DefaultCache>()
+            .get::<FontAtlas>(&font_atlas_key)?;
+        let text = Text::new(
+            &mut *space.fetch_mut(),
+            "Hello World!",
+            &atlas.load(),
+            Color::GREEN,
+        );
+
+        Ok(MainState { space, text })
     }
 }
 
@@ -40,15 +78,17 @@ impl EventHandler for MainState {
     }
 
     fn draw(&mut self) -> Result<()> {
-        let Self {
-            gfx, ..
-        } = self;
+        let Self { space, text } = self;
+        let gfx = &mut *space.fetch_mut::<Graphics>();
 
         gfx.set_projection(Orthographic3::new(0., 320., 240., 0., -1., 1.));
         gfx.begin_default_pass(PassAction::default());
         gfx.apply_default_pipeline();
         gfx.apply_transforms();
-        gfx.draw(&self.text, InstanceParam::new().translate2(Vector2::new(20., 140.)));
+        gfx.draw(
+            text,
+            InstanceParam::new().translate2(Vector2::new(20., 140.)),
+        );
         gfx.end_pass();
         gfx.commit_frame();
         Ok(())

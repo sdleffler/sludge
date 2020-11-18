@@ -1821,17 +1821,16 @@ impl Asset for Texture {
         key: &Key,
         _cache: &Cache<'a, R>,
         resources: &R,
-    ) -> Result<Loaded<'static, Self>> {
-        match key {
-            Key::Path(path) => {
-                let mut filesystem = resources.fetch_mut::<Filesystem>();
-                let mut gfx = resources.fetch_mut::<Graphics>();
-                let mut file = filesystem.open(path)?;
-                let texture = Texture::from_reader(&mut *gfx, &mut file)
-                    .with_context(|| anyhow!("Failed to create a texture using {:?}", path))?;
-                Ok(Loaded::new(texture))
-            } // _ => panic!("logical resources not supported (yet)"),
-        }
+    ) -> Result<Loaded<Self>> {
+        let path = key
+            .to_path()
+            .with_context(|| anyhow!("bad key for Texture"))?;
+        let mut filesystem = resources.fetch_mut::<Filesystem>();
+        let mut gfx = resources.fetch_mut::<Graphics>();
+        let mut file = filesystem.open(path)?;
+        let texture = Texture::from_reader(&mut *gfx, &mut file)
+            .with_context(|| anyhow!("failed to create a texture using {:?}", path))?;
+        Ok(Loaded::new(texture))
     }
 }
 
