@@ -65,28 +65,31 @@ impl<'a> FontAtlasKey<'a> {
 /// located within `font_texture`.
 #[derive(Debug, Clone)]
 pub struct FontAtlas {
-    font_map: HashMap<char, CharInfo>,
     font_texture: Cached<Texture>,
+    font_map: HashMap<char, CharInfo>,
 }
 
 impl FontAtlas {
     pub(crate) fn from_rusttype_font(
         ctx: &mut Graphics,
         rusttype_font: &rusttype::Font,
-        font_size: f32,
+        em_pixels: f32,
         char_list_type: CharacterListType,
     ) -> Result<FontAtlas> {
         use rusttype as rt;
 
-        let em_pixels = font_size;
+        let font_scale = rt::Scale {
+            x: em_pixels,
+            y: em_pixels,
+        };
         let inval_bb = rt::Rect {
             min: rt::Point { x: 0, y: 0 },
             max: rt::Point {
-                x: (font_size / 4.0) as i32,
+                x: (em_pixels / 4.0) as i32,
                 y: 0,
             },
         };
-        const MARGIN: u32 = 3;
+        const MARGIN: u32 = 1;
         let char_list = Self::get_char_list(char_list_type)?;
         let chars_per_row = ((char_list.len() as f32).sqrt() as u32) + 1;
         let mut glyphs_and_chars = char_list
@@ -95,10 +98,7 @@ impl FontAtlas {
                 (
                     rusttype_font
                         .glyph(*c)
-                        .scaled(rt::Scale {
-                            x: font_size,
-                            y: font_size,
-                        })
+                        .scaled(font_scale)
                         .positioned(rt::Point { x: 0.0, y: 0.0 }),
                     *c,
                 )
@@ -148,10 +148,9 @@ impl FontAtlas {
         texture_height += chars_per_row * MARGIN;
 
         let mut texture = RgbaImage::new(texture_width as u32, texture_height as u32);
-
         let mut texture_cursor = Point2::<u32>::new(0, 0);
-
         let mut char_map: HashMap<char, CharInfo> = HashMap::new();
+        let v_metrics = rusttype_font.v_metrics(font_scale);
 
         for row in char_rows {
             let first_glyph = row.first().unwrap().0;
@@ -167,7 +166,7 @@ impl FontAtlas {
                 char_map.insert(
                     c,
                     CharInfo {
-                        vertical_offset: bb.min.y as f32 / em_pixels,
+                        vertical_offset: (v_metrics.ascent + bb.min.y as f32) / em_pixels,
                         uvs: Box2::new(
                             texture_cursor.x as f32 / texture_width as f32,
                             texture_cursor.y as f32 / texture_height as f32,
@@ -195,20 +194,20 @@ impl FontAtlas {
         }
 
         Ok(FontAtlas {
-            font_map: char_map,
             font_texture: Cached::new(Texture::from_rgba8(
                 ctx,
                 texture_width as u16,
                 texture_height as u16,
                 &texture,
             )),
+            font_map: char_map,
         })
     }
 
     pub fn from_reader<R: Read>(
         ctx: &mut Graphics,
         mut font: R,
-        font_size: f32,
+        em_pixels: f32,
         char_list_type: CharacterListType,
     ) -> Result<FontAtlas> {
         use rusttype as rt;
@@ -219,7 +218,7 @@ impl FontAtlas {
             "Unable to create a rusttype::Font using bytes_font"
         ))?;
 
-        Self::from_rusttype_font(ctx, &rusttype_font, font_size, char_list_type)
+        Self::from_rusttype_font(ctx, &rusttype_font, em_pixels, char_list_type)
     }
 
     fn get_char_list(char_list_type: CharacterListType) -> Result<Vec<char>> {
