@@ -20,8 +20,9 @@ pub enum CharacterListType {
 
 #[derive(Debug, Clone, Copy)]
 struct CharInfo {
-    vertical_offset: i32,
-    width: f32,
+    vertical_offset: f32,
+    horizontal_offset: f32,
+    advance_width: f32,
     uvs: Box2<f32>,
 }
 
@@ -132,18 +133,20 @@ impl FontAtlas {
 
             for (glyph, c) in row {
                 let bb = glyph.pixel_bounding_box().unwrap_or(inval_bb);
+                let h_metrics = glyph.unpositioned().h_metrics();
 
                 char_map.insert(
                     c,
                     CharInfo {
-                        vertical_offset: bb.min.y,
+                        vertical_offset: bb.min.y as f32,
                         uvs: Box2::new(
                             texture_cursor.x as f32 / texture_width as f32,
                             texture_cursor.y as f32 / texture_height as f32,
                             bb.width() as f32 / texture_width as f32,
                             bb.height() as f32 / texture_height as f32,
                         ),
-                        width: glyph.unpositioned().h_metrics().advance_width,
+                        advance_width: h_metrics.advance_width,
+                        horizontal_offset: h_metrics.left_side_bearing,
                     },
                 );
 
@@ -255,9 +258,12 @@ impl Text {
             let i_param = InstanceParam::new()
                 .src(c_info.uvs)
                 .color(color)
-                .translate2(Vector2::new(width, c_info.vertical_offset as f32));
+                .translate2(Vector2::new(
+                    width + c_info.horizontal_offset,
+                    c_info.vertical_offset,
+                ));
             self.batch.insert(i_param);
-            width += c_info.width;
+            width += c_info.advance_width;
         }
     }
 }
