@@ -1449,6 +1449,17 @@ impl SpriteBatch {
         self.sprites.clear();
     }
 
+    #[inline]
+    pub fn texture(&self) -> &Cached<Texture> {
+        &self.texture
+    }
+
+    #[inline]
+    pub fn set_texture(&mut self, texture: impl Into<Cached<Texture>>) {
+        *self.dirty.get_mut() = true;
+        self.texture = texture.into();
+    }
+
     pub fn flush(&self, ctx: &mut Graphics) {
         if !self.dirty.load(atomic::Ordering::Relaxed) {
             return;
@@ -1488,11 +1499,6 @@ impl SpriteBatch {
         inner.bindings.images[0] = texture.texture;
 
         self.dirty.store(false, atomic::Ordering::Relaxed);
-    }
-
-    #[inline]
-    pub fn texture(&self) -> Texture {
-        self.texture.load().clone()
     }
 }
 

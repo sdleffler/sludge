@@ -6,7 +6,7 @@ use crate::{
 };
 
 use {
-    im::HashMap,
+    hashbrown::HashMap,
     image::{Rgba, RgbaImage},
     std::{borrow::Cow, ffi::OsStr, path::Path},
 };
@@ -34,6 +34,7 @@ struct CharInfo {
     horizontal_offset: f32,
     advance_width: f32,
     uvs: Box2<f32>,
+    scale: Vector2<f32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -77,6 +78,7 @@ impl FontAtlas {
     ) -> Result<FontAtlas> {
         use rusttype as rt;
 
+        let em_pixels = font_size;
         let inval_bb = rt::Rect {
             min: rt::Point { x: 0, y: 0 },
             max: rt::Point {
@@ -165,15 +167,16 @@ impl FontAtlas {
                 char_map.insert(
                     c,
                     CharInfo {
-                        vertical_offset: bb.min.y as f32,
+                        vertical_offset: bb.min.y as f32 / em_pixels,
                         uvs: Box2::new(
                             texture_cursor.x as f32 / texture_width as f32,
                             texture_cursor.y as f32 / texture_height as f32,
                             bb.width() as f32 / texture_width as f32,
                             bb.height() as f32 / texture_height as f32,
                         ),
-                        advance_width: h_metrics.advance_width,
-                        horizontal_offset: h_metrics.left_side_bearing,
+                        advance_width: h_metrics.advance_width / em_pixels,
+                        horizontal_offset: h_metrics.left_side_bearing / em_pixels,
+                        scale: Vector2::repeat(1. / em_pixels),
                     },
                 );
 
@@ -271,41 +274,49 @@ impl Drawable for FontAtlas {
     }
 }
 
+const DEFAULT_TEXT_BUFFER_SIZE: usize = 64;
+
 #[derive(Debug)]
 pub struct Text {
     batch: SpriteBatch,
-    char_texture_map: HashMap<char, CharInfo>,
+    atlas: Cached<FontAtlas>,
 }
 
 impl Text {
-    pub fn new(ctx: &mut Graphics, input_text: &str, font_atlas: &FontAtlas, color: Color) -> Self {
-        let mut text = Text {
-            batch: SpriteBatch::with_capacity(
-                ctx,
-                font_atlas.font_texture.clone(),
-                input_text.len(),
-            ),
-            char_texture_map: font_atlas.font_map.clone(),
-        };
+    pub fn new(ctx: &mut Graphics, input_text: &str, font_atlas: FontAtlas, color: Color) -> Self {
+        let mut text = Self::from_cached(ctx, font_atlas.into());
         text.set_text(input_text, color);
         text
     }
 
+    pub fn from_cached(ctx: &mut Graphics, mut font_atlas: Cached<FontAtlas>) -> Self {
+        let atlas = font_atlas.load_cached();
+        Text {
+            batch: SpriteBatch::with_capacity(
+                ctx,
+                atlas.font_texture.clone(),
+                DEFAULT_TEXT_BUFFER_SIZE,
+            ),
+            atlas: font_atlas,
+        }
+    }
+
     pub fn set_text(&mut self, new_text: &str, color: Color) {
+        let atlas = self.atlas.load_cached();
+        let font_map = &atlas.font_map;
         self.batch.clear();
+        self.batch.set_texture(atlas.font_texture.clone());
         let mut width: f32 = 0.;
         for c in new_text.chars() {
-            let c_info = self
-                .char_texture_map
-                .get(&c)
-                .unwrap_or(self.char_texture_map.get(&'a').unwrap());
+            let c_info = font_map.get(&c).unwrap_or(font_map.get(&'a').unwrap());
             let i_param = InstanceParam::new()
                 .src(c_info.uvs)
                 .color(color)
                 .translate2(Vector2::new(
                     width + c_info.horizontal_offset,
                     c_info.vertical_offset,
-                ));
+                ))
+                .scale2(c_info.scale);
             self.batch.insert(i_param);
             width += c_info.advance_width;
         }
