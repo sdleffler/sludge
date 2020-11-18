@@ -602,14 +602,11 @@ where
         key: &Key,
         _cache: &Cache<'a, R>,
         resources: &R,
-    ) -> Result<Loaded<'static, Self>> {
-        match key {
-            Key::Path(path) => {
-                let fh = resources.fetch_mut::<Filesystem>().open(&path)?;
-                let tiled = xml_parser::parse_tileset(fh, 1)?;
-                Ok(TileSheet::from_tiled(&tiled)?.into())
-            } //_ => bail!("can only load from logical"),
-        }
+    ) -> Result<Loaded<Self>> {
+        let path = key.to_path()?;
+        let fh = resources.fetch_mut::<Filesystem>().open(&path)?;
+        let tiled = xml_parser::parse_tileset(fh, 1)?;
+        Ok(TileSheet::from_tiled(&tiled)?.into())
     }
 }
 
@@ -623,36 +620,32 @@ where
         key: &Key,
         _cache: &Cache<'a, R>,
         resources: &R,
-    ) -> Result<Loaded<'static, Self>> {
-        match key {
-            Key::Path(path) => {
-                let tiled =
-                    xml_parser::parse_file(&mut *resources.fetch_mut::<Filesystem>(), &path)?;
+    ) -> Result<Loaded<Self>> {
+        let path = key.to_path()?;
+        let tiled = xml_parser::parse_file(&mut *resources.fetch_mut::<Filesystem>(), &path)?;
 
-                let mut deps = vec![];
-                for ts in tiled.tilesets.iter() {
-                    if let Some(src) = ts.source.as_ref() {
-                        deps.push(Key::from_path(Path::new(src)).clone_static());
-                    }
-                }
-
-                for ls in tiled.image_layers.iter() {
-                    if let Some(img) = &ls.image {
-                        deps.push(Key::from_path(Path::new(&img.source)).clone_static());
-                    }
-                }
-
-                let tiled_map = Self::from_tiled(&path, &tiled).with_context(|| {
-                    anyhow!(
-                        "error deserializing `{}` at path `{}`",
-                        ::std::any::type_name::<TiledMap<L, T, O>>(),
-                        path.display()
-                    )
-                })?;
-
-                Ok(Loaded::with_deps(tiled_map, deps))
-            } //_ => bail!("can only load from path"),
+        let mut deps = vec![];
+        for ts in tiled.tilesets.iter() {
+            if let Some(src) = ts.source.as_ref() {
+                deps.push(Key::from_path(Path::new(src)).clone_static());
+            }
         }
+
+        for ls in tiled.image_layers.iter() {
+            if let Some(img) = &ls.image {
+                deps.push(Key::from_path(Path::new(&img.source)).clone_static());
+            }
+        }
+
+        let tiled_map = Self::from_tiled(&path, &tiled).with_context(|| {
+            anyhow!(
+                "error deserializing `{}` at path `{}`",
+                ::std::any::type_name::<TiledMap<L, T, O>>(),
+                path.display()
+            )
+        })?;
+
+        Ok(Loaded::with_deps(tiled_map, deps))
     }
 }
 
