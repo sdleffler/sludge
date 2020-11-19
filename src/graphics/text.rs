@@ -282,20 +282,18 @@ pub struct Text {
 }
 
 impl Text {
-    pub fn new(ctx: &mut Graphics, input_text: &str, font_atlas: FontAtlas, color: Color) -> Self {
-        let mut text = Self::from_cached(ctx, font_atlas.into());
-        text.set_text(input_text, color);
-        text
+    pub fn from_cached(ctx: &mut Graphics, font_atlas: Cached<FontAtlas>) -> Self {
+        Self::from_cached_with_capacity(ctx, font_atlas, DEFAULT_TEXT_BUFFER_SIZE)
     }
 
-    pub fn from_cached(ctx: &mut Graphics, mut font_atlas: Cached<FontAtlas>) -> Self {
+    pub fn from_cached_with_capacity(
+        ctx: &mut Graphics,
+        mut font_atlas: Cached<FontAtlas>,
+        capacity: usize,
+    ) -> Self {
         let atlas = font_atlas.load_cached();
         Text {
-            batch: SpriteBatch::with_capacity(
-                ctx,
-                atlas.font_texture.clone(),
-                DEFAULT_TEXT_BUFFER_SIZE,
-            ),
+            batch: SpriteBatch::with_capacity(ctx, atlas.font_texture.clone(), capacity),
             atlas: font_atlas,
         }
     }
@@ -307,7 +305,7 @@ impl Text {
         self.batch.set_texture(atlas.font_texture.clone());
         let mut width: f32 = 0.;
         for c in new_text.chars() {
-            let c_info = font_map.get(&c).unwrap_or(font_map.get(&'a').unwrap());
+            let c_info = font_map.get(&c).unwrap_or(font_map.get(&'?').unwrap());
             let i_param = InstanceParam::new()
                 .src(c_info.uvs)
                 .color(color)
