@@ -6,7 +6,7 @@ use crate::{
 };
 
 use {
-    im::HashMap,
+    hashbrown::HashMap,
     image::{Rgba, RgbaImage},
     std::{borrow::Cow, ffi::OsStr, path::Path},
 };
@@ -34,6 +34,7 @@ struct CharInfo {
     horizontal_offset: f32,
     advance_width: f32,
     uvs: Box2<f32>,
+    scale: Vector2<f32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -64,27 +65,31 @@ impl<'a> FontAtlasKey<'a> {
 /// located within `font_texture`.
 #[derive(Debug, Clone)]
 pub struct FontAtlas {
-    font_map: HashMap<char, CharInfo>,
     font_texture: Cached<Texture>,
+    font_map: HashMap<char, CharInfo>,
 }
 
 impl FontAtlas {
     pub(crate) fn from_rusttype_font(
         ctx: &mut Graphics,
         rusttype_font: &rusttype::Font,
-        font_size: f32,
+        em_pixels: f32,
         char_list_type: CharacterListType,
     ) -> Result<FontAtlas> {
         use rusttype as rt;
 
+        let font_scale = rt::Scale {
+            x: em_pixels,
+            y: em_pixels,
+        };
         let inval_bb = rt::Rect {
             min: rt::Point { x: 0, y: 0 },
             max: rt::Point {
-                x: (font_size / 4.0) as i32,
+                x: (em_pixels / 4.0) as i32,
                 y: 0,
             },
         };
-        const MARGIN: u32 = 3;
+        const MARGIN: u32 = 1;
         let char_list = Self::get_char_list(char_list_type)?;
         let chars_per_row = ((char_list.len() as f32).sqrt() as u32) + 1;
         let mut glyphs_and_chars = char_list
@@ -93,10 +98,7 @@ impl FontAtlas {
                 (
                     rusttype_font
                         .glyph(*c)
-                        .scaled(rt::Scale {
-                            x: font_size,
-                            y: font_size,
-                        })
+                        .scaled(font_scale)
                         .positioned(rt::Point { x: 0.0, y: 0.0 }),
                     *c,
                 )
@@ -146,10 +148,9 @@ impl FontAtlas {
         texture_height += chars_per_row * MARGIN;
 
         let mut texture = RgbaImage::new(texture_width as u32, texture_height as u32);
-
         let mut texture_cursor = Point2::<u32>::new(0, 0);
-
         let mut char_map: HashMap<char, CharInfo> = HashMap::new();
+        let v_metrics = rusttype_font.v_metrics(font_scale);
 
         for row in char_rows {
             let first_glyph = row.first().unwrap().0;
@@ -165,15 +166,16 @@ impl FontAtlas {
                 char_map.insert(
                     c,
                     CharInfo {
-                        vertical_offset: bb.min.y as f32,
+                        vertical_offset: (v_metrics.ascent + bb.min.y as f32) / em_pixels,
                         uvs: Box2::new(
                             texture_cursor.x as f32 / texture_width as f32,
                             texture_cursor.y as f32 / texture_height as f32,
                             bb.width() as f32 / texture_width as f32,
                             bb.height() as f32 / texture_height as f32,
                         ),
-                        advance_width: h_metrics.advance_width,
-                        horizontal_offset: h_metrics.left_side_bearing,
+                        advance_width: h_metrics.advance_width / em_pixels,
+                        horizontal_offset: h_metrics.left_side_bearing / em_pixels,
+                        scale: Vector2::repeat(1. / em_pixels),
                     },
                 );
 
@@ -192,20 +194,20 @@ impl FontAtlas {
         }
 
         Ok(FontAtlas {
-            font_map: char_map,
             font_texture: Cached::new(Texture::from_rgba8(
                 ctx,
                 texture_width as u16,
                 texture_height as u16,
                 &texture,
             )),
+            font_map: char_map,
         })
     }
 
     pub fn from_reader<R: Read>(
         ctx: &mut Graphics,
         mut font: R,
-        font_size: f32,
+        em_pixels: f32,
         char_list_type: CharacterListType,
     ) -> Result<FontAtlas> {
         use rusttype as rt;
@@ -216,7 +218,7 @@ impl FontAtlas {
             "Unable to create a rusttype::Font using bytes_font"
         ))?;
 
-        Self::from_rusttype_font(ctx, &rusttype_font, font_size, char_list_type)
+        Self::from_rusttype_font(ctx, &rusttype_font, em_pixels, char_list_type)
     }
 
     fn get_char_list(char_list_type: CharacterListType) -> Result<Vec<char>> {
@@ -271,41 +273,47 @@ impl Drawable for FontAtlas {
     }
 }
 
+const DEFAULT_TEXT_BUFFER_SIZE: usize = 64;
+
 #[derive(Debug)]
 pub struct Text {
     batch: SpriteBatch,
-    char_texture_map: HashMap<char, CharInfo>,
+    atlas: Cached<FontAtlas>,
 }
 
 impl Text {
-    pub fn new(ctx: &mut Graphics, input_text: &str, font_atlas: &FontAtlas, color: Color) -> Self {
-        let mut text = Text {
-            batch: SpriteBatch::with_capacity(
-                ctx,
-                font_atlas.font_texture.clone(),
-                input_text.len(),
-            ),
-            char_texture_map: font_atlas.font_map.clone(),
-        };
-        text.set_text(input_text, color);
-        text
+    pub fn from_cached(ctx: &mut Graphics, font_atlas: Cached<FontAtlas>) -> Self {
+        Self::from_cached_with_capacity(ctx, font_atlas, DEFAULT_TEXT_BUFFER_SIZE)
+    }
+
+    pub fn from_cached_with_capacity(
+        ctx: &mut Graphics,
+        mut font_atlas: Cached<FontAtlas>,
+        capacity: usize,
+    ) -> Self {
+        let atlas = font_atlas.load_cached();
+        Text {
+            batch: SpriteBatch::with_capacity(ctx, atlas.font_texture.clone(), capacity),
+            atlas: font_atlas,
+        }
     }
 
     pub fn set_text(&mut self, new_text: &str, color: Color) {
+        let atlas = self.atlas.load_cached();
+        let font_map = &atlas.font_map;
         self.batch.clear();
+        self.batch.set_texture(atlas.font_texture.clone());
         let mut width: f32 = 0.;
         for c in new_text.chars() {
-            let c_info = self
-                .char_texture_map
-                .get(&c)
-                .unwrap_or(self.char_texture_map.get(&'a').unwrap());
+            let c_info = font_map.get(&c).unwrap_or(font_map.get(&'?').unwrap());
             let i_param = InstanceParam::new()
                 .src(c_info.uvs)
                 .color(color)
                 .translate2(Vector2::new(
                     width + c_info.horizontal_offset,
                     c_info.vertical_offset,
-                ));
+                ))
+                .scale2(c_info.scale);
             self.batch.insert(i_param);
             width += c_info.advance_width;
         }

@@ -55,12 +55,8 @@ impl MainState {
         let atlas = space
             .fetch_mut::<DefaultCache>()
             .get::<FontAtlas>(&font_atlas_key)?;
-        let text = Text::new(
-            &mut *space.fetch_mut(),
-            "Hello World!",
-            &atlas.load(),
-            Color::GREEN,
-        );
+        let mut text = Text::from_cached(&mut *space.fetch_mut(), atlas);
+        text.set_text("Hello World!", Color::GREEN);
 
         Ok(MainState { space, text })
     }
@@ -87,7 +83,9 @@ impl EventHandler for MainState {
         gfx.apply_transforms();
         gfx.draw(
             text,
-            InstanceParam::new().translate2(Vector2::new(20., 140.)),
+            InstanceParam::new()
+                .translate2(Vector2::new(20., 140.))
+                .scale2(Vector2::repeat(40.)),
         );
         gfx.end_pass();
         gfx.commit_frame();
