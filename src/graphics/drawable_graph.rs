@@ -127,6 +127,19 @@ impl<'a, T: AnyDrawable> DrawableNodeBuilder<'a, T> {
         self
     }
 
+    #[inline]
+    pub fn translate2(&mut self, v: Vector2<f32>) -> &mut Self {
+        self.graph.objects[self.index].entry.tx *= Translation3::from(v.push(0.));
+        self
+    }
+
+    #[inline]
+    pub fn scale2(&mut self, v: Vector2<f32>) -> &mut Self {
+        self.graph.objects[self.index].entry.tx *=
+            Transform3::from_matrix_unchecked(Matrix3::from_diagonal(&v.push(1.)).to_homogeneous());
+        self
+    }
+
     pub fn get(&self) -> DrawableNodeId<T> {
         DrawableId::new(self.index)
     }
