@@ -1,4 +1,10 @@
-#![feature(drain_filter, exact_size_is_empty, option_expect_none, duration_zero)]
+#![feature(
+    drain_filter,
+    exact_size_is_empty,
+    option_expect_none,
+    duration_zero,
+    clamp
+)]
 
 use {
     anyhow::*,

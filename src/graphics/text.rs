@@ -37,11 +37,17 @@ struct CharInfo {
     scale: Vector2<f32>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum ThresholdFunction {
+    Above(f32),
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FontAtlasKey<'a> {
     pub path: Cow<'a, Path>,
     pub size: u32,
     pub char_list_type: CharacterListType,
+    pub threshold: Option<f32>,
 }
 
 impl<'a> FontAtlasKey<'a> {
@@ -54,6 +60,21 @@ impl<'a> FontAtlasKey<'a> {
             path: Cow::Borrowed(Path::new(path)),
             size,
             char_list_type,
+            threshold: None,
+        }
+    }
+
+    pub fn with_threshold<S: AsRef<OsStr> + ?Sized>(
+        path: &'a S,
+        size: u32,
+        char_list_type: CharacterListType,
+        threshold: f32,
+    ) -> Self {
+        Self {
+            path: Cow::Borrowed(Path::new(path)),
+            size,
+            char_list_type,
+            threshold: Some(threshold),
         }
     }
 }
@@ -70,22 +91,20 @@ pub struct FontAtlas {
 }
 
 impl FontAtlas {
-    pub(crate) fn from_rusttype_font(
+    pub(crate) fn from_rusttype_font<F: FnMut(f32) -> f32>(
         ctx: &mut Graphics,
         rusttype_font: &rusttype::Font,
-        em_pixels: f32,
+        height_px: f32,
         char_list_type: CharacterListType,
+        mut threshold: F,
     ) -> Result<FontAtlas> {
         use rusttype as rt;
 
-        let font_scale = rt::Scale {
-            x: em_pixels,
-            y: em_pixels,
-        };
+        let font_scale = rt::Scale::uniform(height_px);
         let inval_bb = rt::Rect {
             min: rt::Point { x: 0, y: 0 },
             max: rt::Point {
-                x: (em_pixels / 4.0) as i32,
+                x: (height_px / 4.0) as i32,
                 y: 0,
             },
         };
@@ -166,23 +185,23 @@ impl FontAtlas {
                 char_map.insert(
                     c,
                     CharInfo {
-                        vertical_offset: (v_metrics.ascent + bb.min.y as f32) / em_pixels,
+                        vertical_offset: (v_metrics.ascent + bb.min.y as f32) / height_px,
                         uvs: Box2::new(
                             texture_cursor.x as f32 / texture_width as f32,
                             texture_cursor.y as f32 / texture_height as f32,
                             bb.width() as f32 / texture_width as f32,
                             bb.height() as f32 / texture_height as f32,
                         ),
-                        advance_width: h_metrics.advance_width / em_pixels,
-                        horizontal_offset: h_metrics.left_side_bearing / em_pixels,
-                        scale: Vector2::repeat(1. / em_pixels),
+                        advance_width: h_metrics.advance_width / height_px,
+                        horizontal_offset: h_metrics.left_side_bearing / height_px,
+                        scale: Vector2::repeat(1. / height_px),
                     },
                 );
 
                 glyph.draw(|x, y, v| {
                     let x: u32 = texture_cursor.x as u32 + x;
                     let y: u32 = texture_cursor.y as u32 + y;
-                    let c = (v * 255.0) as u8;
+                    let c = (threshold(v).clamp(0., 1.) * 255.0) as u8;
                     let color = Rgba([255, 255, 255, c]);
                     texture.put_pixel(x, y, color);
                 });
@@ -193,13 +212,11 @@ impl FontAtlas {
             texture_cursor.x = 0;
         }
 
+        let texture_obj =
+            Texture::from_rgba8(ctx, texture_width as u16, texture_height as u16, &texture);
+
         Ok(FontAtlas {
-            font_texture: Cached::new(Texture::from_rgba8(
-                ctx,
-                texture_width as u16,
-                texture_height as u16,
-                &texture,
-            )),
+            font_texture: Cached::new(texture_obj),
             font_map: char_map,
         })
     }
@@ -207,7 +224,7 @@ impl FontAtlas {
     pub fn from_reader<R: Read>(
         ctx: &mut Graphics,
         mut font: R,
-        em_pixels: f32,
+        height_px: f32,
         char_list_type: CharacterListType,
     ) -> Result<FontAtlas> {
         use rusttype as rt;
@@ -218,7 +235,7 @@ impl FontAtlas {
             "Unable to create a rusttype::Font using bytes_font"
         ))?;
 
-        Self::from_rusttype_font(ctx, &rusttype_font, em_pixels, char_list_type)
+        Self::from_rusttype_font(ctx, &rusttype_font, height_px, char_list_type, |v| v)
     }
 
     fn get_char_list(char_list_type: CharacterListType) -> Result<Vec<char>> {
@@ -356,12 +373,22 @@ impl Asset for FontAtlas {
         let key = key.to_rust::<FontAtlasKey>()?;
         let mut font = cache.get::<Font>(&Key::from_path(&key.path))?;
         let gfx = &mut *resources.fetch_mut::<Graphics>();
-        let atlas = FontAtlas::from_rusttype_font(
-            gfx,
-            &font.load_cached().inner,
-            key.size as f32,
-            key.char_list_type,
-        )?;
+        let atlas = match key.threshold {
+            Some(t) => FontAtlas::from_rusttype_font(
+                gfx,
+                &font.load_cached().inner,
+                key.size as f32,
+                key.char_list_type,
+                |v| if v > t { 1. } else { 0. },
+            )?,
+            None => FontAtlas::from_rusttype_font(
+                gfx,
+                &font.load_cached().inner,
+                key.size as f32,
+                key.char_list_type,
+                |v| v,
+            )?,
+        };
         Ok(Loaded::with_deps(
             atlas,
             vec![Key::from(key.path.into_owned())],
