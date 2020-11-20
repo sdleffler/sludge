@@ -170,6 +170,12 @@ impl Drop for OwnedTexture {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum FilterMode {
+    Nearest,
+    Linear,
+}
+
 /// A `Texture` is a safe type used to obtain asynchronous references to an
 /// `OwnedTexture`
 #[derive(Debug, Clone)]
@@ -221,6 +227,16 @@ impl Texture {
 
     pub fn from_inner(texture: mq::Texture) -> Self {
         Self::from(OwnedTexture::from_inner(texture))
+    }
+
+    pub fn set_filter_mode(&self, ctx: &mut Graphics, filter_mode: FilterMode) {
+        self.texture.set_filter(
+            &mut ctx.mq,
+            match filter_mode {
+                FilterMode::Nearest => mq::FilterMode::Nearest,
+                FilterMode::Linear => mq::FilterMode::Linear,
+            },
+        );
     }
 }
 
