@@ -56,7 +56,7 @@ rand = "0.7.3"
 rand_xorshift = "0.2.0"
 rlua_serde = { git = "https://github.com/sdleffler/rlua_serde" }
 rusttype = "0.9.2"
-serde-hashkey = { git = "https://github.com/sdleffler/serde-hashkey", branch = "ordered-float" }
+serde-hashkey = { git = "https://github.com/sdleffler/serde-hashkey", branch = "main", features = ["ordered-float"] }
 
 [dev-dependencies]
 approx = "0.3.2"

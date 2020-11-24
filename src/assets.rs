@@ -17,6 +17,7 @@ use {
         sync::{Arc, Condvar, Mutex},
         thread::{self, ThreadId},
     },
+    serde_hashkey::OrderedFloatPolicy,
 };
 
 pub type DefaultCache = Cache<'static, UnifiedResources<'static>>;
@@ -114,7 +115,7 @@ impl<'a, T: SmartComponent<ScContext<'a>>> SmartComponent<ScContext<'a>> for Cac
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct StructuredKey {
-    inner: serde_hashkey::Key,
+    inner: serde_hashkey::Key<OrderedFloatPolicy>,
 }
 
 impl fmt::Display for StructuredKey {
@@ -164,7 +165,7 @@ impl<'a> Key<'a> {
 
     pub fn from_structured<T: Serialize>(structured: &T) -> Result<Self> {
         Ok(Self::Structured(StructuredKey {
-            inner: serde_hashkey::to_key(structured)?,
+            inner: serde_hashkey::to_key_with_ordered_float(structured)?,
         }))
     }
 
