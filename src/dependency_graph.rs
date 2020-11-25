@@ -46,6 +46,10 @@ impl<T> DependencyGraph<T> {
         Ok(maybe_old.map(|old| self.graph.remove_node(old.graph_index).unwrap().1))
     }
 
+    pub fn is_dirty(&self) -> bool {
+        self.changed
+    }
+
     pub fn update(&mut self) -> Result<bool> {
         if !self.changed {
             return Ok(false);

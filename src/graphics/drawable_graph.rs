@@ -201,9 +201,10 @@ impl ops::Index<ErasedDrawableNodeId> for DrawableGraph {
 impl ops::IndexMut<ErasedDrawableNodeId> for DrawableGraph {
     #[inline]
     fn index_mut(&mut self, i: ErasedDrawableNodeId) -> &mut Self::Output {
-        if matches!(self.objects[i.0].parent, Some(j) if self.objects[j].y_sorted) {
-            *self.dirty.get_mut() = true;
-        }
+        // FIXME(sleffy): two-kinded dirtiness (transform change of child only vs. full?)
+        // if matches!(self.objects[i.0].parent, Some(j) if self.objects[j].y_sorted) {
+        *self.dirty.get_mut() = true;
+        // }
         &mut *self.objects[i.0].entry
     }
 }
@@ -348,6 +349,10 @@ impl DrawableGraph {
             .children
             .iter()
             .map(move |&index| (DrawableId::new(index), &self.objects[index].entry.value))
+    }
+
+    pub fn is_dirty(&self) -> bool {
+        self.dirty.load(atomic::Ordering::Relaxed)
     }
 
     pub fn sort(&self) {

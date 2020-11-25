@@ -18,20 +18,20 @@ use anyhow::Result;
 
 /// A command to change to a new scene, either by pushign a new one,
 /// popping one or replacing the current scene (pop and then push).
-pub enum SceneSwitch<C, W, Ev> {
+pub enum SceneSwitch<C, Ev> {
     None,
-    Push(Box<dyn Scene<C, W, Ev>>),
-    Replace(Box<dyn Scene<C, W, Ev>>),
+    Push(Box<dyn Scene<C, Ev>>),
+    Replace(Box<dyn Scene<C, Ev>>),
     Pop,
 }
 
 /// A trait for you to implement on a scene.
 /// Defines the callbacks the scene uses:
 /// a common context type `C`, and an input event type `Ev`.
-pub trait Scene<C, W, Ev> {
-    fn update(&mut self, gameworld: &mut W, ctx: &mut C) -> Result<SceneSwitch<C, W, Ev>>;
-    fn draw(&mut self, gameworld: &mut W, ctx: &mut C) -> Result<()>;
-    fn input(&mut self, gameworld: &mut W, event: Ev, started: bool);
+pub trait Scene<C, Ev> {
+    fn update(&mut self, ctx: &mut C) -> Result<SceneSwitch<C, Ev>>;
+    fn draw(&mut self, ctx: &mut C) -> Result<()>;
+    fn input(&mut self, ctx: &mut C, event: Ev, started: bool);
     /// Only used for human-readable convenience (or not at all, tbh)
     fn name(&self) -> &str;
     /// This returns whether or not to draw the next scene down on the
@@ -42,14 +42,14 @@ pub trait Scene<C, W, Ev> {
     }
 }
 
-impl<C, W, Ev> SceneSwitch<C, W, Ev> {
+impl<C, Ev> SceneSwitch<C, Ev> {
     /// Convenient shortcut function for boxing scenes.
     ///
     /// Slightly nicer than writing
     /// `SceneSwitch::Replace(Box::new(x))` all the damn time.
     pub fn replace<S>(scene: S) -> Self
     where
-        S: Scene<C, W, Ev> + 'static,
+        S: Scene<C, Ev> + 'static,
     {
         SceneSwitch::Replace(Box::new(scene))
     }
@@ -57,41 +57,37 @@ impl<C, W, Ev> SceneSwitch<C, W, Ev> {
     /// Same as `replace()` but returns SceneSwitch::Push
     pub fn push<S>(scene: S) -> Self
     where
-        S: Scene<C, W, Ev> + 'static,
+        S: Scene<C, Ev> + 'static,
     {
         SceneSwitch::Push(Box::new(scene))
     }
 }
 
 /// A stack of `Scene`'s, together with a context object.
-pub struct SceneStack<C, W, Ev> {
-    pub world: W,
-    scenes: Vec<Box<dyn Scene<C, W, Ev>>>,
+pub struct SceneStack<C, Ev> {
+    scenes: Vec<Box<dyn Scene<C, Ev>>>,
 }
 
-impl<C, W, Ev> SceneStack<C, W, Ev> {
-    pub fn new(_ctx: &mut C, global_state: W) -> Self {
-        Self {
-            world: global_state,
-            scenes: Vec::new(),
-        }
+impl<C, Ev> SceneStack<C, Ev> {
+    pub fn new() -> Self {
+        Self { scenes: Vec::new() }
     }
 
     /// Add a new scene to the top of the stack.
-    pub fn push(&mut self, scene: Box<dyn Scene<C, W, Ev>>) {
+    pub fn push(&mut self, scene: Box<dyn Scene<C, Ev>>) {
         self.scenes.push(scene)
     }
 
     /// Remove the top scene from the stack and returns it;
     /// panics if there is none.
-    pub fn pop(&mut self) -> Box<dyn Scene<C, W, Ev>> {
+    pub fn pop(&mut self) -> Box<dyn Scene<C, Ev>> {
         self.scenes
             .pop()
             .expect("ERROR: Popped an empty scene stack.")
     }
 
     /// Returns the current scene; panics if there is none.
-    pub fn current(&self) -> &dyn Scene<C, W, Ev> {
+    pub fn current(&self) -> &dyn Scene<C, Ev> {
         &**self
             .scenes
             .last()
@@ -100,10 +96,7 @@ impl<C, W, Ev> SceneStack<C, W, Ev> {
 
     /// Executes the given SceneSwitch command; if it is a pop or replace
     /// it returns `Some(old_scene)`, otherwise `None`
-    pub fn switch(
-        &mut self,
-        next_scene: SceneSwitch<C, W, Ev>,
-    ) -> Option<Box<dyn Scene<C, W, Ev>>> {
+    pub fn switch(&mut self, next_scene: SceneSwitch<C, Ev>) -> Option<Box<dyn Scene<C, Ev>>> {
         match next_scene {
             SceneSwitch::None => None,
             SceneSwitch::Pop => {
@@ -131,7 +124,7 @@ impl<C, W, Ev> SceneStack<C, W, Ev> {
                 .scenes
                 .last_mut()
                 .expect("Tried to update empty scene stack");
-            current_scene.update(&mut self.world, ctx)?
+            current_scene.update(ctx)?
         };
 
         self.switch(next_scene);
@@ -143,45 +136,29 @@ impl<C, W, Ev> SceneStack<C, W, Ev> {
     /// supposed to draw the previous one, then draw them from the bottom up.
     ///
     /// This allows for layering GUI's and such.
-    fn draw_scenes(scenes: &mut [Box<dyn Scene<C, W, Ev>>], world: &mut W, ctx: &mut C) {
+    fn draw_scenes(scenes: &mut [Box<dyn Scene<C, Ev>>], ctx: &mut C) {
         assert!(scenes.len() > 0);
         if let Some((current, rest)) = scenes.split_last_mut() {
             if current.draw_previous() {
-                SceneStack::draw_scenes(rest, world, ctx);
+                SceneStack::draw_scenes(rest, ctx);
             }
             current
-                .draw(world, ctx)
+                .draw(ctx)
                 .expect("I would hope drawing a scene never fails!");
         }
     }
 
     /// Draw the current scene.
     pub fn draw(&mut self, ctx: &mut C) {
-        SceneStack::draw_scenes(&mut self.scenes, &mut self.world, ctx)
+        SceneStack::draw_scenes(&mut self.scenes, ctx)
     }
 
     /// Feeds the given input event to the current scene.
-    pub fn input(&mut self, event: Ev, started: bool) {
+    pub fn input(&mut self, ctx: &mut C, event: Ev, started: bool) {
         let current_scene = &mut **self
             .scenes
             .last_mut()
             .expect("Tried to do input for empty scene stack");
-        current_scene.input(&mut self.world, event, started);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    struct Thing {
-        #[allow(unused)]
-        scenes: Vec<SceneStack<u32, u32, u32>>,
-    }
-
-    #[test]
-    fn test1() {
-        #[allow(unused)]
-        let x = Thing { scenes: vec![] };
+        current_scene.input(ctx, event, started);
     }
 }

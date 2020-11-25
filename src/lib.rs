@@ -298,6 +298,15 @@ impl Space {
             &["WorldEvent", "Hierarchy"],
         )?;
 
+        let resources = &this.resources;
+        let maintainers = &mut this.maintainers;
+        this.lua.context(|lua| {
+            maintainers.refresh(
+                lua,
+                &mut resources.local.borrow_mut(),
+                Some(&resources.global),
+            )
+        })?;
         this.maintain()?;
 
         Ok(this)

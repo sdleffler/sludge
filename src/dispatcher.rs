@@ -1,6 +1,5 @@
 use crate::{
-    dependency_graph::DependencyGraph, OwnedResources, Resources, SharedResources, System,
-    UnifiedResources,
+    dependency_graph::DependencyGraph, OwnedResources, SharedResources, System, UnifiedResources,
 };
 use {anyhow::*, rlua::prelude::*};
 
@@ -50,11 +49,10 @@ impl<'a> Dispatcher<'a> {
         lua: LuaContext<'lua>,
         resources: &UnifiedResources,
     ) -> Result<()> {
-        self.refresh(
-            lua,
-            &mut *resources.local.borrow_mut(),
-            Some(&resources.global),
-        )?;
+        ensure!(
+            !self.dependency_graph.is_dirty(),
+            "dispatcher has been modified but not refreshed!"
+        );
 
         for (_, sys) in self.dependency_graph.sorted() {
             sys.update(lua, resources)?;
