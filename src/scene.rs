@@ -31,7 +31,7 @@ pub enum SceneSwitch<C, Ev> {
 pub trait Scene<C, Ev> {
     fn update(&mut self, ctx: &mut C) -> Result<SceneSwitch<C, Ev>>;
     fn draw(&mut self, ctx: &mut C) -> Result<()>;
-    fn input(&mut self, ctx: &mut C, event: Ev, started: bool);
+    fn event(&mut self, ctx: &mut C, event: Ev);
     /// Only used for human-readable convenience (or not at all, tbh)
     fn name(&self) -> &str;
     /// This returns whether or not to draw the next scene down on the
@@ -101,14 +101,17 @@ impl<C, Ev> SceneStack<C, Ev> {
             SceneSwitch::None => None,
             SceneSwitch::Pop => {
                 let s = self.pop();
+                log::info!("Pop {}", s.name());
                 Some(s)
             }
             SceneSwitch::Push(s) => {
+                log::info!("Push {}", s.name());
                 self.push(s);
                 None
             }
             SceneSwitch::Replace(s) => {
                 let old_scene = self.pop();
+                log::info!("Replace {} => {}", old_scene.name(), s.name());
                 self.push(s);
                 Some(old_scene)
             }
@@ -136,29 +139,29 @@ impl<C, Ev> SceneStack<C, Ev> {
     /// supposed to draw the previous one, then draw them from the bottom up.
     ///
     /// This allows for layering GUI's and such.
-    fn draw_scenes(scenes: &mut [Box<dyn Scene<C, Ev>>], ctx: &mut C) {
+    fn draw_scenes(scenes: &mut [Box<dyn Scene<C, Ev>>], ctx: &mut C) -> Result<()> {
         assert!(scenes.len() > 0);
         if let Some((current, rest)) = scenes.split_last_mut() {
             if current.draw_previous() {
-                SceneStack::draw_scenes(rest, ctx);
+                SceneStack::draw_scenes(rest, ctx)?;
             }
-            current
-                .draw(ctx)
-                .expect("I would hope drawing a scene never fails!");
+            current.draw(ctx)
+        } else {
+            Ok(())
         }
     }
 
     /// Draw the current scene.
-    pub fn draw(&mut self, ctx: &mut C) {
+    pub fn draw(&mut self, ctx: &mut C) -> Result<()> {
         SceneStack::draw_scenes(&mut self.scenes, ctx)
     }
 
-    /// Feeds the given input event to the current scene.
-    pub fn input(&mut self, ctx: &mut C, event: Ev, started: bool) {
+    /// Feeds the given event to the current scene.
+    pub fn event(&mut self, ctx: &mut C, event: Ev) {
         let current_scene = &mut **self
             .scenes
             .last_mut()
             .expect("Tried to do input for empty scene stack");
-        current_scene.input(ctx, event, started);
+        current_scene.event(ctx, event);
     }
 }
