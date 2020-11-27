@@ -187,15 +187,15 @@ impl FontAtlas {
                 char_map.insert(
                     c,
                     CharInfo {
-                        vertical_offset: (v_metrics.ascent + bb.min.y as f32) / height_px,
+                        vertical_offset: (v_metrics.ascent + bb.min.y as f32),
                         uvs: Box2::new(
                             texture_cursor.x as f32 / texture_width as f32,
                             texture_cursor.y as f32 / texture_height as f32,
                             bb.width() as f32 / texture_width as f32,
                             bb.height() as f32 / texture_height as f32,
                         ),
-                        advance_width: h_metrics.advance_width / height_px,
-                        horizontal_offset: h_metrics.left_side_bearing / height_px,
+                        advance_width: h_metrics.advance_width,
+                        horizontal_offset: h_metrics.left_side_bearing,
                         scale: Vector2::repeat(1. / height_px),
                     },
                 );
@@ -220,7 +220,7 @@ impl FontAtlas {
         Ok(FontAtlas {
             font_texture: Cached::new(texture_obj),
             font_map: char_map,
-            line_gap: (v_metrics.ascent - v_metrics.descent + v_metrics.line_gap) / height_px,
+            line_gap: v_metrics.ascent - v_metrics.descent + v_metrics.line_gap,
         })
     }
 
@@ -343,9 +343,8 @@ impl Text {
                 .translate2(Vector2::new(
                     x + width + c_info.horizontal_offset,
                     y + c_info.vertical_offset,
-                ))
-                .scale2(c_info.scale);
-            batch.insert(i_param);
+                ));
+            self.batch.insert(i_param);
             width += c_info.advance_width;
         }
     }

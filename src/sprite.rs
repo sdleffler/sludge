@@ -180,57 +180,57 @@ impl SpriteSheet {
         let dims = spritesheet_data.meta.size;
         let size = Vector2::new(dims.w, dims.h);
 
-        let tags = spritesheet_data
-            .meta
-            .frame_tags
-            .into_iter()
-            .flatten()
-            .map(|frame_tag| Tag {
+        let mut frames = Vec::new();
+        for ase_frame in spritesheet_data.frames.into_iter() {
+            let fr = ase_frame.frame;
+            let sb = ase_frame.sprite_source_size;
+            let ss = ase_frame.source_size;
+
+            let duration = ase_frame.duration;
+            let frame = Box2::new(fr.x, fr.y, fr.w, fr.h);
+            let frame_source = Box2::new(sb.x, sb.y, sb.w, sb.h);
+            let source_size = Vector2::new(ss.w, ss.h);
+            let offset = (Vector2::new(sb.x as f32, sb.y as f32)
+                - Vector2::new(ss.w as f32, ss.h as f32) / 2.)
+                .map(f32::floor);
+            let uvs = Box2::new(
+                fr.x as f32 / size.x as f32,
+                fr.y as f32 / size.y as f32,
+                fr.w as f32 / size.x as f32,
+                fr.h as f32 / size.y as f32,
+            );
+
+            frames.push(Frame {
+                frame,
+                frame_source,
+                source_size,
+                offset,
+                uvs,
+                duration,
+            });
+        }
+
+        let mut tags = vec![Tag {
+            name: String::new(),
+            from: 0,
+            to: frames.len() as u32 - 1,
+            direction: Direction::Forward,
+        }];
+
+        for frame_tag in spritesheet_data.meta.frame_tags.into_iter().flatten() {
+            tags.push(Tag {
                 name: frame_tag.name,
                 from: frame_tag.from,
                 to: frame_tag.to,
                 direction: Direction::from(frame_tag.direction),
-            })
-            .collect::<Vec<_>>();
+            });
+        }
 
         let tag_ids = tags
             .iter()
             .enumerate()
             .map(|(i, tag)| (tag.name.clone(), TagId(i as u32)))
             .collect::<HashMap<_, _>>();
-
-        let frames = spritesheet_data
-            .frames
-            .into_iter()
-            .map(|ase_frame| {
-                let fr = ase_frame.frame;
-                let sb = ase_frame.sprite_source_size;
-                let ss = ase_frame.source_size;
-
-                let duration = ase_frame.duration;
-                let frame = Box2::new(fr.x, fr.y, fr.w, fr.h);
-                let frame_source = Box2::new(sb.x, sb.y, sb.w, sb.h);
-                let source_size = Vector2::new(ss.w, ss.h);
-                let offset = (Vector2::new(sb.x as f32, sb.y as f32)
-                    - Vector2::new(ss.w as f32, ss.h as f32) / 2.)
-                    .map(f32::floor);
-                let uvs = Box2::new(
-                    fr.x as f32 / size.x as f32,
-                    fr.y as f32 / size.y as f32,
-                    fr.w as f32 / size.x as f32,
-                    fr.h as f32 / size.y as f32,
-                );
-
-                Frame {
-                    frame,
-                    frame_source,
-                    source_size,
-                    offset,
-                    uvs,
-                    duration,
-                }
-            })
-            .collect();
 
         Ok(Self {
             image: spritesheet_data
@@ -317,7 +317,7 @@ pub struct SpriteName(pub String);
 pub struct SpriteFrame(pub FrameId);
 
 /// Component holding the state of a running animation at a given tag.
-#[derive(Debug, Copy, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub struct SpriteTag {
     /// The index of the currently running animation/tag.
     pub tag_id: TagId,
@@ -327,6 +327,17 @@ pub struct SpriteTag {
     pub is_paused: bool,
     /// Whether this animation should loop, or pause on the last frame.
     pub should_loop: bool,
+}
+
+impl Default for SpriteTag {
+    fn default() -> Self {
+        Self {
+            tag_id: TagId::default(),
+            remaining: 0.,
+            is_paused: false,
+            should_loop: true,
+        }
+    }
 }
 
 impl<'a> SmartComponent<ScContext<'a>> for SpriteName {}
@@ -368,6 +379,10 @@ impl SpriteAnimation {
         let sheet = self.sheet.load_cached();
         sheet.update_animation(dt, &mut self.tag, &mut self.frame);
         sheet[self.frame.0]
+    }
+
+    pub fn current(&self) -> Frame {
+        self.sheet.load()[self.frame]
     }
 }
 

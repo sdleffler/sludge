@@ -117,7 +117,7 @@ impl<N: Numeric> Box2<N> {
     #[inline]
     pub fn merged(&self, other: &Self) -> Self {
         let new_mins = self.mins.coords.inf(&other.mins.coords);
-        let new_maxes = self.mins.coords.sup(&other.maxs.coords);
+        let new_maxes = self.maxs.coords.sup(&other.maxs.coords);
         Self {
             mins: Point2::from(new_mins),
             maxs: Point2::from(new_maxes),
@@ -231,7 +231,7 @@ impl<N: Numeric> From<Box2<N>> for Box2Proxy<N> {
 
 impl<N: Numeric> From<Box2Proxy<N>> for Box2<N> {
     fn from(b: Box2Proxy<N>) -> Self {
-        Self::from_extents(Point2::new(b.x, b.y), Vector2::new(b.w, b.h))
+        Self::new(b.x, b.y, b.w, b.h)
     }
 }
 
@@ -251,12 +251,6 @@ where
     fn from_lua(lua_value: LuaValue<'lua>, _lua: LuaContext<'lua>) -> LuaResult<Self> {
         rlua_serde::from_value(lua_value)
     }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct Box3<N: Scalar> {
-    pub origin: Point3<N>,
-    pub extent: Vector3<N>,
 }
 
 #[rustfmt::skip]

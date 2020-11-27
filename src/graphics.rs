@@ -1440,13 +1440,10 @@ impl SpriteBatch {
         *self.dirty.get_mut() = true;
         let inner = self.inner.get_mut().unwrap();
         if let Some(aabb) = inner.aabb.as_mut() {
-            aabb.merge(
-                &self
-                    .texture
-                    .load_cached()
-                    .aabb2()
-                    .transformed_by(param.tx.matrix()),
-            );
+            let texture = self.texture.load_cached();
+            let scaled = param.scale2(param.src.extents());
+            let mat = scaled.tx.matrix();
+            aabb.merge(&texture.aabb2().transformed_by(mat));
         }
         SpriteId(self.sprites.insert(param))
     }
@@ -1542,9 +1539,14 @@ impl Drawable for SpriteBatch {
 
         let mut inner = self.inner.write().unwrap();
         let mut initial = Box2::invalid();
-        let image_aabb = self.texture.load().aabb2();
+        let texture = self.texture.load();
+        let image_aabb = texture.aabb2();
         for (_, param) in self.sprites.iter() {
-            initial.merge(&param.transform_aabb(&image_aabb));
+            initial.merge(
+                &param
+                    .scale2(param.src.extents())
+                    .transform_aabb(&image_aabb),
+            );
         }
         inner.aabb = Some(initial);
 

@@ -600,8 +600,7 @@ where
                 }
             }
             InputEffect::Button(button, point) => {
-                let f = || ButtonState::default();
-                let button_status = self.buttons.entry(button).or_insert_with(f);
+                let button_status = self.buttons.entry(button).or_default();
                 button_status.pressed = started;
                 button_status.event_location = point;
             }
@@ -629,12 +628,12 @@ where
         *button_status
     }
 
-    pub fn get_button_down(&self, axis: Buttons) -> bool {
-        self.get_button(axis).pressed
+    pub fn get_button_down(&self, button: Buttons) -> bool {
+        self.get_button(button).pressed
     }
 
-    pub fn get_button_up(&self, axis: Buttons) -> bool {
-        !self.get_button(axis).pressed
+    pub fn get_button_up(&self, button: Buttons) -> bool {
+        !self.get_button(button).pressed
     }
 
     /// Returns whether or not the button was pressed this frame,
@@ -642,18 +641,18 @@ where
     ///
     /// Basically, `get_button_down()` and `get_button_up()` are level
     /// triggers, this and `get_button_released()` are edge triggered.
-    pub fn get_button_pressed(&self, axis: Buttons) -> bool {
-        let b = self.get_button(axis);
+    pub fn get_button_pressed(&self, button: Buttons) -> bool {
+        let b = self.get_button(button);
         b.pressed && !b.pressed_last_frame
     }
 
-    pub fn get_button_released(&self, axis: Buttons) -> bool {
-        let b = self.get_button(axis);
+    pub fn get_button_released(&self, button: Buttons) -> bool {
+        let b = self.get_button(button);
         !b.pressed && b.pressed_last_frame
     }
 
-    pub fn get_button_event_location(&self, axis: Buttons) -> Option<Point2<f32>> {
-        let b = self.get_button(axis);
+    pub fn get_button_event_location(&self, button: Buttons) -> Option<Point2<f32>> {
+        let b = self.get_button(button);
         b.event_location
     }
 
