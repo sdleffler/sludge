@@ -600,8 +600,7 @@ where
                 }
             }
             InputEffect::Button(button, point) => {
-                let f = || ButtonState::default();
-                let button_status = self.buttons.entry(button).or_insert_with(f);
+                let button_status = self.buttons.entry(button).or_default();
                 button_status.pressed = started;
                 button_status.event_location = point;
             }
