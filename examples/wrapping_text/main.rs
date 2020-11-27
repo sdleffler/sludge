@@ -56,7 +56,7 @@ impl MainState {
             .fetch_mut::<DefaultCache>()
             .get::<FontAtlas>(&font_atlas_key)?;
         let mut text = Text::from_cached(&mut *space.fetch_mut(), atlas);
-        text.set_text("Hello World!", Color::GREEN);
+        text.set_wrapping_text("Hello! Here we have an example of some SUPER cool wrapping text! It works nicely.", Color::GREEN, 20);
 
         Ok(MainState { space, text })
     }

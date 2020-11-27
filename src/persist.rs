@@ -1,4 +1,4 @@
-use ::{
+use {
     anyhow::*,
     hashbrown::HashMap,
     rlua::prelude::*,

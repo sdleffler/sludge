@@ -21,6 +21,7 @@ pub struct Font {
 pub enum CharacterListType {
     AsciiSubset,
     Ascii,
+    ExtendedAscii,
     Cyrillic,
     Thai,
     Vietnamese,
@@ -88,6 +89,7 @@ impl<'a> FontAtlasKey<'a> {
 pub struct FontAtlas {
     font_texture: Cached<Texture>,
     font_map: HashMap<char, CharInfo>,
+    line_gap: f32,
 }
 
 impl FontAtlas {
@@ -218,6 +220,7 @@ impl FontAtlas {
         Ok(FontAtlas {
             font_texture: Cached::new(texture_obj),
             font_map: char_map,
+            line_gap: (v_metrics.ascent - v_metrics.descent + v_metrics.line_gap) / height_px,
         })
     }
 
@@ -241,7 +244,8 @@ impl FontAtlas {
     fn get_char_list(char_list_type: CharacterListType) -> Result<Vec<char>> {
         let char_list = match char_list_type {
             CharacterListType::AsciiSubset => [0x20..0x7F].iter(),
-            CharacterListType::Ascii => [0x00..0xFF].iter(),
+            CharacterListType::Ascii => [0x00..0x7F].iter(),
+            CharacterListType::ExtendedAscii => [0x00..0xFF].iter(),
             CharacterListType::Cyrillic => [
                 0x0020u32..0x00FF, // Basic Latin + Latin Supplement
                 0x0400u32..0x052F, // Cyrillic + Cyrillic Supplement
@@ -316,23 +320,93 @@ impl Text {
     }
 
     pub fn set_text(&mut self, new_text: &str, color: Color) {
-        let atlas = self.atlas.load_cached();
-        let font_map = &atlas.font_map;
         self.batch.clear();
+        let atlas = self.atlas.load_cached();
         self.batch.set_texture(atlas.font_texture.clone());
-        let mut width: f32 = 0.;
-        for c in new_text.chars() {
+        Self::draw_word(new_text, color, &atlas.font_map, 0., 0., &mut self.batch);
+    }
+
+    fn draw_word(
+        word: &str,
+        color: Color,
+        font_map: &HashMap<char, CharInfo>,
+        x: f32,
+        y: f32,
+        batch: &mut SpriteBatch,
+    ) {
+        let mut width = 0.;
+        for c in word.chars() {
             let c_info = font_map.get(&c).unwrap_or(font_map.get(&'?').unwrap());
             let i_param = InstanceParam::new()
                 .src(c_info.uvs)
                 .color(color)
                 .translate2(Vector2::new(
-                    width + c_info.horizontal_offset,
-                    c_info.vertical_offset,
+                    x + width + c_info.horizontal_offset,
+                    y + c_info.vertical_offset,
                 ))
                 .scale2(c_info.scale);
-            self.batch.insert(i_param);
+            batch.insert(i_param);
             width += c_info.advance_width;
+        }
+    }
+
+    // width_per_line referse to how many pixels we have per line
+    pub fn set_wrapping_text(&mut self, text: &str, color: Color, width_per_line: usize) {
+        struct Word {
+            width: f32,
+            text: String,
+        }
+
+        let atlas = self.atlas.load_cached();
+        let font_map = &atlas.font_map;
+        let space = font_map.get(&' ').unwrap();
+        self.batch.clear();
+        self.batch.set_texture(atlas.font_texture.clone());
+
+        let words: Vec<Word> = text
+            .split(" ")
+            .map(|word| Word {
+                width: word
+                    .chars()
+                    .map(|c| {
+                        font_map
+                            .get(&c)
+                            .unwrap_or(font_map.get(&'?').unwrap())
+                            .advance_width
+                    })
+                    .sum(),
+                text: word.to_owned(),
+            })
+            .collect();
+
+        let mut cursor = Point2::<f32>::new(0., 0.);
+
+        for word in words.iter() {
+            if word.width + cursor.x > width_per_line as f32 {
+                cursor.x = 0.;
+                cursor.y += atlas.line_gap;
+            }
+
+            Self::draw_word(
+                &word.text,
+                color,
+                &font_map,
+                cursor.x,
+                cursor.y,
+                &mut self.batch,
+            );
+            cursor.x += word.width;
+
+            let i_param = InstanceParam::new()
+                .src(space.uvs)
+                .color(color)
+                .translate2(Vector2::new(
+                    cursor.x + space.horizontal_offset,
+                    cursor.y + space.vertical_offset,
+                ))
+                .scale2(space.scale);
+            self.batch.insert(i_param);
+            cursor.x += space.advance_width;
         }
     }
 }

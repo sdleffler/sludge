@@ -7,6 +7,7 @@ use {
     arc_swap::ArcSwap,
     hashbrown::{HashMap, HashSet},
     serde::{de::DeserializeOwned, *},
+    serde_hashkey::OrderedFloatPolicy,
     std::{
         any::{self, Any, TypeId},
         borrow::Cow,
@@ -17,7 +18,6 @@ use {
         sync::{Arc, Condvar, Mutex},
         thread::{self, ThreadId},
     },
-    serde_hashkey::OrderedFloatPolicy,
 };
 
 pub type DefaultCache = Cache<'static, UnifiedResources<'static>>;

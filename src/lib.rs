@@ -72,7 +72,7 @@ pub mod prelude {
 }
 
 #[doc(hidden)]
-pub use ::{anyhow, inventory, nalgebra, ncollide2d, rlua, rlua_serde, serde, sludge_macros::*};
+pub use {anyhow, inventory, nalgebra, ncollide2d, rlua, rlua_serde, serde, sludge_macros::*};
 
 #[doc(hidden)]
 pub mod sludge {
