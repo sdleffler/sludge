@@ -745,45 +745,45 @@ mod tests {
     fn test_input_bindings() {
         let ib = make_input_binding();
         assert_eq!(
-            ib.resolve(KeyCode::Z),
+            ib.resolve_keycode(KeyCode::Z),
             Some(InputEffect::Button(Buttons::A, None))
         );
         assert_eq!(
-            ib.resolve(KeyCode::X),
+            ib.resolve_keycode(KeyCode::X),
             Some(InputEffect::Button(Buttons::B, None))
         );
         assert_eq!(
-            ib.resolve(KeyCode::Enter),
+            ib.resolve_keycode(KeyCode::Enter),
             Some(InputEffect::Button(Buttons::Start, None))
         );
         assert_eq!(
-            ib.resolve(KeyCode::RightShift),
+            ib.resolve_keycode(KeyCode::RightShift),
             Some(InputEffect::Button(Buttons::Select, None))
         );
         assert_eq!(
-            ib.resolve(KeyCode::LeftShift),
+            ib.resolve_keycode(KeyCode::LeftShift),
             Some(InputEffect::Button(Buttons::Select, None))
         );
 
         assert_eq!(
-            ib.resolve(KeyCode::Up),
+            ib.resolve_keycode(KeyCode::Up),
             Some(InputEffect::Axis(Axes::Vert, true))
         );
         assert_eq!(
-            ib.resolve(KeyCode::Down),
+            ib.resolve_keycode(KeyCode::Down),
             Some(InputEffect::Axis(Axes::Vert, false))
         );
         assert_eq!(
-            ib.resolve(KeyCode::Left),
+            ib.resolve_keycode(KeyCode::Left),
             Some(InputEffect::Axis(Axes::Horz, false))
         );
         assert_eq!(
-            ib.resolve(KeyCode::Right),
+            ib.resolve_keycode(KeyCode::Right),
             Some(InputEffect::Axis(Axes::Horz, true))
         );
 
-        assert_eq!(ib.resolve(KeyCode::Q), None);
-        assert_eq!(ib.resolve(KeyCode::W), None);
+        assert_eq!(ib.resolve_keycode(KeyCode::Q), None);
+        assert_eq!(ib.resolve_keycode(KeyCode::W), None);
     }
 
     #[test]
