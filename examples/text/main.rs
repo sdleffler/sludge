@@ -55,8 +55,9 @@ impl MainState {
         let atlas = space
             .fetch_mut::<DefaultCache>()
             .get::<FontAtlas>(&font_atlas_key)?;
-        let mut text = Text::from_cached(&mut *space.fetch_mut(), atlas);
-        text.set_text("Hello World!", Color::GREEN);
+        let mut text_layout = TextLayout::new(atlas.load().clone());
+        text_layout.push_str("Hello world!", std::iter::repeat(Color::WHITE));
+        let text = text_layout.apply_layout(&mut *space.fetch_mut());
 
         Ok(MainState { space, text })
     }
@@ -84,8 +85,8 @@ impl EventHandler for MainState {
         gfx.draw(
             text,
             InstanceParam::new()
-                .translate2(Vector2::new(20., 140.))
-                .scale2(Vector2::repeat(40.)),
+                .translate2(Vector2::new(540., 480.))
+                .scale2(Vector2::repeat(2.)),
         );
         gfx.end_pass();
         gfx.commit_frame();

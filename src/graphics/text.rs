@@ -36,6 +36,8 @@ struct CharInfo {
     advance_width: f32,
     uvs: Box2<f32>,
     scale: Vector2<f32>,
+    width: f32,
+    height: f32,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -87,7 +89,7 @@ impl<'a> FontAtlasKey<'a> {
 /// located within `font_texture`.
 #[derive(Debug, Clone)]
 pub struct FontAtlas {
-    font_texture: Cached<Texture>,
+    pub font_texture: Cached<Texture>,
     font_map: HashMap<char, CharInfo>,
     line_gap: f32,
 }
@@ -197,6 +199,8 @@ impl FontAtlas {
                         advance_width: h_metrics.advance_width,
                         horizontal_offset: h_metrics.left_side_bearing,
                         scale: Vector2::repeat(1. / height_px),
+                        width: bb.width() as f32,
+                        height: bb.height() as f32,
                     },
                 );
 
@@ -299,115 +303,40 @@ const DEFAULT_TEXT_BUFFER_SIZE: usize = 64;
 #[derive(Debug)]
 pub struct Text {
     batch: SpriteBatch,
-    atlas: Cached<FontAtlas>,
 }
 
 impl Text {
-    pub fn from_cached(ctx: &mut Graphics, font_atlas: Cached<FontAtlas>) -> Self {
-        Self::from_cached_with_capacity(ctx, font_atlas, DEFAULT_TEXT_BUFFER_SIZE)
+    pub fn from_cached<T: Clone + Into<Cached<Texture>>>(ctx: &mut Graphics, texture: T) -> Self {
+        Self::from_cached_with_capacity(ctx, DEFAULT_TEXT_BUFFER_SIZE, texture)
     }
 
-    pub fn from_cached_with_capacity(
+    pub fn from_cached_with_capacity<T: Clone + Into<Cached<Texture>>>(
         ctx: &mut Graphics,
-        mut font_atlas: Cached<FontAtlas>,
         capacity: usize,
+        texture: T,
     ) -> Self {
-        let atlas = font_atlas.load_cached();
         Text {
-            batch: SpriteBatch::with_capacity(ctx, atlas.font_texture.clone(), capacity),
-            atlas: font_atlas,
+            batch: SpriteBatch::with_capacity(ctx, texture, capacity),
         }
     }
 
-    pub fn set_text(&mut self, new_text: &str, color: Color) {
+    fn set_text(&mut self, layout: &TextLayout) {
         self.batch.clear();
-        let atlas = self.atlas.load_cached();
-        self.batch.set_texture(atlas.font_texture.clone());
-        Self::draw_word(new_text, color, &atlas.font_map, 0., 0., &mut self.batch);
-    }
-
-    fn draw_word(
-        word: &str,
-        color: Color,
-        font_map: &HashMap<char, CharInfo>,
-        x: f32,
-        y: f32,
-        batch: &mut SpriteBatch,
-    ) {
-        let mut width = 0.;
-        for c in word.chars() {
-            let c_info = font_map.get(&c).unwrap_or(font_map.get(&'?').unwrap());
+        self.batch.set_texture(layout.font_atlas.font_texture.clone());
+        for layout_c in layout.chars.iter() {
+            let c_info = layout.font_atlas.font_map.get(&layout_c.c).unwrap_or(&layout.font_atlas.font_map[&'?']);
             let i_param = InstanceParam::new()
                 .src(c_info.uvs)
-                .color(color)
+                .color(layout_c.color)
                 .translate2(Vector2::new(
-                    x + width + c_info.horizontal_offset,
-                    y + c_info.vertical_offset,
+                    layout_c.coords.mins.x,
+                    layout_c.coords.mins.y
                 ));
             self.batch.insert(i_param);
-            width += c_info.advance_width;
         }
     }
 
-    // width_per_line referse to how many pixels we have per line
-    pub fn set_wrapping_text(&mut self, text: &str, color: Color, width_per_line: usize) {
-        struct Word {
-            width: f32,
-            text: String,
-        }
 
-        let atlas = self.atlas.load_cached();
-        let font_map = &atlas.font_map;
-        let space = font_map.get(&' ').unwrap();
-        self.batch.clear();
-        self.batch.set_texture(atlas.font_texture.clone());
-
-        let words: Vec<Word> = text
-            .split(" ")
-            .map(|word| Word {
-                width: word
-                    .chars()
-                    .map(|c| {
-                        font_map
-                            .get(&c)
-                            .unwrap_or(font_map.get(&'?').unwrap())
-                            .advance_width
-                    })
-                    .sum(),
-                text: word.to_owned(),
-            })
-            .collect();
-
-        let mut cursor = Point2::<f32>::new(0., 0.);
-
-        for word in words.iter() {
-            if word.width + cursor.x > width_per_line as f32 {
-                cursor.x = 0.;
-                cursor.y += atlas.line_gap;
-            }
-
-            Self::draw_word(
-                &word.text,
-                color,
-                &font_map,
-                cursor.x,
-                cursor.y,
-                &mut self.batch,
-            );
-            cursor.x += word.width;
-
-            let i_param = InstanceParam::new()
-                .src(space.uvs)
-                .color(color)
-                .translate2(Vector2::new(
-                    cursor.x + space.horizontal_offset,
-                    cursor.y + space.vertical_offset,
-                ))
-                .scale2(space.scale);
-            self.batch.insert(i_param);
-            cursor.x += space.advance_width;
-        }
-    }
 }
 
 impl Drawable for Text {
@@ -417,6 +346,140 @@ impl Drawable for Text {
 
     fn aabb2(&self) -> Box2<f32> {
         self.batch.aabb2()
+    }
+}
+
+// end - ending index of current word within TextLayout.chars (we always
+// start at 0 and will use the previous word's end to figure out the size
+// of the next word)
+// width - width of the given word in pixels (used to determine whether
+// or not we should start a new line)
+struct Word {
+    end: usize,
+    width: f32
+}
+
+#[derive(Debug)]
+pub struct LayoutCharInfo {
+    coords: Box2<f32>,
+    color: Color,
+    c: char
+}
+
+pub struct TextLayout {
+    pub chars: Vec<LayoutCharInfo>,
+    words: Vec<Word>,
+    font_atlas: FontAtlas,
+}
+
+impl TextLayout {
+    pub fn new(font_atlas: FontAtlas) -> Self {
+        TextLayout {
+            font_atlas: font_atlas,
+            chars: Vec::new(),
+            words: Vec::new(),
+        }
+    }
+
+    pub fn push_str(&mut self, text: &str, colors: impl IntoIterator<Item = Color> + Clone) {
+        if let Some(upper_bound) = colors.clone().into_iter().size_hint().1 {
+            assert!(upper_bound < text.len(), "Passed in less colors than the number of chars you tried to push!");
+        }
+        let mut upper_bound = 0;
+        let split_text = text.split(" ");
+        for word in split_text {
+            upper_bound += word.len();
+            self.words.push(Word {
+                end: upper_bound,
+                width: word.chars().map(|c| self.font_atlas.font_map.get(&c).unwrap_or(&self.font_atlas.font_map[&'?']).advance_width).sum()
+                }
+            )
+        }
+
+        let mut width = 0.;
+        for (c, color) in text.chars().zip(colors.clone()) {
+            if c.is_whitespace() {
+                width += self.font_atlas.font_map[&' '].advance_width;
+                continue;
+            }
+            let c_info = self.font_atlas.font_map.get(&c).unwrap_or(&self.font_atlas.font_map[&'?']);
+            self.chars.push(LayoutCharInfo {
+                coords: Box2::new(width + c_info.horizontal_offset, c_info.vertical_offset, c_info.width, c_info.height),
+                color: color,
+                c,
+            }
+            );
+            width += c_info.advance_width;
+        }
+    }
+    
+    // TODO: the commented out code worked without the text layout thing, need to adapt
+    // it to use the new types
+    pub fn push_wrapping_str(&mut self, _text: &str, _colors: impl IntoIterator<Item = Color>) {
+        unimplemented!();
+        //struct Word {
+        //    width: f32,
+        //    text: String,
+        //}
+
+        //let atlas = layout.font_atlas.load_cached();
+        //let font_map = &atlas.font_map;
+        //let space = font_map[&' '];
+        //self.batch.clear();
+        //self.batch.set_texture(atlas.font_texture.clone());
+
+        //let words: Vec<Word> = layout.text
+        //    .split(" ")
+        //    .map(|word| Word {
+        //        width: word
+        //            .chars()
+        //            .map(|c| {
+        //                font_map
+        //                    .get(&c)
+        //                    .unwrap_or(&font_map[&'?'])
+        //                    .advance_width
+        //            })
+        //            .sum(),
+        //        text: word.to_owned(),
+        //    })
+        //    .collect();
+
+        //let mut cursor = Point2::<f32>::new(0., 0.);
+
+        //for word in words.iter() {
+        //    if word.width + cursor.x > width_per_line as f32 {
+        //        cursor.x = 0.;
+        //        cursor.y += atlas.line_gap;
+        //    }
+
+        //    Self::draw_word(
+        //        &word.text,
+        //        color,
+        //        &font_map,
+        //        cursor.x,
+        //        cursor.y,
+        //        &mut self.batch,
+        //    );
+        //    cursor.x += word.width;
+
+        //    let i_param = InstanceParam::new()
+        //        .src(space.uvs)
+        //        .color(color)
+        //        .translate2(Vector2::new(
+        //            cursor.x + space.horizontal_offset,
+        //            cursor.y + space.vertical_offset,
+        //        ))
+        //        .scale2(space.scale);
+        //    self.batch.insert(i_param);
+        //    cursor.x += space.advance_width;
+        //}
+
+    }
+
+    pub fn apply_layout(&self, gfx: &mut Graphics) -> Text {
+        let mut text = Text::from_cached(gfx, self.font_atlas.font_texture.clone());
+        text.set_text(&self);
+        text
     }
 }
 
