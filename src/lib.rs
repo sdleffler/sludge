@@ -337,11 +337,11 @@ impl Space {
         lua.context(|lua| maintainers.update(lua, resources))
     }
 
-    pub fn fetch<T: FetchAll<'static>>(&self) -> FetchResult<T::Fetched> {
+    pub fn fetch<T: FetchAll<'static>>(&self) -> Result<T::Fetched, NotFound> {
         self.resources.fetch::<T>()
     }
 
-    pub fn fetch_one<T: Any + Send + Sync>(&self) -> FetchResult<Shared<'static, T>> {
+    pub fn fetch_one<T: Any + Send + Sync>(&self) -> Result<Shared<'static, T>, NotFound> {
         self.resources.fetch_one()
     }
 
@@ -366,12 +366,12 @@ impl Space {
     }
 
     #[inline]
-    pub fn world(&self) -> FetchResult<Shared<'static, World>> {
+    pub fn world(&self) -> Result<Shared<'static, World>, NotFound> {
         self.fetch_one()
     }
 
     #[inline]
-    pub fn scheduler(&self) -> FetchResult<Shared<'static, Scheduler>> {
+    pub fn scheduler(&self) -> Result<Shared<'static, Scheduler>, NotFound> {
         self.fetch_one()
     }
 
