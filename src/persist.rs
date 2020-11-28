@@ -6,15 +6,15 @@ use ::{
 };
 
 use crate::{
-    api::*, components::Persistent, ecs::*, EventArgs, EventName, Resources, Scheduler,
-    SludgeLuaContextExt, Space, Wakeup,
+    api::*, components::Persistent, ecs::*, EventArgs, EventName, Scheduler, SludgeLuaContextExt,
+    Space, Wakeup,
 };
 
 /// Create a new table under the `WORLD_TABLE_REGISTRY_KEY` and fill it with a mapping from
 /// 32-bit transient hecs entity IDs to serializer thunks.
 pub fn record_world_table<'lua>(lua: LuaContext<'lua>, world: &World) -> LuaResult<LuaTable<'lua>> {
-    let resources = lua.resources();
-    let entity_ud_registry = resources.fetch::<EntityUserDataRegistry>();
+    let tmp = lua.fetch_one::<EntityUserDataRegistry>()?;
+    let entity_ud_registry = tmp.borrow();
 
     let to_table = lua
         .load(include_str!("api/lua/component_value_thunk.lua"))
@@ -214,8 +214,8 @@ pub fn playback_scheduler_table<'lua>(
 }
 
 pub fn persist<'lua, W: Write>(lua: LuaContext<'lua>, space: &Space, writer: W) -> Result<()> {
-    let world_table = record_world_table(lua, &*space.world())?;
-    let scheduler_table = record_scheduler_table(lua, &*space.scheduler())?;
+    let world_table = record_world_table(lua, &*space.world()?.borrow())?;
+    let scheduler_table = record_scheduler_table(lua, &*space.scheduler()?.borrow())?;
     let permanents = lua.named_registry_value::<_, LuaTable>(PERMANENTS_SER_TABLE_REGISTRY_KEY)?;
 
     let persisted_table =
@@ -235,7 +235,7 @@ pub fn unpersist<'lua, R: Read>(lua: LuaContext<'lua>, space: &Space, reader: R)
     playback_scheduler_table(
         lua,
         persisted_table.get("scheduler")?,
-        &mut *space.scheduler_mut(),
+        &mut *space.scheduler()?.borrow_mut(),
     )?;
 
     Ok(())

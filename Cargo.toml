@@ -33,7 +33,7 @@ xml-rs = "0.8"
 base64 = "0.13.0"
 libflate = "0.1.18"
 zstd = "0.5"
-thiserror = "1.0.20"
+thiserror = "1.0.22"
 gilrs = "0.8.0"
 image = { version = "0.22", default-features = false, features = ["gif_codec", "jpeg", "ico", "png_codec", "pnm",
 "tga", "tiff", "webp", "bmp", "dxt", ] }

@@ -11,7 +11,28 @@ use {
         ptr::NonNull,
         sync::Arc,
     },
+    thiserror::Error,
 };
+
+#[derive(Debug, Error)]
+pub enum FetchError {
+    #[error("resource of type `{0}` not found")]
+    NotFound(String),
+}
+
+impl FetchError {
+    pub fn not_found<T: Any + Send + Sync>() -> Self {
+        Self::NotFound(any::type_name::<T>().to_owned())
+    }
+}
+
+pub type FetchResult<T> = Result<T, FetchError>;
+
+impl From<FetchError> for LuaError {
+    fn from(ferr: FetchError) -> Self {
+        LuaError::external(ferr)
+    }
+}
 
 #[derive(Debug)]
 pub struct Shared<'a, T: 'static> {
@@ -235,90 +256,13 @@ impl<'a> OwnedResources<'a> {
             .insert(type_id, Arc::new(AtomicRefCell::new(entry)));
     }
 
-    pub fn fetch<'b, T: Any + Send + Sync>(&'b self) -> Fetch<'a, 'b, T> {
-        let borrow = self
-            .map
-            .get(&TypeId::of::<T>())
-            .expect("entry not found")
-            .borrow();
-        let ptr = unsafe {
-            let any_ref = match &*borrow {
-                StoredResource::Owned { pointer } => &**pointer,
-                StoredResource::Mutable { pointer, .. }
-                | StoredResource::Immutable { pointer, .. } => pointer.as_ref(),
-            };
-
-            NonNull::new_unchecked(any_ref.downcast_ref::<T>().unwrap() as *const _ as *mut _)
-        };
-
-        Fetch {
-            _borrow: borrow,
-            ptr,
-        }
+    pub fn fetch_one<T: Any + Send + Sync>(&self) -> FetchResult<Shared<'a, T>> {
+        let maybe_shared = self.map.get(&TypeId::of::<T>()).cloned().map(Shared::new);
+        maybe_shared.ok_or_else(|| FetchError::not_found::<T>())
     }
 
-    pub fn fetch_mut<'b, T: Any + Send>(&'b self) -> FetchMut<'a, 'b, T> {
-        let mut borrow = self
-            .map
-            .get(&TypeId::of::<T>())
-            .expect("entry not found")
-            .borrow_mut();
-        let ptr = unsafe {
-            let any_ref = match &mut *borrow {
-                StoredResource::Owned { pointer } => &mut **pointer,
-                StoredResource::Mutable { pointer, .. } => pointer.as_mut(),
-                StoredResource::Immutable { .. } => {
-                    panic!("cannot fetch immutably borrowed resource as mutable")
-                }
-            };
-
-            NonNull::new_unchecked(any_ref.downcast_mut::<T>().unwrap() as *mut _)
-        };
-
-        FetchMut {
-            _borrow: borrow,
-            ptr,
-        }
-    }
-
-    pub fn try_fetch<'b, T: Any + Send + Sync>(&'b self) -> Option<Fetch<'a, 'b, T>> {
-        let borrow = self.map.get(&TypeId::of::<T>())?.try_borrow().ok()?;
-        let ptr = unsafe {
-            let any_ref = match &*borrow {
-                StoredResource::Owned { pointer } => &**pointer,
-                StoredResource::Mutable { pointer, .. }
-                | StoredResource::Immutable { pointer, .. } => pointer.as_ref(),
-            };
-
-            NonNull::new_unchecked(any_ref.downcast_ref::<T>().unwrap() as *const _ as *mut _)
-        };
-
-        Some(Fetch {
-            _borrow: borrow,
-            ptr,
-        })
-    }
-
-    pub fn try_fetch_mut<'b, T: Any + Send>(&'b self) -> Option<FetchMut<'a, 'b, T>> {
-        let mut borrow = self.map.get(&TypeId::of::<T>())?.try_borrow_mut().ok()?;
-        let ptr = unsafe {
-            let any_ref = match &mut *borrow {
-                StoredResource::Owned { pointer } => &mut **pointer,
-                StoredResource::Mutable { pointer, .. } => pointer.as_mut(),
-                StoredResource::Immutable { .. } => return None,
-            };
-
-            NonNull::new_unchecked(any_ref.downcast_mut::<T>().unwrap() as *mut _)
-        };
-
-        Some(FetchMut {
-            _borrow: borrow,
-            ptr,
-        })
-    }
-
-    pub fn fetch_shared<T: Any>(&self) -> Option<Shared<'a, T>> {
-        self.map.get(&TypeId::of::<T>()).cloned().map(Shared::new)
+    pub fn fetch<T: FetchAll<'a>>(&self) -> FetchResult<T::Fetched> {
+        T::fetch_components_owned(self)
     }
 
     pub fn get_mut<T: Any + Send + Sync>(&mut self) -> Option<&mut T> {
@@ -339,38 +283,6 @@ impl<'a> OwnedResources<'a> {
 
 unsafe impl<'a> Send for OwnedResources<'a> {}
 unsafe impl<'a> Sync for OwnedResources<'a> {}
-
-pub struct SharedFetch<'a: 'b, 'b, T> {
-    _outer: AtomicRef<'b, OwnedResources<'a>>,
-    inner: Fetch<'a, 'b, T>,
-}
-
-impl<'a: 'b, 'b, T> ops::Deref for SharedFetch<'a, 'b, T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
-pub struct SharedFetchMut<'a: 'b, 'b, T> {
-    _outer: AtomicRef<'b, OwnedResources<'a>>,
-    inner: FetchMut<'a, 'b, T>,
-}
-
-impl<'a: 'b, 'b, T> ops::Deref for SharedFetchMut<'a, 'b, T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
-impl<'a: 'b, 'b, T> ops::DerefMut for SharedFetchMut<'a, 'b, T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct SharedResources<'a> {
@@ -408,60 +320,8 @@ impl<'a> Resources<'a> for SharedResources<'a> {
         self.shared.borrow_mut()
     }
 
-    fn fetch<T: Any + Send + Sync>(&self) -> SharedFetch<'a, '_, T> {
-        let outer = self.shared.borrow();
-        let inner = unsafe {
-            let inner_ptr = &*outer as *const OwnedResources;
-            (*inner_ptr).fetch::<T>()
-        };
-
-        SharedFetch {
-            inner,
-            _outer: outer,
-        }
-    }
-
-    fn fetch_mut<T: Any + Send>(&self) -> SharedFetchMut<'a, '_, T> {
-        let outer = self.shared.borrow();
-        let inner = unsafe {
-            let inner_ptr = &*outer as *const OwnedResources;
-            (*inner_ptr).fetch_mut::<T>()
-        };
-
-        SharedFetchMut {
-            inner,
-            _outer: outer,
-        }
-    }
-
-    fn try_fetch<T: Any + Send + Sync>(&self) -> Option<SharedFetch<'a, '_, T>> {
-        let outer = self.shared.try_borrow().ok()?;
-        let inner = unsafe {
-            let inner_ptr = &*outer as *const OwnedResources;
-            (*inner_ptr).try_fetch::<T>()?
-        };
-
-        Some(SharedFetch {
-            inner,
-            _outer: outer,
-        })
-    }
-
-    fn try_fetch_mut<T: Any + Send>(&self) -> Option<SharedFetchMut<'a, '_, T>> {
-        let outer = self.shared.try_borrow().ok()?;
-        let inner = unsafe {
-            let inner_ptr = &*outer as *const OwnedResources;
-            (*inner_ptr).try_fetch_mut::<T>()?
-        };
-
-        Some(SharedFetchMut {
-            inner,
-            _outer: outer,
-        })
-    }
-
-    fn fetch_shared<T: Any>(&self) -> Option<Shared<'a, T>> {
-        self.shared.borrow().fetch_shared::<T>()
+    fn fetch_one<T: Any + Send + Sync>(&self) -> FetchResult<Shared<'a, T>> {
+        self.shared.borrow().fetch_one()
     }
 }
 
@@ -489,63 +349,75 @@ impl<'a> Resources<'a> for UnifiedResources<'a> {
         self.local.borrow_mut()
     }
 
-    fn fetch<T: Any + Send + Sync>(&self) -> SharedFetch<'a, '_, T> {
-        match self.try_fetch::<T>() {
-            Some(fetched) => fetched,
-            None => panic!(
-                "entry `{}` not found in local or global resources",
-                any::type_name::<T>()
-            ),
-        }
-    }
-
-    fn fetch_mut<T: Any + Send>(&self) -> SharedFetchMut<'a, '_, T> {
-        match self.try_fetch_mut::<T>() {
-            Some(fetched) => fetched,
-            None => panic!(
-                "entry `{}` not found in local or global resources",
-                any::type_name::<T>()
-            ),
-        }
-    }
-
-    fn try_fetch<T: Any + Send + Sync>(&self) -> Option<SharedFetch<'a, '_, T>> {
+    fn fetch_one<T: Any + Send + Sync>(&self) -> FetchResult<Shared<'a, T>> {
         self.local
-            .try_fetch::<T>()
-            .or_else(|| self.global.try_fetch::<T>())
-    }
-
-    fn try_fetch_mut<T: Any + Send>(&self) -> Option<SharedFetchMut<'a, '_, T>> {
-        self.local
-            .try_fetch_mut::<T>()
-            .or_else(|| self.global.try_fetch_mut::<T>())
-    }
-
-    fn fetch_shared<T: Any>(&self) -> Option<Shared<'a, T>> {
-        self.local
-            .fetch_shared::<T>()
-            .or_else(|| self.global.fetch_shared::<T>())
+            .fetch_one::<T>()
+            .or_else(|_| self.global.fetch_one::<T>())
     }
 }
 
 impl<'a> LuaUserData for UnifiedResources<'a> {}
 
+pub trait Fetchable: Any + Send + Sync {}
+impl<T> Fetchable for T where T: Any + Send + Sync {}
+
 pub trait Resources<'a> {
     fn borrow(&self) -> AtomicRef<OwnedResources<'a>>;
     fn borrow_mut(&self) -> AtomicRefMut<OwnedResources<'a>>;
-    fn fetch<T: Any + Send + Sync>(&self) -> SharedFetch<'a, '_, T>;
-    fn fetch_mut<T: Any + Send>(&self) -> SharedFetchMut<'a, '_, T>;
-    fn try_fetch<T: Any + Send + Sync>(&self) -> Option<SharedFetch<'a, '_, T>>;
-    fn try_fetch_mut<T: Any + Send>(&self) -> Option<SharedFetchMut<'a, '_, T>>;
-    fn fetch_shared<T: Any>(&self) -> Option<Shared<'a, T>>;
+    fn fetch_one<T: Any + Send + Sync>(&self) -> FetchResult<Shared<'a, T>>;
+
+    fn fetch<T: FetchAll<'a>>(&self) -> FetchResult<T::Fetched> {
+        T::fetch_components(self)
+    }
 }
+
+pub trait FetchAll<'a> {
+    type Fetched;
+    fn fetch_components<R>(resources: &R) -> FetchResult<Self::Fetched>
+    where
+        R: Resources<'a> + ?Sized;
+
+    fn fetch_components_owned(resources: &OwnedResources<'a>) -> FetchResult<Self::Fetched>;
+}
+
+macro_rules! impl_tuple {
+    ($($id:ident),*) => {
+        #[allow(non_snake_case)]
+        impl<'a, $($id: Fetchable),*> FetchAll<'a> for ($($id,)*) {
+            type Fetched = ($(Shared<'a, $id>,)*);
+            fn fetch_components<Res>(_resources: &Res) -> FetchResult<Self::Fetched>
+                where Res: Resources<'a> + ?Sized
+            {
+                $(let $id = _resources.fetch_one()?;)*
+                Ok(($($id,)*))
+            }
+
+            fn fetch_components_owned(_resources: &OwnedResources<'a>) -> FetchResult<Self::Fetched> {
+                $(let $id = _resources.fetch_one()?;)*
+                Ok(($($id,)*))
+            }
+        }
+    };
+}
+
+macro_rules! impl_all_tuples {
+    ($t:ident $(, $ts:ident)*) => {
+        impl_tuple!($t $(, $ts)*);
+        impl_all_tuples!($($ts),*);
+    };
+    () => {
+        impl_tuple!();
+    };
+}
+
+impl_all_tuples!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z);
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn borrowed_resources() {
+    fn borrowed_resources() -> Result<()> {
         let mut a = 5i32;
         let mut b: &'static str = "hello";
         let c = true;
@@ -556,15 +428,21 @@ mod tests {
             borrowed_resources.insert_mut(&mut b);
             borrowed_resources.insert_ref(&c);
 
+            let shared_a = borrowed_resources.fetch_one::<i32>()?;
+            let shared_b = borrowed_resources.fetch_one::<&'static str>()?;
+            let shared_c = borrowed_resources.fetch_one::<bool>()?;
+
             {
-                assert_eq!(*borrowed_resources.fetch::<i32>(), 5i32);
-                *borrowed_resources.fetch_mut::<&'static str>() = "world";
-                assert_eq!(*borrowed_resources.fetch::<bool>(), true);
+                assert_eq!(*shared_a.borrow(), 5i32);
+                *shared_b.borrow_mut() = "world";
+                assert_eq!(*shared_c.borrow(), true);
             }
 
             let _ = borrowed_resources;
         }
 
         assert_eq!(b, "world");
+
+        Ok(())
     }
 }

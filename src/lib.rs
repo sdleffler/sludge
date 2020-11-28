@@ -131,12 +131,20 @@ impl<T, E: fmt::Debug> SludgeResultExt for Result<T, E> {
 
 const RESOURCES_REGISTRY_KEY: &'static str = "sludge.resources";
 
-pub trait SludgeLuaContextExt<'lua> {
+pub trait SludgeLuaContextExt<'lua>: Sized {
     fn resources(self) -> UnifiedResources<'static>;
     fn spawn<T: ToLua<'lua>>(self, task: T) -> LuaResult<LuaThread<'lua>>;
     fn broadcast<S: AsRef<str>, T: ToLuaMulti<'lua>>(self, event_name: S, args: T)
         -> LuaResult<()>;
     fn notify<T: ToLuaMulti<'lua>>(self, thread: LuaThread<'lua>, args: T) -> LuaResult<()>;
+
+    fn fetch_one<T: Fetchable>(self) -> LuaResult<Shared<'static, T>> {
+        self.resources().fetch_one().to_lua_err()
+    }
+
+    fn fetch<T: FetchAll<'static>>(self) -> LuaResult<T::Fetched> {
+        self.resources().fetch::<T>().to_lua_err()
+    }
 }
 
 impl<'lua> SludgeLuaContextExt<'lua> for LuaContext<'lua> {
@@ -160,8 +168,8 @@ impl<'lua> SludgeLuaContextExt<'lua> for LuaContext<'lua> {
         };
 
         let key = self.create_registry_value(thread.clone())?;
-        self.resources()
-            .fetch::<SchedulerQueueChannel>()
+        self.fetch_one::<SchedulerQueueChannel>()?
+            .borrow()
             .spawn
             .try_send(key)
             .unwrap();
@@ -187,8 +195,8 @@ impl<'lua> SludgeLuaContextExt<'lua> for LuaContext<'lua> {
             },
         };
 
-        self.resources()
-            .fetch::<SchedulerQueueChannel>()
+        self.fetch_one::<SchedulerQueueChannel>()?
+            .borrow()
             .event
             .try_send(event)
             .unwrap();
@@ -211,8 +219,8 @@ impl<'lua> SludgeLuaContextExt<'lua> for LuaContext<'lua> {
             },
         };
 
-        self.resources()
-            .fetch::<SchedulerQueueChannel>()
+        self.fetch_one::<SchedulerQueueChannel>()?
+            .borrow()
             .event
             .try_send(event)
             .unwrap();
@@ -329,24 +337,12 @@ impl Space {
         lua.context(|lua| maintainers.update(lua, resources))
     }
 
-    pub fn fetch<T: Any + Send + Sync>(&self) -> SharedFetch<'static, '_, T> {
-        self.resources.fetch()
+    pub fn fetch<T: FetchAll<'static>>(&self) -> FetchResult<T::Fetched> {
+        self.resources.fetch::<T>()
     }
 
-    pub fn fetch_mut<T: Any + Send + Sync>(&self) -> SharedFetchMut<'static, '_, T> {
-        self.resources.fetch_mut()
-    }
-
-    pub fn try_fetch<T: Any + Send + Sync>(&self) -> Option<SharedFetch<'static, '_, T>> {
-        self.resources.try_fetch()
-    }
-
-    pub fn try_fetch_mut<T: Any + Send + Sync>(&self) -> Option<SharedFetchMut<'static, '_, T>> {
-        self.resources.try_fetch_mut()
-    }
-
-    pub fn fetch_shared<T: Any>(&self) -> Option<Shared<'static, T>> {
-        self.resources.fetch_shared()
+    pub fn fetch_one<T: Any + Send + Sync>(&self) -> FetchResult<Shared<'static, T>> {
+        self.resources.fetch_one()
     }
 
     pub fn resources(&self) -> &UnifiedResources<'static> {
@@ -370,23 +366,13 @@ impl Space {
     }
 
     #[inline]
-    pub fn world(&self) -> SharedFetch<'static, '_, World> {
-        self.fetch()
+    pub fn world(&self) -> FetchResult<Shared<'static, World>> {
+        self.fetch_one()
     }
 
     #[inline]
-    pub fn world_mut(&self) -> SharedFetchMut<'static, '_, World> {
-        self.fetch_mut()
-    }
-
-    #[inline]
-    pub fn scheduler(&self) -> SharedFetch<'static, '_, Scheduler> {
-        self.fetch()
-    }
-
-    #[inline]
-    pub fn scheduler_mut(&self) -> SharedFetchMut<'static, '_, Scheduler> {
-        self.fetch_mut()
+    pub fn scheduler(&self) -> FetchResult<Shared<'static, Scheduler>> {
+        self.fetch_one()
     }
 
     pub fn save<W: Write>(&self, writer: W) -> Result<()> {

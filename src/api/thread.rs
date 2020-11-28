@@ -1,4 +1,4 @@
-use crate::{Atom, Event, EventName, Resources, SchedulerQueueChannel, SludgeLuaContextExt};
+use crate::{Atom, Event, EventName, SchedulerQueueChannel, SludgeLuaContextExt};
 use {anyhow::*, rlua::prelude::*};
 
 pub fn load<'lua>(lua: LuaContext<'lua>) -> Result<LuaValue<'lua>> {
@@ -21,8 +21,8 @@ pub fn load<'lua>(lua: LuaContext<'lua>) -> Result<LuaValue<'lua>> {
         };
 
         let key = ctx.create_registry_value(thread.clone())?;
-        ctx.resources()
-            .fetch::<SchedulerQueueChannel>()
+        ctx.fetch_one::<SchedulerQueueChannel>()?
+            .borrow()
             .spawn
             .try_send(key)
             .unwrap();
@@ -43,8 +43,8 @@ pub fn load<'lua>(lua: LuaContext<'lua>) -> Result<LuaValue<'lua>> {
             },
         };
 
-        ctx.resources()
-            .fetch::<SchedulerQueueChannel>()
+        ctx.fetch_one::<SchedulerQueueChannel>()?
+            .borrow()
             .event
             .try_send(event)
             .unwrap();
@@ -66,8 +66,8 @@ pub fn load<'lua>(lua: LuaContext<'lua>) -> Result<LuaValue<'lua>> {
             },
         };
 
-        ctx.resources()
-            .fetch::<SchedulerQueueChannel>()
+        ctx.fetch_one::<SchedulerQueueChannel>()?
+            .borrow()
             .event
             .try_send(event)
             .unwrap();

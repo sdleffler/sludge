@@ -604,7 +604,10 @@ where
         resources: &R,
     ) -> Result<Loaded<Self>> {
         let path = key.to_path()?;
-        let fh = resources.fetch_mut::<Filesystem>().open(&path)?;
+        let fh = resources
+            .fetch_one::<Filesystem>()?
+            .borrow_mut()
+            .open(&path)?;
         let tiled = xml_parser::parse_tileset(fh, 1)?;
         Ok(TileSheet::from_tiled(&tiled)?.into())
     }
@@ -622,7 +625,10 @@ where
         resources: &R,
     ) -> Result<Loaded<Self>> {
         let path = key.to_path()?;
-        let tiled = xml_parser::parse_file(&mut *resources.fetch_mut::<Filesystem>(), &path)?;
+        let tiled = xml_parser::parse_file(
+            &mut *resources.fetch_one::<Filesystem>()?.borrow_mut(),
+            &path,
+        )?;
 
         let mut deps = vec![];
         for ts in tiled.tilesets.iter() {
@@ -663,8 +669,8 @@ where
 {
     fn add_methods<'lua, M: LuaUserDataMethods<'lua, Self>>(methods: &mut M) {
         methods.add_method("layers", |lua, this, ()| {
-            let resources = lua.resources();
-            let world = resources.fetch::<World>();
+            let tmp = lua.fetch_one::<World>()?;
+            let world = tmp.borrow();
             let map = world.get::<TiledMap<L, T, O>>(this.0.into()).to_lua_err()?;
             rlua_serde::to_value(lua, &map.layers)
         });
@@ -691,7 +697,8 @@ where
 
         // FIXME(sleffy): type parameter for determining the cache type to load from.
         let mut tiled_map = resources
-            .fetch_mut::<crate::assets::DefaultCache>()
+            .fetch_one::<crate::assets::DefaultCache>()?
+            .borrow()
             .get::<TiledMap<L, T, O>>(&Key::from_path(&map_path))
             .with_context(|| {
                 anyhow!(
