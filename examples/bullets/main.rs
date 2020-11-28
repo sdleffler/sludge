@@ -75,13 +75,18 @@ impl EventHandler for MainState {
             ..
         } = self;
 
-        space.lua().context(|lua| {
+        space.lua().context(|lua| -> Result<()> {
             //while timer::check_update_time(ctx, 60) {
-            space.fetch_mut::<Scheduler>().update(lua, 1.0).unwrap();
+            space
+                .fetch_one::<Scheduler>()?
+                .borrow_mut()
+                .update(lua, 1.0)?;
+
+            let world = space.fetch_one::<World>()?;
 
             let (w, h) = (320., 240.);
             {
-                let mut world = space.fetch_mut::<World>();
+                let world = &mut *world.borrow_mut();
                 for _ in 0..10 {
                     let pos = na::Vector2::new(w / 2., h / 2.);
                     world.spawn((
@@ -101,9 +106,8 @@ impl EventHandler for MainState {
                 }
             }
 
-            let world = space.fetch::<World>();
-
             for (_e, (mut spatial, maybe_tx, sprite_index)) in world
+                .borrow()
                 .query::<(&mut Spatial, Option<&mut Transform>, &SpriteIndex)>()
                 .iter()
             {
@@ -119,7 +123,9 @@ impl EventHandler for MainState {
                 batch[sprite_index.idx] = InstanceParam::default().translate2(spatial.pos);
             }
             //}
-        });
+
+            Ok(())
+        })?;
 
         space.maintain().unwrap();
 

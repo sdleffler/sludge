@@ -103,9 +103,8 @@ pub struct PositionAccessor(Entity);
 impl LuaUserData for PositionAccessor {
     fn add_methods<'lua, T: LuaUserDataMethods<'lua, Self>>(methods: &mut T) {
         methods.add_meta_method(LuaMetaMethod::Index, |lua, this, key: LuaString| {
-            let resources = lua.resources();
-            let world = resources.fetch::<World>();
-            let pos = world.get::<Position>(this.0).to_lua_err()?;
+            let world = lua.fetch_one::<World>()?;
+            let pos = *world.borrow().get::<Position>(this.0).to_lua_err()?;
             match key.to_str()? {
                 "x" => pos.translation.vector.x.to_lua(lua),
                 "y" => pos.translation.vector.y.to_lua(lua),
@@ -117,26 +116,27 @@ impl LuaUserData for PositionAccessor {
         // Separate method from index because index cannot return multiple
         // values.
         methods.add_method("coords", |lua, this, ()| {
-            let resources = lua.resources();
-            let world = resources.fetch::<World>();
-            let pos = world.get::<Position>(this.0).to_lua_err()?;
+            let world = lua.fetch_one::<World>()?;
+            let pos = *world.borrow().get::<Position>(this.0).to_lua_err()?;
             let x = pos.translation.vector.x;
             let y = pos.translation.vector.y;
             (x, y).to_lua_multi(lua)
         });
 
         methods.add_method("set_coords", |lua, this, (x, y): (f32, f32)| {
-            let resources = lua.resources();
-            let world = resources.fetch::<World>();
-            let mut pos = world.get_mut::<Position>(this.0).to_lua_err()?;
-            pos.translation.vector = Vector2::new(x, y);
+            let world = lua.fetch_one::<World>()?;
+            world
+                .borrow()
+                .get_mut::<Position>(this.0)
+                .to_lua_err()?
+                .translation
+                .vector = Vector2::new(x, y);
             Ok(())
         });
 
         methods.add_method("to_table", |lua, this, ()| {
-            let resources = lua.resources();
-            let world = resources.fetch::<World>();
-            let position = world.get::<Position>(this.0).to_lua_err()?;
+            let world = lua.fetch_one::<World>()?;
+            let position = *world.borrow().get::<Position>(this.0).to_lua_err()?;
             rlua_serde::to_value(lua, *position)
         });
     }
@@ -229,9 +229,8 @@ pub struct VelocityAccessor(Entity);
 impl LuaUserData for VelocityAccessor {
     fn add_methods<'lua, T: LuaUserDataMethods<'lua, Self>>(methods: &mut T) {
         methods.add_meta_method(LuaMetaMethod::Index, |lua, this, key: LuaString| {
-            let resources = lua.resources();
-            let world = resources.fetch::<World>();
-            let velocity = world.get::<Velocity>(this.0).to_lua_err()?;
+            let world = lua.fetch_one::<World>()?;
+            let velocity = *world.borrow().get::<Velocity>(this.0).to_lua_err()?;
             match key.to_str()? {
                 "x" => velocity.linear.x.to_lua(lua),
                 "y" => velocity.linear.y.to_lua(lua),
@@ -241,25 +240,26 @@ impl LuaUserData for VelocityAccessor {
         });
 
         methods.add_method("linear", |lua, this, ()| {
-            let resources = lua.resources();
-            let world = resources.fetch::<World>();
-            let velocity = world.get::<Velocity>(this.0).to_lua_err()?;
+            let world = lua.fetch_one::<World>()?;
+            let velocity = *world.borrow().get::<Velocity>(this.0).to_lua_err()?;
             let x = velocity.linear.x;
             let y = velocity.linear.y;
             (x, y).to_lua_multi(lua)
         });
 
         methods.add_method("set_linear", |lua, this, (x, y)| {
-            let resources = lua.resources();
-            let world = resources.fetch::<World>();
-            let mut velocity = world.get_mut::<Velocity>(this.0).to_lua_err()?;
-            velocity.linear = Vector2::new(x, y);
+            let world = lua.fetch_one::<World>()?;
+            world
+                .borrow()
+                .get_mut::<Velocity>(this.0)
+                .to_lua_err()?
+                .linear = Vector2::new(x, y);
             Ok(())
         });
 
         methods.add_method("to_table", |lua, this, ()| {
-            let resources = lua.resources();
-            let world = resources.fetch::<World>();
+            let tmp = lua.fetch_one::<World>()?;
+            let world = tmp.borrow();
             let velocity = world.get::<Velocity>(this.0).to_lua_err()?;
             rlua_serde::to_value(lua, *velocity)
         });
@@ -316,8 +316,8 @@ pub struct ShapeAccessor(Entity);
 impl LuaUserData for ShapeAccessor {
     fn add_methods<'lua, T: LuaUserDataMethods<'lua, Self>>(methods: &mut T) {
         methods.add_method("to_table", |lua, this, ()| {
-            let resources = lua.resources();
-            let world = resources.fetch::<World>();
+            let tmp = lua.fetch_one::<World>()?;
+            let world = tmp.borrow();
             let shape = world.get::<Shape>(this.0).to_lua_err()?;
 
             if let Some(cuboid) = shape.handle.as_shape::<Cuboid<f32>>() {

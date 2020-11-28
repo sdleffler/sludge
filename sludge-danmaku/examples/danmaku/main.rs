@@ -159,7 +159,7 @@ impl MainState {
 
         space.refresh(&mut dispatcher)?;
 
-        let events = space.fetch_mut::<World>().track::<SpriteIndex>();
+        let events = space.world()?.borrow_mut().track::<SpriteIndex>();
 
         space.lua().context(|lua| -> Result<_> {
             lua.load(include_str!("main.lua")).exec()?;
@@ -194,15 +194,15 @@ impl EventHandler for MainState {
             ..
         } = self;
 
-        let scheduler = space.fetch_shared::<Scheduler>().unwrap();
+        let (scheduler, world) = space.fetch::<(Scheduler, World)>()?;
         space
             .lua()
             .context(|lua| scheduler.borrow_mut().update(lua, 1.0))?;
 
         space.dispatch(dispatcher)?;
 
-        for (e, (proj, mut sprite_index)) in space
-            .fetch::<World>()
+        for (e, (proj, mut sprite_index)) in world
+            .borrow()
             .query::<(&Projectile, &mut SpriteIndex)>()
             .iter()
         {
@@ -219,7 +219,7 @@ impl EventHandler for MainState {
             };
         }
 
-        for event in space.fetch_mut::<World>().poll::<SpriteIndex>(events) {
+        for event in world.borrow().poll::<SpriteIndex>(events) {
             if let ComponentEvent::Removed(e) = event {
                 let idx = indices.remove(e).unwrap();
                 batch.remove(idx);
@@ -239,7 +239,8 @@ impl EventHandler for MainState {
             ..
         } = self;
 
-        let gfx = &mut *space.fetch_mut::<Graphics>();
+        let tmp = space.fetch_one::<Graphics>()?;
+        let gfx = &mut *tmp.borrow_mut();
 
         gfx.set_projection(Orthographic3::new(0., 320., 0., 240., -1., 1.));
 

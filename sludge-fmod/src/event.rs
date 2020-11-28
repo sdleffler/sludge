@@ -630,8 +630,8 @@ impl LuaUserData for EventInstance {
             |lua, this, (maybe_cb, mask): (Option<LuaFunction>, Option<EventCallbackMask>)| {
                 if let Some(cb) = maybe_cb {
                     let resources = lua.resources();
-                    let fmod = resources.fetch::<Fmod>();
-                    let cq_send = fmod.cq_send.clone();
+                    let fmod = resources.fetch_one::<Fmod>()?;
+                    let cq_send = fmod.borrow().cq_send.clone();
                     let key = Arc::new(lua.create_registry_value(cb)?);
                     this.set_callback(
                         move |event_instance, event_info| {
@@ -767,8 +767,8 @@ impl LuaUserData for EventDescription {
             |lua, this, (maybe_cb, mask): (Option<LuaFunction>, Option<EventCallbackMask>)| {
                 if let Some(cb) = maybe_cb {
                     let resources = lua.resources();
-                    let fmod = resources.fetch::<Fmod>();
-                    let cq_send = fmod.cq_send.clone();
+                    let fmod = resources.fetch_one::<Fmod>()?;
+                    let cq_send = fmod.borrow().cq_send.clone();
                     let key = Arc::new(lua.create_registry_value(cb)?);
                     this.set_callback(
                         move |event_instance, event_info| {

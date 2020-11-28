@@ -9,10 +9,57 @@ use {
         ops,
         pin::Pin,
         ptr::NonNull,
-        sync::Arc,
+        sync::{
+            Arc, LockResult, RwLock, RwLockReadGuard, RwLockWriteGuard, TryLockError, TryLockResult,
+        },
     },
     thiserror::Error,
 };
+
+#[derive(Debug, Error)]
+pub enum BorrowError {
+    #[error("resource is already borrowed")]
+    AlreadyBorrowed,
+}
+
+impl From<BorrowError> for LuaError {
+    fn from(err: BorrowError) -> Self {
+        LuaError::external(err)
+    }
+}
+
+trait LockResultExt {
+    type Ok;
+
+    fn handle(self) -> Result<Self::Ok, BorrowError>;
+}
+
+impl<T> LockResultExt for LockResult<T> {
+    type Ok = T;
+
+    fn handle(self) -> Result<T, BorrowError> {
+        let t = match self {
+            Ok(t) => t,
+            Err(p_err) => p_err.into_inner(),
+        };
+
+        Ok(t)
+    }
+}
+
+impl<T> LockResultExt for TryLockResult<T> {
+    type Ok = T;
+
+    fn handle(self) -> Result<T, BorrowError> {
+        let t = match self {
+            Ok(t) => t,
+            Err(TryLockError::Poisoned(p_err)) => p_err.into_inner(),
+            Err(TryLockError::WouldBlock) => return Err(BorrowError::AlreadyBorrowed),
+        };
+
+        Ok(t)
+    }
+}
 
 #[derive(Debug, Error)]
 pub enum FetchError {
@@ -29,14 +76,14 @@ impl FetchError {
 pub type FetchResult<T> = Result<T, FetchError>;
 
 impl From<FetchError> for LuaError {
-    fn from(ferr: FetchError) -> Self {
-        LuaError::external(ferr)
+    fn from(err: FetchError) -> Self {
+        LuaError::external(err)
     }
 }
 
 #[derive(Debug)]
 pub struct Shared<'a, T: 'static> {
-    inner: Arc<AtomicRefCell<StoredResource<'a>>>,
+    inner: Arc<RwLock<StoredResource<'a>>>,
     _marker: PhantomData<T>,
 }
 
@@ -50,7 +97,7 @@ impl<'a, T: 'static> Clone for Shared<'a, T> {
 }
 
 impl<'a, T: 'static> Shared<'a, T> {
-    fn new(inner: Arc<AtomicRefCell<StoredResource<'a>>>) -> Self {
+    fn new(inner: Arc<RwLock<StoredResource<'a>>>) -> Self {
         Self {
             inner,
             _marker: PhantomData,
@@ -58,39 +105,27 @@ impl<'a, T: 'static> Shared<'a, T> {
     }
 
     pub fn borrow(&self) -> Fetch<'a, '_, T> {
-        let _borrow = self.inner.borrow();
-        let ptr = unsafe {
-            let any_ref = match &*_borrow {
-                StoredResource::Owned { pointer } => &**pointer,
-                StoredResource::Mutable { pointer, .. }
-                | StoredResource::Immutable { pointer, .. } => pointer.as_ref(),
-            };
-
-            NonNull::new_unchecked(any_ref.downcast_ref::<T>().unwrap() as *const _ as *mut _)
-        };
-
-        Fetch { _borrow, ptr }
+        match self.try_borrow() {
+            Some(t) => t,
+            None => panic!(
+                "attempted to immutably borrow already mutably borrowed resource of type `{}`",
+                any::type_name::<T>()
+            ),
+        }
     }
 
     pub fn borrow_mut(&self) -> FetchMut<'a, '_, T> {
-        let mut _borrow = self.inner.borrow_mut();
-        let ptr = unsafe {
-            let any_ref = match &mut *_borrow {
-                StoredResource::Owned { pointer } => &mut **pointer,
-                StoredResource::Mutable { pointer, .. } => pointer.as_mut(),
-                StoredResource::Immutable { .. } => {
-                    panic!("cannot fetch immutably borrowed resource as mutable")
-                }
-            };
-
-            NonNull::new_unchecked(any_ref.downcast_mut::<T>().unwrap() as *mut _)
-        };
-
-        FetchMut { _borrow, ptr }
+        match self.try_borrow_mut() {
+            Some(t) => t,
+        None => panic!(
+                "attempted to mutably borrow already immutably or mutably borrowed resource of type `{}`",
+                any::type_name::<T>()
+            ),
+        }
     }
 
     pub fn try_borrow(&self) -> Option<Fetch<'a, '_, T>> {
-        let _borrow = self.inner.try_borrow().ok()?;
+        let _borrow = self.inner.try_read().handle().ok()?;
         let ptr = unsafe {
             let any_ref = match &*_borrow {
                 StoredResource::Owned { pointer } => &**pointer,
@@ -101,11 +136,15 @@ impl<'a, T: 'static> Shared<'a, T> {
             NonNull::new_unchecked(any_ref.downcast_ref::<T>().unwrap() as *const _ as *mut _)
         };
 
-        Some(Fetch { _borrow, ptr })
+        Some(Fetch {
+            _origin: self,
+            _borrow,
+            ptr,
+        })
     }
 
     pub fn try_borrow_mut(&self) -> Option<FetchMut<'a, '_, T>> {
-        let mut _borrow = self.inner.try_borrow_mut().ok()?;
+        let mut _borrow = self.inner.try_write().handle().ok()?;
         let ptr = unsafe {
             let any_ref = match &mut *_borrow {
                 StoredResource::Owned { pointer } => &mut **pointer,
@@ -117,6 +156,42 @@ impl<'a, T: 'static> Shared<'a, T> {
         };
 
         Some(FetchMut { _borrow, ptr })
+    }
+
+    pub fn blocking_borrow(&self) -> Fetch<'a, '_, T> {
+        let _borrow = self.inner.read().handle().unwrap();
+        let ptr = unsafe {
+            let any_ref = match &*_borrow {
+                StoredResource::Owned { pointer } => &**pointer,
+                StoredResource::Mutable { pointer, .. }
+                | StoredResource::Immutable { pointer, .. } => pointer.as_ref(),
+            };
+
+            NonNull::new_unchecked(any_ref.downcast_ref::<T>().unwrap() as *const _ as *mut _)
+        };
+
+        Fetch {
+            _origin: self,
+            _borrow,
+            ptr,
+        }
+    }
+
+    pub fn blocking_borrow_mut(&self) -> FetchMut<'a, '_, T> {
+        let mut _borrow = self.inner.write().handle().unwrap();
+        let ptr = unsafe {
+            let any_ref = match &mut *_borrow {
+                StoredResource::Owned { pointer } => &mut **pointer,
+                StoredResource::Mutable { pointer, .. } => pointer.as_mut(),
+                StoredResource::Immutable { .. } => {
+                    panic!("cannot fetch resource inserted as immutable reference as mutable")
+                }
+            };
+
+            NonNull::new_unchecked(any_ref.downcast_mut::<T>().unwrap() as *mut _)
+        };
+
+        FetchMut { _borrow, ptr }
     }
 }
 
@@ -136,21 +211,19 @@ enum StoredResource<'a> {
 }
 
 #[derive(Debug)]
-pub struct Fetch<'a: 'b, 'b, T: ?Sized> {
-    _borrow: AtomicRef<'b, StoredResource<'a>>,
+pub struct Fetch<'a: 'b, 'b, T: 'static> {
+    _origin: &'b Shared<'a, T>,
+    _borrow: RwLockReadGuard<'b, StoredResource<'a>>,
     ptr: NonNull<T>,
 }
 
-impl<'a: 'b, 'b, T: ?Sized> Clone for Fetch<'a, 'b, T> {
+impl<'a: 'b, 'b, T: 'static> Clone for Fetch<'a, 'b, T> {
     fn clone(&self) -> Self {
-        Self {
-            _borrow: AtomicRef::clone(&self._borrow),
-            ptr: self.ptr,
-        }
+        self._origin.borrow()
     }
 }
 
-impl<'a: 'b, 'b, T: ?Sized> ops::Deref for Fetch<'a, 'b, T> {
+impl<'a: 'b, 'b, T: 'static> ops::Deref for Fetch<'a, 'b, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -158,16 +231,16 @@ impl<'a: 'b, 'b, T: ?Sized> ops::Deref for Fetch<'a, 'b, T> {
     }
 }
 
-unsafe impl<'a: 'b, 'b, T: ?Sized> Send for Fetch<'a, 'b, T> where T: Sync {}
-unsafe impl<'a: 'b, 'b, T: ?Sized> Sync for Fetch<'a, 'b, T> where T: Sync {}
+unsafe impl<'a: 'b, 'b, T: 'static> Send for Fetch<'a, 'b, T> where T: Sync {}
+unsafe impl<'a: 'b, 'b, T: 'static> Sync for Fetch<'a, 'b, T> where T: Sync {}
 
 #[derive(Debug)]
-pub struct FetchMut<'a: 'b, 'b, T: ?Sized> {
-    _borrow: AtomicRefMut<'b, StoredResource<'a>>,
+pub struct FetchMut<'a: 'b, 'b, T: 'static> {
+    _borrow: RwLockWriteGuard<'b, StoredResource<'a>>,
     ptr: NonNull<T>,
 }
 
-impl<'a: 'b, 'b, T: ?Sized> ops::Deref for FetchMut<'a, 'b, T> {
+impl<'a: 'b, 'b, T: 'static> ops::Deref for FetchMut<'a, 'b, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -175,14 +248,14 @@ impl<'a: 'b, 'b, T: ?Sized> ops::Deref for FetchMut<'a, 'b, T> {
     }
 }
 
-impl<'a: 'b, 'b, T: ?Sized> ops::DerefMut for FetchMut<'a, 'b, T> {
+impl<'a: 'b, 'b, T: 'static> ops::DerefMut for FetchMut<'a, 'b, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         unsafe { self.ptr.as_mut() }
     }
 }
 
-unsafe impl<'a: 'b, 'b, T: ?Sized> Send for FetchMut<'a, 'b, T> where T: Send {}
-unsafe impl<'a: 'b, 'b, T: ?Sized> Sync for FetchMut<'a, 'b, T> where T: Sync {}
+unsafe impl<'a: 'b, 'b, T: 'static> Send for FetchMut<'a, 'b, T> where T: Send {}
+unsafe impl<'a: 'b, 'b, T: 'static> Sync for FetchMut<'a, 'b, T> where T: Sync {}
 
 // Implementation ripped from the `Box::downcast` method for `Box<dyn Any + 'static + Send>`
 fn downcast_send_sync<T: Any>(
@@ -196,7 +269,7 @@ fn downcast_send_sync<T: Any>(
 
 #[derive(Debug)]
 pub struct OwnedResources<'a> {
-    map: HashMap<TypeId, Arc<AtomicRefCell<StoredResource<'a>>>>,
+    map: HashMap<TypeId, Arc<RwLock<StoredResource<'a>>>>,
 }
 
 impl<'a> OwnedResources<'a> {
@@ -214,7 +287,7 @@ impl<'a> OwnedResources<'a> {
         self.map
             .remove(&TypeId::of::<T>())
             .and_then(|t| Arc::try_unwrap(t).ok())
-            .and_then(|t| match t.into_inner() {
+            .and_then(|t| match t.into_inner().handle().unwrap() {
                 StoredResource::Owned { pointer } => Some(*downcast_send_sync(pointer).unwrap()),
                 _ => None,
             })
@@ -226,8 +299,7 @@ impl<'a> OwnedResources<'a> {
         let entry = StoredResource::Owned {
             pointer: Box::new(res),
         };
-        self.map
-            .insert(type_id, Arc::new(AtomicRefCell::new(entry)));
+        self.map.insert(type_id, Arc::new(RwLock::new(entry)));
     }
 
     pub fn insert_ref<T: Any + Send + Sync>(&mut self, res: &'a T) {
@@ -239,8 +311,7 @@ impl<'a> OwnedResources<'a> {
             },
             _marker: PhantomData,
         };
-        self.map
-            .insert(type_id, Arc::new(AtomicRefCell::new(entry)));
+        self.map.insert(type_id, Arc::new(RwLock::new(entry)));
     }
 
     pub fn insert_mut<T: Any + Send + Sync>(&mut self, res: &'a mut T) {
@@ -252,8 +323,7 @@ impl<'a> OwnedResources<'a> {
             },
             _marker: PhantomData,
         };
-        self.map
-            .insert(type_id, Arc::new(AtomicRefCell::new(entry)));
+        self.map.insert(type_id, Arc::new(RwLock::new(entry)));
     }
 
     pub fn fetch_one<T: Any + Send + Sync>(&self) -> FetchResult<Shared<'a, T>> {
@@ -271,6 +341,8 @@ impl<'a> OwnedResources<'a> {
             .get_mut(&TypeId::of::<T>())
             .and_then(Arc::get_mut)?
             .get_mut()
+            .handle()
+            .unwrap()
         {
             StoredResource::Owned { pointer } => Some(pointer.downcast_mut().unwrap()),
             StoredResource::Mutable { pointer, .. } => {

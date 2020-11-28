@@ -52,10 +52,9 @@ impl MainState {
             40,
             CharacterListType::Ascii,
         ))?;
-        let atlas = space
-            .fetch_mut::<DefaultCache>()
-            .get::<FontAtlas>(&font_atlas_key)?;
-        let mut text = Text::from_cached(&mut *space.fetch_mut(), atlas);
+        let (cache, gfx) = space.fetch::<(DefaultCache, Graphics)>()?;
+        let atlas = cache.borrow().get::<FontAtlas>(&font_atlas_key)?;
+        let mut text = Text::from_cached(&mut *gfx.borrow_mut(), atlas);
         text.set_text("Hello World!", Color::GREEN);
 
         Ok(MainState { space, text })
@@ -75,7 +74,8 @@ impl EventHandler for MainState {
 
     fn draw(&mut self) -> Result<()> {
         let Self { space, text } = self;
-        let gfx = &mut *space.fetch_mut::<Graphics>();
+        let graphics = space.fetch_one::<Graphics>()?;
+        let gfx = &mut *graphics.borrow_mut();
 
         gfx.set_projection(Orthographic3::new(0., 320., 240., 0., -1., 1.));
         gfx.begin_default_pass(PassAction::default());

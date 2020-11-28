@@ -67,24 +67,24 @@ pub struct ProjectileAccessor(Entity);
 impl LuaUserData for ProjectileAccessor {
     fn add_methods<'lua, T: LuaUserDataMethods<'lua, Self>>(methods: &mut T) {
         methods.add_method("position", |lua, this, ()| {
-            let resources = lua.resources();
-            let world = resources.fetch::<World>();
+            let tmp = lua.fetch_one::<World>()?;
+            let world = tmp.borrow();
             let projectile = world.get::<Projectile>(this.0).to_lua_err()?;
             let v = projectile.position.translation.vector;
             Ok((v.x, v.y, projectile.position.rotation.angle()))
         });
 
         methods.add_method("velocity", |lua, this, ()| {
-            let resources = lua.resources();
-            let world = resources.fetch::<World>();
+            let tmp = lua.fetch_one::<World>()?;
+            let world = tmp.borrow();
             let projectile = world.get::<Projectile>(this.0).to_lua_err()?;
             let v = projectile.velocity.linear;
             Ok((v.x, v.y, projectile.velocity.angular))
         });
 
         methods.add_method("acceleration", |lua, this, ()| {
-            let resources = lua.resources();
-            let world = resources.fetch::<World>();
+            let tmp = lua.fetch_one::<World>()?;
+            let world = tmp.borrow();
             let projectile = world.get::<Projectile>(this.0).to_lua_err()?;
             let v = projectile.acceleration.linear;
             Ok((v.x, v.y, projectile.acceleration.angular))
@@ -1634,8 +1634,8 @@ impl<B: Bullet + Clone> ErasedBullet for BulletSlug<B> {
             Ok(())
         })?;
 
-        let resources = lua.resources();
-        let world = &mut *resources.fetch_mut::<World>();
+        let tmp = lua.fetch_one::<World>()?;
+        let world = &mut *tmp.borrow_mut();
         Ok(world.spawn_batch(batch.to_vec()))
     }
 }
@@ -1666,8 +1666,8 @@ pub struct LuaGroup {
 impl LuaUserData for LuaGroup {
     fn add_methods<'lua, T: LuaUserDataMethods<'lua, Self>>(methods: &mut T) {
         methods.add_method_mut("cancel", |lua, this, ()| {
-            let resources = lua.resources();
-            let world = resources.fetch::<World>();
+            let tmp = lua.fetch_one::<World>()?;
+            let world = tmp.borrow();
             let mut buf = world.get_buffer();
 
             for &e in &this.entities {
@@ -1688,8 +1688,8 @@ impl LuaUserData for LuaGroup {
 
 impl Pattern for LuaGroup {
     fn build<'lua>(&self, builder: &mut dyn PatternBuilder<'lua>) -> Result<()> {
-        let resources = builder.lua().resources();
-        let world = resources.fetch::<World>();
+        let tmp = builder.lua().fetch_one::<World>()?;
+        let world = tmp.borrow();
 
         for &entity in &self.entities {
             let proj = match world.get::<Projectile>(entity) {
@@ -1724,10 +1724,10 @@ impl System for DanmakuSystem {
     }
 
     fn update(&self, _lua: LuaContext, resources: &UnifiedResources) -> Result<()> {
-        let mut world = resources.fetch_mut::<World>();
-        let mut danmaku = resources.fetch_mut::<Danmaku>();
-
-        danmaku.update(&mut *world, 1. / 60.);
+        let (world, danmaku) = resources.fetch::<(World, Danmaku)>()?;
+        danmaku
+            .borrow_mut()
+            .update(&mut *world.borrow_mut(), 1. / 60.);
 
         Ok(())
     }
@@ -1849,9 +1849,8 @@ pub fn load<'lua>(lua: LuaContext<'lua>) -> Result<LuaValue<'lua>> {
     table.set(
         "set_bounds",
         lua.create_function(|lua, bounds: Option<Box2<f32>>| {
-            let resources = lua.resources();
-            let mut danmaku = resources.fetch_mut::<Danmaku>();
-            danmaku.bounds = bounds;
+            let danmaku = lua.fetch_one::<Danmaku>()?;
+            danmaku.borrow_mut().bounds = bounds;
             Ok(())
         })?,
     )?;
