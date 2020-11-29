@@ -65,7 +65,7 @@ pub mod prelude {
         api::LuaEntity,
         ecs::*,
         math::*,
-        resources::{OwnedResources, Resources, SharedResources, UnifiedResources},
+        resources::{BorrowExt, OwnedResources, Resources, SharedResources, UnifiedResources},
         Scheduler, SludgeLuaContextExt, SludgeResultExt, Space, System,
     };
 

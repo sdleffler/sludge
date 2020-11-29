@@ -466,23 +466,6 @@ impl<'a> OwnedResources<'a> {
     pub fn fetch<T: FetchAll<'a>>(&self) -> Result<T::Fetched, NotFound> {
         T::fetch_components_owned(self)
     }
-
-    /// Retrieve a mutable reference to some resource in the map.
-    pub fn get_mut<T: Fetchable>(&mut self) -> Option<&mut T> {
-        match self
-            .map
-            .get_mut(&TypeId::of::<T>())
-            .and_then(Arc::get_mut)?
-            .get_mut()
-            .handle()
-        {
-            StoredResource::Owned { pointer } => Some(pointer.downcast_mut().unwrap()),
-            StoredResource::Mutable { pointer, .. } => {
-                Some(unsafe { pointer.as_mut() }.downcast_mut().unwrap())
-            }
-            _ => None,
-        }
-    }
 }
 
 unsafe impl<'a> Send for OwnedResources<'a> {}
@@ -640,6 +623,24 @@ pub trait FetchAll<'a> {
     fn fetch_components_owned(resources: &OwnedResources<'a>) -> Result<Self::Fetched, NotFound>;
 }
 
+// pub struct Pair<T, U>(T, U);
+
+/// An extension trait for tuples/bundles of resources for conveniently borrowing multiple
+/// `Shared` references at once.
+pub trait BorrowExt<'a> {
+    /// The output of immutably borrowing the bundle.
+    type Borrowed;
+
+    /// The output of mutably borrowing the bundle.
+    type MutBorrowed;
+
+    /// Borrow all components in the bundle immutably.
+    fn borrow(&'a self) -> Self::Borrowed;
+
+    /// Borrow all components in the bundle mutably.
+    fn borrow_mut(&'a self) -> Self::MutBorrowed;
+}
+
 macro_rules! impl_tuple {
     ($($id:ident),*) => {
         #[allow(non_snake_case)]
@@ -655,6 +656,22 @@ macro_rules! impl_tuple {
             fn fetch_components_owned(_resources: &OwnedResources<'a>) -> Result<Self::Fetched, NotFound> {
                 $(let $id = _resources.fetch_one()?;)*
                 Ok(($($id,)*))
+            }
+        }
+
+        #[allow(non_snake_case)]
+        impl<'a, 'b: 'a, $($id: Fetchable),*> BorrowExt<'a> for ($(Shared<'b, $id>,)*) {
+            type Borrowed = ($(Fetch<'b, 'a, $id>,)*);
+            type MutBorrowed = ($(FetchMut<'b, 'a, $id>,)*);
+
+            fn borrow(&'a self) -> Self::Borrowed {
+                let ($($id,)*) = self;
+                ($($id.borrow(),)*)
+            }
+
+            fn borrow_mut(&'a self) -> Self::MutBorrowed {
+                let ($($id,)*) = self;
+                ($($id.borrow_mut(),)*)
             }
         }
     };

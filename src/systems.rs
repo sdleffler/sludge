@@ -55,9 +55,8 @@ impl<C: ParentComponent> crate::System for HierarchySystem<C> {
     ) -> Result<()> {
         if !resources.has_value::<HierarchyManager<C>>() {
             let hierarchy = {
-                let world = resources
-                    .get_mut::<World>()
-                    .ok_or_else(|| anyhow!("no World resource yet"))?;
+                let tmp = resources.fetch_one::<World>()?;
+                let world = &mut *tmp.borrow_mut();
                 HierarchyManager::<C>::new(world)
             };
             resources.insert(hierarchy);
