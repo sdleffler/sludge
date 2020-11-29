@@ -5,6 +5,7 @@
     duration_zero,
     clamp
 )]
+#![deny(broken_intra_doc_links)]
 
 use {
     anyhow::*,

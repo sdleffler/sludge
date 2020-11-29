@@ -4,9 +4,9 @@
 //!
 //! This module provides types which implement [`Resources`](Resources), a trait
 //! which allows by-type access to singletons both local to a space
-//! (for example an [ECS world](sludge::ecs::World)) and global
+//! (for example an [ECS world](crate::ecs::World)) and global
 //! context types which are shared between all spaces in your program
-//! (for example the [graphics context](sludge::graphics::Graphics)).
+//! (for example the [graphics context](crate::graphics::Graphics)).
 //!
 //! There are currently three different containers for these singleton
 //! resources, of which currently only two implement the `Resources`
@@ -541,7 +541,7 @@ impl<'a> Resources<'a> for SharedResources<'a> {
 #[derive(Debug, Clone)]
 pub struct UnifiedResources<'a> {
     /// The "local" resources are intended to contain resources which are local to a
-    /// sludge [`Space`](sludge::Space). This is stuff which will be created and
+    /// sludge [`Space`](crate::Space). This is stuff which will be created and
     /// destroyed alongside the space, such as an ECS world or gamestate or what have
     /// you.
     pub local: SharedResources<'a>,
