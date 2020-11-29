@@ -156,25 +156,9 @@ impl<'lua> SludgeLuaContextExt<'lua> for LuaContext<'lua> {
     }
 
     fn spawn<T: ToLua<'lua>>(self, task: T) -> LuaResult<LuaThread<'lua>> {
-        let thread = match task.to_lua(self)? {
-            LuaValue::Function(f) => self.create_thread(f)?,
-            LuaValue::Thread(th) => th,
-            _ => {
-                return Err(LuaError::FromLuaConversionError {
-                    to: "thread or function",
-                    from: "lua value",
-                    message: None,
-                })
-            }
-        };
-
-        let key = self.create_registry_value(thread.clone())?;
-        self.fetch_one::<SchedulerQueueChannel>()?
+        self.fetch_one::<SchedulerQueue>()?
             .borrow()
-            .spawn
-            .try_send(key)
-            .unwrap();
-        Ok(thread)
+            .spawn(self, task)
     }
 
     fn broadcast<S: AsRef<str>, T: ToLuaMulti<'lua>>(
@@ -182,50 +166,15 @@ impl<'lua> SludgeLuaContextExt<'lua> for LuaContext<'lua> {
         event_name: S,
         args: T,
     ) -> LuaResult<()> {
-        let args = args.to_lua_multi(self)?;
-        let event = Event::Broadcast {
-            name: EventName(Atom::from(event_name.as_ref())),
-            args: if args.is_empty() {
-                None
-            } else {
-                Some(
-                    args.into_iter()
-                        .map(|v| self.create_registry_value(v))
-                        .collect::<LuaResult<_>>()?,
-                )
-            },
-        };
-
-        self.fetch_one::<SchedulerQueueChannel>()?
+        self.fetch_one::<SchedulerQueue>()?
             .borrow()
-            .event
-            .try_send(event)
-            .unwrap();
-        Ok(())
+            .broadcast(self, event_name, args)
     }
 
     fn notify<T: ToLuaMulti<'lua>>(self, thread: LuaThread<'lua>, args: T) -> LuaResult<()> {
-        let args = args.to_lua_multi(self)?;
-        let thread = self.create_registry_value(thread)?;
-        let event = Event::Notify {
-            thread,
-            args: if args.is_empty() {
-                None
-            } else {
-                Some(
-                    args.into_iter()
-                        .map(|v| self.create_registry_value(v))
-                        .collect::<LuaResult<_>>()?,
-                )
-            },
-        };
-
-        self.fetch_one::<SchedulerQueueChannel>()?
+        self.fetch_one::<SchedulerQueue>()?
             .borrow()
-            .event
-            .try_send(event)
-            .unwrap();
-        Ok(())
+            .notify(self, thread, args)
     }
 }
 
@@ -274,7 +223,8 @@ impl Space {
         let mut local = OwnedResources::new();
 
         local.insert(World::new());
-        let (scheduler, queue_handle) = lua.context(Scheduler::new)?;
+        let scheduler = lua.context(Scheduler::new)?;
+        let queue_handle = scheduler.queue().clone();
         local.insert(scheduler);
         local.insert(queue_handle);
         local.insert(EntityUserDataRegistry::new());
@@ -386,10 +336,23 @@ impl Space {
     }
 }
 
-/// A thread waiting to be woken up, living in the scheduler's queue. This
+/// A pending wake-up for a thread, living in the scheduler's queue. This
 /// can represent a thread which is scheduled for a given tick, or a thread
 /// which was waiting for an event which was previously broadcast this tick
 /// and is ready to be run.
+///
+/// A given thread may have multiple wake-ups pointing to it in the scheduler's
+/// queue at any time, for example if it's waiting on two events which are
+/// both broadcast on the same update, or if an event is broadcast and then
+/// the thread is notified. The behavior of the thread, whether it's woken
+/// multiple times or only once, depends on the behavior of the type of
+/// wakeups involved: a `Notify` wakeup will not invalidate other wakeups,
+/// but a `Broadcast` or `Timed` wakeup will invalidate other `Broadcast`
+/// or `Timed` wakeups (but *not* a `Notify` wakeup.) One way to think about
+/// it is that any number of `Broadcast` or `Timed` wakeups targeting a
+/// specific thread will wake up a thread at most once on a given update,
+/// while `Notify` wakeups will resume the target thread no matter what happens
+/// before or after (unless the thread throws an error and dies or something.)
 ///
 /// An event wakeup will always appear as if it's scheduled for tick 0, and
 /// as such will always be at the front of the priority queue.
@@ -468,11 +431,17 @@ impl Ord for Wakeup {
     }
 }
 
+/// The type of an event name. Internally, it's implemented as an interned string.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct EventName(Atom);
 
 pub type EventArgs = SmallVec<[LuaRegistryKey; 3]>;
 
+/// The type of an event to be sent into a scheduler's queue.
+///
+/// You shouldn't usually need to construct this type by hand; there are convenience
+/// methods which will both construct the `Event` and push it onto the queue by
+/// themselves.
 #[derive(Debug)]
 pub enum Event {
     Broadcast {
@@ -485,16 +454,173 @@ pub enum Event {
     },
 }
 
+/// The `SchedulerQueue` is one half of a concurrent MPSC queue corresponding to
+/// a specific `Scheduler`. It can be cheaply cloned and send to other threads
+/// or into the Lua state for use inside userdata.
 #[derive(Debug, Clone)]
-pub struct SchedulerQueueChannel {
+pub struct SchedulerQueue {
     spawn: Sender<LuaRegistryKey>,
     event: Sender<Event>,
+}
+
+impl SchedulerQueue {
+    /// Push an already encoded `Event` into the event queue.
+    ///
+    /// If you don't have an `Event` at hand for some reason or another,
+    /// you can use [`broadcast`](SchedulerQueue::broadcast) or
+    /// [`notify`](SchedulerQueue::notify) for a simpler and more convenient
+    /// API.
+    pub fn push_event(&self, event: Event) {
+        self.event
+            .try_send(event)
+            .expect("unbounded channel should never fail to send");
+    }
+
+    /// Push a Lua thread which is already encoded into a registry key into
+    /// the spawn queue.
+    ///
+    /// If you don't have a registry key handy or you're working in a Lua
+    /// context, there's the more convenient [`spawn`](SchedulerQueue::spawn)
+    /// method. Most of the time that's probably what you'll want.
+    pub fn push_spawn(&self, spawn: LuaRegistryKey) {
+        self.spawn
+            .try_send(spawn)
+            .expect("unbounded channel should never fail to send");
+    }
+
+    /// Spawn a Lua thread, pushing it into the scheduler's queue.
+    ///
+    /// This method will look at the input type and coerce it into
+    /// being a Lua thread, and the resulting thread value will
+    /// be returned. It will successfully convert either already
+    /// constructed threads or functions, where in the latter case
+    /// the function is very simply turned into a thread using a
+    /// method equivalent to the basic Lua `coroutine.create`
+    /// API function.
+    pub fn spawn<'lua, T: ToLua<'lua>>(
+        &self,
+        lua: LuaContext<'lua>,
+        task: T,
+    ) -> LuaResult<LuaThread<'lua>> {
+        let thread = match task.to_lua(lua)? {
+            LuaValue::Function(f) => lua.create_thread(f)?,
+            LuaValue::Thread(th) => th,
+            _ => {
+                return Err(LuaError::FromLuaConversionError {
+                    to: "thread or function",
+                    from: "lua value",
+                    message: None,
+                })
+            }
+        };
+
+        let key = lua.create_registry_value(thread.clone())?;
+        self.push_spawn(key);
+
+        Ok(thread)
+    }
+
+    /// Broadcast an event to all threads waiting for it.
+    ///
+    /// Events have string names and take any number of arguments.
+    /// The arguments are stored into the Lua registry for safety
+    /// and subsequently pushed into the event queue as an `Event::Broadcast`.
+    ///
+    /// When threads waiting on events are resumed, the event's
+    /// arguments are returned from the yield call which caused the thread
+    /// to wait. The same values are returned from *every* yield call
+    /// which waits on the same event, so any changes to the yielded
+    /// arguments will be seen by other threads waiting on the same
+    /// event during the same broadcast, in arbitrary order.
+    pub fn broadcast<'lua, S: AsRef<str>, T: ToLuaMulti<'lua>>(
+        &self,
+        lua: LuaContext<'lua>,
+        event_name: S,
+        args: T,
+    ) -> LuaResult<()> {
+        let args = args.to_lua_multi(lua)?;
+        let event = Event::Broadcast {
+            name: EventName(Atom::from(event_name.as_ref())),
+            args: if args.is_empty() {
+                None
+            } else {
+                Some(
+                    args.into_iter()
+                        .map(|v| lua.create_registry_value(v))
+                        .collect::<LuaResult<_>>()?,
+                )
+            },
+        };
+
+        self.push_event(event);
+
+        Ok(())
+    }
+
+    /// Notify a single specific thread to continue execution the next
+    /// time the scheduler is updated.
+    ///
+    /// This function will wake a thread *regardless* of whether it has
+    /// previously been woken on a given scheduler update. If called
+    /// multiple times with same *or* different arguments, it will wake
+    /// that thread as many times as it is called; unlike for event
+    /// broadcasts and "sleep" calls/timed wakeups, notify has *no*
+    /// protection against double-waking (waking the same thread twice
+    /// when it needed to only be woken once on an update.) A notified
+    /// thread will have any timed wakeups or events it was waiting on
+    /// invalidated, and will not subsequently be woken by those events
+    /// unless the next yield also requests it.
+    pub fn notify<'lua, T: ToLuaMulti<'lua>>(
+        &self,
+        lua: LuaContext<'lua>,
+        thread: LuaThread<'lua>,
+        args: T,
+    ) -> LuaResult<()> {
+        let args = args.to_lua_multi(lua)?;
+        let thread = lua.create_registry_value(thread)?;
+        let event = Event::Notify {
+            thread,
+            args: if args.is_empty() {
+                None
+            } else {
+                Some(
+                    args.into_iter()
+                        .map(|v| lua.create_registry_value(v))
+                        .collect::<LuaResult<_>>()?,
+                )
+            },
+        };
+
+        self.push_event(event);
+
+        Ok(())
+    }
 }
 
 /// The scheduler controls the execution of Lua "threads", under a cooperative
 /// concurrency model. It is a priority queue of coroutines to be resumed,
 /// ordered by how soon they should be woken. It also supports waking threads
 /// via string-keyed events, with Lua-valued arguments for event broadcasts.
+///
+/// # Scenes, `Space`s and the `Scheduler`
+///
+/// By default, all `Space`s are initialized with a `Scheduler` in their local
+/// resources. This `Scheduler` is expected to be used for scripting purposes
+/// irrespective of whatever state the user's application is in; it can be updated
+/// at the user's discretion in their main loop, or simply not used at all. However,
+/// it should be noted that the main `Scheduler` in the space's resources is what
+/// is manipulated by the `sludge.thread` Lua API's `spawn`, `broadcast`, and `notify`
+/// methods.
+///
+/// Sometimes, it may be useful to create secondary schedulers, for example in
+/// order to script events that have to be individually paused and stopped from
+/// updating for some purpose. For example, during a bossfight, a boss shouldn't
+/// have its time "advance" at all, and so if its AI is scripted using threading
+/// and the scheduler, the scheduler somehow needs to be prevented from updating
+/// during that time. For that purpose it is useful to create a scheduler which is
+/// used to schedule *only* combat-related threads, so that the space's scheduler
+/// can always be updated and the combat scheduler can be paused during a scripted
+/// event or otherwise.
 ///
 /// # Persistence and the `Scheduler`
 ///
@@ -558,11 +684,16 @@ pub struct Scheduler {
     /// and 2.) we clear the entire arena all in one go later!
     event_args: Arena<EventArgs>,
 
-    /// Shared channel for sending events to wake up sleeping threads.
-    event_channel: Receiver<Event>,
+    /// Receiving half of the shared channel for sending events to wake up
+    /// sleeping threads.
+    event_receiver: Receiver<Event>,
 
-    /// Shared channel for sending new threads to be scheduled.
-    spawn_channel: Receiver<LuaRegistryKey>,
+    /// Receiving half of the shared channel for sending new threads to be
+    /// scheduled.
+    spawn_receiver: Receiver<LuaRegistryKey>,
+
+    /// Sending halves of the shared channels for sending events/new threads.
+    senders: SchedulerQueue,
 
     /// "Discrete" time in "ticks" (60ths of a second, 60FPS)
     discrete: u64,
@@ -575,46 +706,74 @@ pub struct Scheduler {
 }
 
 impl Scheduler {
-    pub const CHANNEL_BOUND: usize = 4096;
+    const CHANNEL_BOUND: usize = 4096;
 
-    pub(crate) fn new(lua: LuaContext) -> Result<(Self, SchedulerQueueChannel)> {
+    /// Construct a new scheduler in the given Lua context. Schedulers are tied
+    /// to a given Lua state and cannot be moved from one to another; they store
+    /// a significant amount of state in the registry of their bound Lua state.
+    pub fn new(lua: LuaContext) -> Result<Self> {
         let (spawn_sender, spawn_channel) = crossbeam_channel::bounded(Self::CHANNEL_BOUND);
         let (event_sender, event_channel) = crossbeam_channel::bounded(Self::CHANNEL_BOUND);
+        let senders = SchedulerQueue {
+            spawn: spawn_sender,
+            event: event_sender,
+        };
         let slots = lua.create_registry_value(lua.create_table()?)?;
 
-        Ok((
-            Self {
-                queue: BinaryHeap::new(),
-                waiting: HashMap::new(),
+        Ok(Self {
+            queue: BinaryHeap::new(),
+            waiting: HashMap::new(),
 
-                threads: Arena::new(),
-                slots,
-                event_args: Arena::new(),
+            threads: Arena::new(),
+            slots,
+            event_args: Arena::new(),
 
-                event_channel,
-                spawn_channel,
+            event_receiver: event_channel,
+            spawn_receiver: spawn_channel,
+            senders,
 
-                discrete: 0,
-                continuous: 0.,
-            },
-            SchedulerQueueChannel {
-                spawn: spawn_sender,
-                event: event_sender,
-            },
-        ))
+            discrete: 0,
+            continuous: 0.,
+        })
     }
 
+    /// Check to see if the scheduler is "idle", meaning that if `update` were to run
+    /// and step the scheduler forward, no threads would be resumed on that step.
+    ///
+    /// The scheduler is considered idle only if no events are waiting to be resumed
+    /// on the current step and there are no events or threads to be spawned waiting in
+    /// its queue.
     pub fn is_idle(&self) -> bool {
-        self.queue.is_empty() || self.queue.peek().unwrap().scheduled_for() > self.discrete
+        let nothing_in_queue =
+            self.queue.is_empty() || self.queue.peek().unwrap().scheduled_for() > self.discrete;
+        let no_pending_events = self.spawn_receiver.is_empty() && self.event_receiver.is_empty();
+        nothing_in_queue && no_pending_events
     }
 
+    /// Returns a reference to the scheduler's queue handle, for spawning threads and
+    /// events.
+    pub fn queue(&self) -> &SchedulerQueue {
+        &self.senders
+    }
+
+    /// Drains the spawn channel, pushing new threads onto the scheduler's heap with a wakeup
+    /// time of 0 (so that they're immediately resumed on the next run through the queue)
+    /// and inserting them into the reverse-lookup table (slots).
     pub(crate) fn queue_all_spawned<'lua>(
         &mut self,
         lua: LuaContext<'lua>,
         slots: &LuaTable<'lua>,
     ) -> Result<()> {
-        for key in self.spawn_channel.try_iter() {
-            let thread = lua.registry_value::<LuaThread>(&key)?;
+        for key in self.spawn_receiver.try_iter() {
+            let thread = match lua.registry_value::<LuaThread>(&key) {
+                Ok(t) => t,
+                Err(e) => {
+                    let c = anyhow!("failed to spawn thread: failed to extract Lua thread from registry key `{:?}`", key);
+                    let err = Error::from(e).context(c);
+                    log::error!("error queuing thread: {:#?}", err);
+                    continue;
+                }
+            };
             let index = self.threads.insert(key);
             slots.set(thread, index.slot())?;
             self.queue.push(Wakeup::Timed {
@@ -626,6 +785,7 @@ impl Scheduler {
         Ok(())
     }
 
+    /// Drains the event channel and adds relevant `Wakeup`s to the queue.
     pub(crate) fn poll_events_and_queue_all_notified<'lua>(
         &mut self,
         lua: LuaContext<'lua>,
@@ -636,7 +796,7 @@ impl Scheduler {
             threads,
             waiting,
             event_args,
-            event_channel,
+            event_receiver: event_channel,
             ..
         } = self;
 
@@ -678,6 +838,11 @@ impl Scheduler {
         Ok(())
     }
 
+    /// Resume threads at the top of the heap until the heap contains only
+    /// idle threads which do not want to be run on the current step.
+    ///
+    /// Threads which are woken are popped from the queue and then reinserted
+    /// with a fresh `Wakeup` depending on what their yield value requests.
     pub(crate) fn run_all_queued<'lua>(
         &mut self,
         lua: LuaContext<'lua>,
@@ -797,6 +962,22 @@ impl Scheduler {
         Ok(())
     }
 
+    /// Run the scheduler for `dt` steps.
+    ///
+    /// The scheduler contains a very simple internal timestep which simply waits
+    /// for accumulated time to be greater than 0., and steps the scheduler forward
+    /// repeatedly, subtracting 1. from the accumulated time until it's equal to
+    /// or less than zero.
+    ///
+    /// To prevent infinite loops of threads spawning and yielding themselves, the
+    /// scheduler internally has a loop cap which counts how many times the scheduler
+    /// is resumed from the top (all queued events spawned and then spawn and event
+    /// queues drained) on a given step. Once the loop cap is reached, the scheduler
+    /// will emit a warning to the logger and it will halt the update for the given
+    /// tick. This is not a panacea, and any time you see a warning that the loop
+    /// cap was exceeded, it's a good idea to look back at your code and check to
+    /// ensure there's nothing infinitely spawning/waking itself. The loop cap is
+    /// currently hardcoded to 8, but may be made parameterizable in the future.
     pub fn update(&mut self, lua: LuaContext, dt: f32) -> Result<()> {
         self.continuous += dt;
         let slots = lua.registry_value(&self.slots)?;
