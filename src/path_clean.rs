@@ -1,5 +1,9 @@
-//! `path-clean` is a Rust port of the the `cleanname` procedure from the Plan 9 C library, and is similar to
-//! [`path.Clean`](https://golang.org/pkg/path/#Clean) from the Go standard library.
+//! This is a lightly modified version of the `path-clean` crate, which diverges a bit from the original
+//! semantics/behavior.
+//!
+//! `path-clean` is a modification of a Rust port of the the `cleanname` procedure from the Plan 9 C library,
+//! and is similar to [`path.Clean`](https://golang.org/pkg/path/#Clean) from the Go standard library. However,
+//! unlike both of these functions, this module will not remove `..` elements which begin a path.
 //!
 //! It works as follows:
 //!
@@ -75,8 +79,7 @@ pub fn clean(path: &str) -> String {
 /// 1. Reduce multiple slashes to a single slash.
 /// 2. Eliminate `.` path name elements (the current directory).
 /// 3. Eliminate `..` path name elements (the parent directory) and the non-`.` non-`..`, element that precedes them.
-/// 4. Eliminate `..` elements that begin a rooted path, that is, replace `/..` by `/` at the beginning of a path.
-/// 5. Leave intact `..` elements that begin a non-rooted path.
+/// 4. Leave intact `..` elements that begin a path.
 ///
 /// If the result of this process is an empty string, return the string `"."`, representing the current directory.
 fn clean_internal(path: &[u8]) -> Vec<u8> {
