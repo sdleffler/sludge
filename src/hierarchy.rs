@@ -8,7 +8,7 @@ use {
 };
 
 use crate::{
-    ecs::{ComponentEvent, Entity, FlaggedComponent, ScContext, World},
+    ecs::{ComponentEvent, ComponentSubscriber, Entity, FlaggedComponent, ScContext, World},
     Resources,
 };
 
@@ -63,7 +63,7 @@ pub struct HierarchyManager<P: ParentComponent> {
 
     scratch_set: HashSet<Entity>,
 
-    events: ReaderId<ComponentEvent>,
+    events: ComponentSubscriber<P>,
     changed: EventChannel<HierarchyEvent>,
 
     _marker: PhantomData<P>,

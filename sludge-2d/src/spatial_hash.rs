@@ -1,6 +1,5 @@
 use {
     hashbrown::{HashMap, HashSet},
-    shrev::ReaderId,
     sludge::{ecs::*, math::*, prelude::*},
     smallvec::SmallVec,
     std::ops,
@@ -245,8 +244,8 @@ impl<T> HashGrid<T> {
 
 #[derive(Debug)]
 pub struct SpatialHasher {
-    position_events: ReaderId<ComponentEvent>,
-    shape_events: ReaderId<ComponentEvent>,
+    position_events: ComponentSubscriber<Position>,
+    shape_events: ComponentSubscriber<Shape>,
 
     grid: HashGrid<Entity>,
     current_ids: HashMap<Entity, SpatialIndex>,

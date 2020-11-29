@@ -1,11 +1,32 @@
+//! An entity component system supporting mutation tracking and Lua access.
+//!
+//! See [the `api` module](crate::api) for more information on integrating
+//! entities and components with Lua scripting.
+//!
+//! This module contains an ECS [`World`](World) type which is built on top
+//! of a custom fork of the `hecs` ECS. It uses the `Entity` type from `hecs`
+//! and supports tracking of component insertions and deletions for any component
+//! with a registered reader, and tracking of component insertions, mutations,
+//! and deletions for components which support mutation tracking. Whether or
+//! not a component supports mutation tracking depends on its implementation
+//! of [`SmartComponent`](SmartComponent).
+//!
+//! For implementing the `SmartComponent` trait, sludge provides two `#[derive]`
+//! macros, `SimpleComponent` and `TrackedComponent`. `#[derive(SimpleComponent)]`
+//! can be used to derive a `SmartComponent` implementation which is un-flagged,
+//! and `#[derive(TrackedComponent)]` will generate an implementation which flags
+//! changes on mutable borrow and registers the component type with the ECS.
+
 use {
     anyhow::*,
+    derivative::*,
     hashbrown::HashMap,
     hibitset::*,
     shrev::{EventChannel, EventIterator},
     std::{
         any::{Any, TypeId},
         fmt,
+        marker::PhantomData,
         pin::Pin,
         sync::{Mutex, RwLock, RwLockReadGuard},
     },
@@ -22,6 +43,7 @@ pub use shrev::ReaderId;
 #[doc(hidden)]
 pub type ScContext<'a> = &'a HashMap<TypeId, EventEmitter>;
 
+#[doc(hidden)]
 pub struct FlaggedComponent(TypeId);
 
 impl FlaggedComponent {
@@ -222,6 +244,14 @@ pub enum ComponentEvent {
     Inserted(Entity),
     Modified(Entity),
     Removed(Entity),
+}
+
+#[derive(Derivative)]
+#[derivative(Debug(bound = ""))]
+pub struct ComponentSubscriber<T> {
+    #[derivative(Debug = "ignore")]
+    _marker: PhantomData<T>,
+    reader_id: ReaderId<ComponentEvent>,
 }
 
 #[derive(Default)]
@@ -531,7 +561,7 @@ impl World {
 
     pub fn poll<'a, T: Component>(
         &'a self,
-        reader_id: &'a mut ReaderId<ComponentEvent>,
+        subscriber: &'a mut ComponentSubscriber<T>,
     ) -> ComponentEventIterator<'a> {
         ComponentEventIterator::new(
             Pin::new(
@@ -542,18 +572,24 @@ impl World {
                     .read()
                     .unwrap(),
             ),
-            reader_id,
+            &mut subscriber.reader_id,
         )
     }
 
-    pub fn track<T: Component>(&mut self) -> ReaderId<ComponentEvent> {
-        self.channels
+    pub fn track<T: Component>(&mut self) -> ComponentSubscriber<T> {
+        let reader_id = self
+            .channels
             .entry(TypeId::of::<T>())
             .or_default()
             .channel
             .get_mut()
             .unwrap()
-            .register_reader()
+            .register_reader();
+
+        ComponentSubscriber {
+            _marker: PhantomData,
+            reader_id,
+        }
     }
 
     pub fn get_buffer(&self) -> CommandBuffer {

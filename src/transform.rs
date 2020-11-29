@@ -3,18 +3,19 @@ use {
     hashbrown::HashSet,
     serde::{Deserialize, Serialize},
     shrev::ReaderId,
-    std::{any::TypeId, marker::PhantomData},
+    sludge_macros::*,
+    std::marker::PhantomData,
 };
 
 use crate::{
     components::Parent,
-    ecs::{ComponentEvent, Entity, FlaggedComponent, ScContext, SmartComponent, World},
+    ecs::{ComponentEvent, ComponentSubscriber, Entity, World},
     hierarchy::{HierarchyEvent, HierarchyManager, ParentComponent},
     math::Transform3,
     Resources,
 };
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, TrackedComponent)]
 pub struct Transform {
     pub(crate) local: Transform3<f32>,
     pub(crate) global: Transform3<f32>,
@@ -41,19 +42,9 @@ impl Transform {
     }
 }
 
-impl<'a> SmartComponent<ScContext<'a>> for Transform {
-    fn on_borrow_mut(&mut self, entity: Entity, flags: ScContext<'a>) {
-        flags[&TypeId::of::<Self>()].emit_modified_atomic(entity);
-    }
-}
-
-inventory::submit! {
-    FlaggedComponent::of::<Transform>()
-}
-
 pub struct TransformManager<P: ParentComponent = Parent> {
     hierarchy_events: ReaderId<HierarchyEvent>,
-    transform_events: ReaderId<ComponentEvent>,
+    transform_events: ComponentSubscriber<Transform>,
 
     modified: HashSet<Entity>,
     removed: HashSet<Entity>,

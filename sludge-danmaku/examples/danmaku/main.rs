@@ -5,7 +5,6 @@ extern crate sludge as sloodge;
 use ::{
     anyhow::*,
     hashbrown::HashMap,
-    shrev::ReaderId,
     sloodge::{
         assets::DefaultCache, conf::Conf, dispatcher::Dispatcher, event::EventHandler,
         filesystem::Filesystem, graphics::*, prelude::*,
@@ -116,7 +115,7 @@ inventory::submit! {
 struct MainState {
     space: Space,
     dispatcher: Dispatcher<'static>,
-    events: ReaderId<ComponentEvent>,
+    events: ComponentSubscriber<SpriteIndex>,
     indices: HashMap<Entity, SpriteId>,
     batch: SpriteBatch,
     canvas: Canvas,
