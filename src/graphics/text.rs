@@ -322,21 +322,21 @@ impl Text {
 
     fn set_text(&mut self, layout: &TextLayout) {
         self.batch.clear();
-        self.batch.set_texture(layout.font_atlas.font_texture.clone());
+        self.batch
+            .set_texture(layout.font_atlas.font_texture.clone());
         for layout_c in layout.chars.iter() {
-            let c_info = layout.font_atlas.font_map.get(&layout_c.c).unwrap_or(&layout.font_atlas.font_map[&'?']);
+            let c_info = layout
+                .font_atlas
+                .font_map
+                .get(&layout_c.c)
+                .unwrap_or(&layout.font_atlas.font_map[&'?']);
             let i_param = InstanceParam::new()
                 .src(c_info.uvs)
                 .color(layout_c.color)
-                .translate2(Vector2::new(
-                    layout_c.coords.mins.x,
-                    layout_c.coords.mins.y
-                ));
+                .translate2(Vector2::new(layout_c.coords.mins.x, layout_c.coords.mins.y));
             self.batch.insert(i_param);
         }
     }
-
-
 }
 
 impl Drawable for Text {
@@ -356,124 +356,153 @@ impl Drawable for Text {
 // or not we should start a new line)
 struct Word {
     end: usize,
-    width: f32
+    width: f32,
+}
+
+impl Word {
+    fn from_str(
+        text: &str,
+        font_map: &HashMap<char, CharInfo>,
+        mut upper_bound: usize,
+    ) -> Vec<Self> {
+        let mut buffer = Vec::new();
+        for word in text.split(" ") {
+            upper_bound += word.len();
+            buffer.push(Word {
+                end: upper_bound,
+                width: word
+                    .chars()
+                    .map(|c| font_map.get(&c).unwrap_or(&font_map[&'?']).advance_width)
+                    .sum(),
+            })
+        }
+        buffer
+    }
 }
 
 #[derive(Debug)]
 pub struct LayoutCharInfo {
     coords: Box2<f32>,
     color: Color,
-    c: char
+    c: char,
 }
 
 pub struct TextLayout {
-    pub chars: Vec<LayoutCharInfo>,
+    chars: Vec<LayoutCharInfo>,
     words: Vec<Word>,
     font_atlas: FontAtlas,
+    cursor: Point2<f32>,
+    space_width: f32,
 }
 
 impl TextLayout {
     pub fn new(font_atlas: FontAtlas) -> Self {
+        let space_width = font_atlas.font_map[&' '].advance_width;
         TextLayout {
             font_atlas: font_atlas,
             chars: Vec::new(),
             words: Vec::new(),
+            cursor: Point2::new(0., 0.),
+            space_width: space_width,
         }
     }
 
     pub fn push_str(&mut self, text: &str, colors: impl IntoIterator<Item = Color> + Clone) {
         if let Some(upper_bound) = colors.clone().into_iter().size_hint().1 {
-            assert!(upper_bound < text.len(), "Passed in less colors than the number of chars you tried to push!");
+            assert!(
+                upper_bound < text.len(),
+                "Passed in less colors than the number of chars you tried to push!"
+            );
         }
-        let mut upper_bound = 0;
-        let split_text = text.split(" ");
-        for word in split_text {
-            upper_bound += word.len();
-            self.words.push(Word {
-                end: upper_bound,
-                width: word.chars().map(|c| self.font_atlas.font_map.get(&c).unwrap_or(&self.font_atlas.font_map[&'?']).advance_width).sum()
-                }
-            )
-        }
-
-        let mut width = 0.;
+        self.words.append(&mut Word::from_str(
+            text,
+            &self.font_atlas.font_map,
+            self.words.last().unwrap_or(&Word { end: 0, width: 0. }).end,
+        ));
         for (c, color) in text.chars().zip(colors.clone()) {
             if c.is_whitespace() {
-                width += self.font_atlas.font_map[&' '].advance_width;
+                self.cursor.x += self.space_width;
                 continue;
             }
-            let c_info = self.font_atlas.font_map.get(&c).unwrap_or(&self.font_atlas.font_map[&'?']);
+            let c_info = self
+                .font_atlas
+                .font_map
+                .get(&c)
+                .unwrap_or(&self.font_atlas.font_map[&'?']);
             self.chars.push(LayoutCharInfo {
-                coords: Box2::new(width + c_info.horizontal_offset, c_info.vertical_offset, c_info.width, c_info.height),
-                color: color,
+                coords: Box2::new(
+                    self.cursor.x + c_info.horizontal_offset,
+                    self.cursor.y + c_info.vertical_offset,
+                    c_info.width,
+                    c_info.height,
+                ),
+                color,
                 c,
-            }
-            );
-            width += c_info.advance_width;
+            });
+            self.cursor.x += c_info.advance_width;
         }
     }
-    
-    // TODO: the commented out code worked without the text layout thing, need to adapt
-    // it to use the new types
-    pub fn push_wrapping_str(&mut self, _text: &str, _colors: impl IntoIterator<Item = Color>) {
-        unimplemented!();
-        //struct Word {
-        //    width: f32,
-        //    text: String,
-        //}
 
-        //let atlas = layout.font_atlas.load_cached();
-        //let font_map = &atlas.font_map;
-        //let space = font_map[&' '];
-        //self.batch.clear();
-        //self.batch.set_texture(atlas.font_texture.clone());
+    pub fn push_wrapping_str(
+        &mut self,
+        text: &str,
+        colors: impl IntoIterator<Item = Color> + Clone,
+        line_width: f32,
+    ) {
+        if let Some(upper_bound) = colors.clone().into_iter().size_hint().1 {
+            assert!(
+                upper_bound < text.len(),
+                "Passed in less colors than the number of chars you tried to push!"
+            );
+        }
 
-        //let words: Vec<Word> = layout.text
-        //    .split(" ")
-        //    .map(|word| Word {
-        //        width: word
-        //            .chars()
-        //            .map(|c| {
-        //                font_map
-        //                    .get(&c)
-        //                    .unwrap_or(&font_map[&'?'])
-        //                    .advance_width
-        //            })
-        //            .sum(),
-        //        text: word.to_owned(),
-        //    })
-        //    .collect();
+        let new_words = Word::from_str(
+            text,
+            &self.font_atlas.font_map,
+            self.words.last().unwrap_or(&Word { end: 0, width: 0. }).end,
+        );
 
-        //let mut cursor = Point2::<f32>::new(0., 0.);
+        let mut start = match self.words.last() {
+            Some(w) => w.end,
+            None => 0usize,
+        };
 
-        //for word in words.iter() {
-        //    if word.width + cursor.x > width_per_line as f32 {
-        //        cursor.x = 0.;
-        //        cursor.y += atlas.line_gap;
-        //    }
+        let mut char_iter = text.chars();
+        let mut color_iter = colors.into_iter();
 
-        //    Self::draw_word(
-        //        &word.text,
-        //        color,
-        //        &font_map,
-        //        cursor.x,
-        //        cursor.y,
-        //        &mut self.batch,
-        //    );
-        //    cursor.x += word.width;
+        for word in new_words.iter() {
+            if word.width + self.cursor.x > line_width as f32 {
+                self.cursor.x = 0.;
+                self.cursor.y += self.font_atlas.line_gap;
+            }
 
-        //    let i_param = InstanceParam::new()
-        //        .src(space.uvs)
-        //        .color(color)
-        //        .translate2(Vector2::new(
-        //            cursor.x + space.horizontal_offset,
-        //            cursor.y + space.vertical_offset,
-        //        ))
-        //        .scale2(space.scale);
-        //    self.batch.insert(i_param);
-        //    cursor.x += space.advance_width;
-        //}
+            for _ in 0..(word.end - start) {
+                let c = char_iter.next().unwrap();
+                let color = color_iter.next().unwrap();
+                let c_info = self
+                    .font_atlas
+                    .font_map
+                    .get(&c)
+                    .unwrap_or(&self.font_atlas.font_map[&'?']);
+                self.chars.push(LayoutCharInfo {
+                    coords: Box2::new(
+                        self.cursor.x + c_info.horizontal_offset,
+                        self.cursor.y + c_info.vertical_offset,
+                        c_info.width,
+                        c_info.height,
+                    ),
+                    color,
+                    c,
+                });
+                self.cursor.x += c_info.advance_width;
+            }
 
+            start = word.end;
+            // Advance the char and color iterators to get rid of the space
+            char_iter.next();
+            color_iter.next();
+            self.cursor.x += self.space_width;
+        }
     }
 
     pub fn apply_layout(&self, gfx: &mut Graphics) -> Text {

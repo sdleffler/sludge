@@ -14,7 +14,7 @@ use {
 };
 
 mod sludge {
-    pub use ::sludge::sludge::*;
+    pub use sludge::sludge::*;
 }
 
 struct MainState {
@@ -57,6 +57,7 @@ impl MainState {
             .get::<FontAtlas>(&font_atlas_key)?;
         let mut text_layout = TextLayout::new(atlas.load().clone());
         text_layout.push_str("Hello world!", std::iter::repeat(Color::WHITE));
+        text_layout.push_str(" Goodbye world!", std::iter::repeat(Color::WHITE));
         let text = text_layout.apply_layout(&mut *space.fetch_mut());
 
         Ok(MainState { space, text })

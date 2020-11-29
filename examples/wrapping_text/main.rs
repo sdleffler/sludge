@@ -14,7 +14,7 @@ use {
 };
 
 mod sludge {
-    pub use ::sludge::sludge::*;
+    pub use sludge::sludge::*;
 }
 
 struct MainState {
@@ -55,9 +55,14 @@ impl MainState {
         let atlas = space
             .fetch_mut::<DefaultCache>()
             .get::<FontAtlas>(&font_atlas_key)?;
-        let mut text = Text::from_cached(&mut *space.fetch_mut(), atlas);
-        text.set_wrapping_text("Hello! Here we have an example of some SUPER cool wrapping text! It works nicely.", Color::GREEN, 400);
 
+        let mut text_layout = TextLayout::new(atlas.load().clone());
+        text_layout.push_wrapping_str(
+            "Hello! Here we have an example of some SUPER cool wrapping text! It works nicely.",
+            std::iter::repeat(Color::WHITE),
+            400.,
+        );
+        let text = text_layout.apply_layout(&mut *space.fetch_mut());
         Ok(MainState { space, text })
     }
 }
