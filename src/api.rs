@@ -27,7 +27,7 @@ pub const PERMANENTS_DE_TABLE_REGISTRY_KEY: &'static str = "sludge.permanents_de
 pub const PLAYBACK_THUNK_REGISTRY_KEY: &'static str = "sludge.playback_thunk";
 pub const PACKAGE_REGISTRY_KEY: &'static str = "sludge.package";
 pub const DEFAULT_PACKAGE_PATH: &'static str =
-    "/scripts/?.lua:/scripts/?/init.lua:/?.lua:/?/init.lua";
+    "/?.lua:/?/init.lua:/scripts/?.lua:/scripts/?/init.lua";
 
 pub struct EntityUserDataRegistry {
     archetypes: Mutex<HashMap<Vec<TypeId>, Vec<(&'static str, LuaComponent)>>>,
