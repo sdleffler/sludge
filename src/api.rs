@@ -26,7 +26,8 @@ pub const PERMANENTS_SER_TABLE_REGISTRY_KEY: &'static str = "sludge.permanents_s
 pub const PERMANENTS_DE_TABLE_REGISTRY_KEY: &'static str = "sludge.permanents_de";
 pub const PLAYBACK_THUNK_REGISTRY_KEY: &'static str = "sludge.playback_thunk";
 pub const PACKAGE_REGISTRY_KEY: &'static str = "sludge.package";
-pub const DEFAULT_PACKAGE_PATH: &'static str = "/?.lua";
+pub const DEFAULT_PACKAGE_PATH: &'static str =
+    "/scripts/?.lua:/scripts/?/init.lua:/?.lua:/?/init.lua";
 
 pub struct EntityUserDataRegistry {
     archetypes: Mutex<HashMap<Vec<TypeId>, Vec<(&'static str, LuaComponent)>>>,
@@ -518,9 +519,10 @@ pub fn require<'lua>(lua: LuaContext<'lua>, module: String) -> LuaResult<LuaValu
         let fs = lua.fetch_one::<Filesystem>()?;
         let package_path = package.get::<_, LuaString>("path")?;
         let segments = package_path.to_str()?.split(":");
+        let module_replaced = module.replace(".", "/");
 
         for segment in segments {
-            let path = segment.replace('?', &module);
+            let path = segment.replace('?', &module_replaced);
             let mut file = match fs.borrow_mut().open(&path) {
                 Ok(file) => file,
                 Err(_) => continue,
@@ -540,7 +542,7 @@ pub fn require<'lua>(lua: LuaContext<'lua>, module: String) -> LuaResult<LuaValu
 
         // FIXME: better error reporting here; collect errors from individual module attempts
         // and log them?
-        Err(anyhow!("module not found!")).to_lua_err()
+        Err(anyhow!("module {} not found!", module)).to_lua_err()
     }
 }
 
