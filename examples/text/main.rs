@@ -56,7 +56,7 @@ impl MainState {
         let atlas = cache.borrow().get::<FontAtlas>(&font_atlas_key)?;
         let mut text_layout = TextLayout::new(atlas.load().clone());
         text_layout.push_str("Hello World!", std::iter::repeat(Color::GREEN));
-        let text = text_layout.apply_layout(&mut *gfx.borrow_mut());
+        let text = Text::from_layout(&text_layout, &mut *gfx.borrow_mut());
         Ok(MainState { space, text })
     }
 }

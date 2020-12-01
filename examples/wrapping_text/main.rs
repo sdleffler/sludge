@@ -62,7 +62,7 @@ impl MainState {
             std::iter::repeat(Color::WHITE),
             400.,
         );
-        let text = text_layout.apply_layout(&mut *gfx.borrow_mut());
+        let text = Text::from_layout(&text_layout, &mut *gfx.borrow_mut());
         Ok(MainState { space, text })
     }
 }
