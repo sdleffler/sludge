@@ -352,7 +352,10 @@ impl Asset for SpriteSheet {
         resources: &R,
     ) -> Result<Loaded<Self>> {
         let path = key.to_path()?;
-        let mut fh = resources.fetch_mut::<Filesystem>().open(&path)?;
+        let mut fh = resources
+            .fetch_one::<Filesystem>()?
+            .borrow_mut()
+            .open(&path)?;
         let mut buf = String::new();
         fh.read_to_string(&mut buf)?;
         Ok(SpriteSheet::from_json(&buf)?.into())
@@ -405,14 +408,14 @@ impl LuaComponentInterface for SpriteAnimation {
         args: LuaValue<'lua>,
         builder: &mut EntityBuilder,
     ) -> LuaResult<()> {
-        let resources = lua.resources();
-
         let table = LuaTable::from_lua(args, lua)?;
         let path = table
             .get::<_, LuaString>("path")
             .log_error_err(module_path!())?;
-        let mut sprite_sheet = resources
-            .fetch_mut::<DefaultCache>()
+
+        let tmp = lua.fetch_one::<DefaultCache>()?;
+        let mut sprite_sheet = tmp
+            .borrow()
             .get::<SpriteSheet>(&Key::from_path(path.to_str()?))
             .to_lua_err()?;
 

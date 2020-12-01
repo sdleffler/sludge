@@ -25,15 +25,15 @@ pub struct NameAccessor(Entity);
 impl LuaUserData for NameAccessor {
     fn add_methods<'lua, T: LuaUserDataMethods<'lua, Self>>(methods: &mut T) {
         methods.add_method("get", |lua, this, ()| {
-            let resources = lua.resources();
-            let world = resources.fetch::<World>();
+            let tmp = lua.fetch_one::<World>()?;
+            let world = tmp.borrow();
             let name = world.get::<Name>(this.0).to_lua_err()?;
             name.0.as_str().to_lua(lua)
         });
 
         methods.add_method("to_table", |lua, this, ()| {
-            let resources = lua.resources();
-            let world = resources.fetch::<World>();
+            let tmp = lua.fetch_one::<World>()?;
+            let world = tmp.borrow();
             let name = world.get::<Name>(this.0).to_lua_err()?;
             rlua_serde::to_value(lua, &*name)
         });

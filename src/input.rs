@@ -1,3 +1,7 @@
+//! This is a lightly modified version of the `ggez-goodies`
+//! crate's `input.rs` module; please see the source for the
+//! license notification.
+//!
 //! An abstract input state object that gets fed user
 //! events and updates itself based on a set of key
 //! bindings.
@@ -11,8 +15,32 @@
 //! (rather based on Unity3D),
 //! * Do some tweening of input axes and stuff just for
 //! fun.
-//! * Take ggez's event-based input API, and present event- or
-//! state-based API so you can do whichever you want.
+//! * Present event- or state-based API so you can do
+//! whichever you want.
+
+/*
+ * MIT License
+ *
+ * Copyright (c) 2016-2018 the ggez developers
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
 
 // TODO: Handle mice, game pads, joysticks
 
@@ -681,7 +709,6 @@ where
     }
 }
 
-#[cfg(feature = "ggez")]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -718,45 +745,45 @@ mod tests {
     fn test_input_bindings() {
         let ib = make_input_binding();
         assert_eq!(
-            ib.resolve(KeyCode::Z),
-            Some(InputEffect::Button(Buttons::A))
+            ib.resolve_keycode(KeyCode::Z),
+            Some(InputEffect::Button(Buttons::A, None))
         );
         assert_eq!(
-            ib.resolve(KeyCode::X),
-            Some(InputEffect::Button(Buttons::B))
+            ib.resolve_keycode(KeyCode::X),
+            Some(InputEffect::Button(Buttons::B, None))
         );
         assert_eq!(
-            ib.resolve(KeyCode::Enter),
-            Some(InputEffect::Button(Buttons::Start))
+            ib.resolve_keycode(KeyCode::Enter),
+            Some(InputEffect::Button(Buttons::Start, None))
         );
         assert_eq!(
-            ib.resolve(KeyCode::RightShift),
-            Some(InputEffect::Button(Buttons::Select))
+            ib.resolve_keycode(KeyCode::RightShift),
+            Some(InputEffect::Button(Buttons::Select, None))
         );
         assert_eq!(
-            ib.resolve(KeyCode::LeftShift),
-            Some(InputEffect::Button(Buttons::Select))
+            ib.resolve_keycode(KeyCode::LeftShift),
+            Some(InputEffect::Button(Buttons::Select, None))
         );
 
         assert_eq!(
-            ib.resolve(KeyCode::Up),
+            ib.resolve_keycode(KeyCode::Up),
             Some(InputEffect::Axis(Axes::Vert, true))
         );
         assert_eq!(
-            ib.resolve(KeyCode::Down),
+            ib.resolve_keycode(KeyCode::Down),
             Some(InputEffect::Axis(Axes::Vert, false))
         );
         assert_eq!(
-            ib.resolve(KeyCode::Left),
+            ib.resolve_keycode(KeyCode::Left),
             Some(InputEffect::Axis(Axes::Horz, false))
         );
         assert_eq!(
-            ib.resolve(KeyCode::Right),
+            ib.resolve_keycode(KeyCode::Right),
             Some(InputEffect::Axis(Axes::Horz, true))
         );
 
-        assert_eq!(ib.resolve(KeyCode::Q), None);
-        assert_eq!(ib.resolve(KeyCode::W), None);
+        assert_eq!(ib.resolve_keycode(KeyCode::Q), None);
+        assert_eq!(ib.resolve_keycode(KeyCode::W), None);
     }
 
     #[test]

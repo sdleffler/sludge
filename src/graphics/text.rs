@@ -520,8 +520,8 @@ impl Asset for Font {
     ) -> Result<Loaded<Self>> {
         use rusttype as rt;
         let path = key.to_path()?;
-        let mut fs = resources.fetch_mut::<Filesystem>();
-        let mut file = fs.open(path)?;
+        let fs = resources.fetch_one::<Filesystem>()?;
+        let mut file = fs.borrow_mut().open(path)?;
         let mut buf = Vec::new();
         file.read_to_end(&mut buf)?;
         let font = rt::Font::try_from_vec(buf).ok_or_else(|| anyhow!("error parsing font"))?;
@@ -537,7 +537,8 @@ impl Asset for FontAtlas {
     ) -> Result<Loaded<Self>> {
         let key = key.to_rust::<FontAtlasKey>()?;
         let mut font = cache.get::<Font>(&Key::from_path(&key.path))?;
-        let gfx = &mut *resources.fetch_mut::<Graphics>();
+        let tmp = resources.fetch_one::<Graphics>()?;
+        let gfx = &mut *tmp.borrow_mut();
         let atlas = match key.threshold {
             Some(t) => FontAtlas::from_rusttype_font(
                 gfx,

@@ -511,8 +511,9 @@ fn load<'lua>(lua: LuaContext<'lua>) -> Result<LuaValue<'lua>> {
             lua.create_function(
                 |lua, (filename, flags): (LuaString, Option<LoadBankFlags>)| {
                     let resources = lua.resources();
-                    let fmod = resources.fetch::<Fmod>();
+                    let fmod = resources.fetch_one::<Fmod>()?;
                     let bank = fmod
+                        .borrow()
                         .load_bank_file(filename.as_bytes(), flags.unwrap_or(LoadBankFlags::NORMAL))
                         .to_lua_err()?;
                     Ok(bank)
@@ -523,8 +524,8 @@ fn load<'lua>(lua: LuaContext<'lua>) -> Result<LuaValue<'lua>> {
             "get_event",
             lua.create_function(|lua, path: LuaString| {
                 let resources = lua.resources();
-                let fmod = resources.fetch::<Fmod>();
-                let event = fmod.get_event(path.as_bytes()).to_lua_err()?;
+                let fmod = resources.fetch_one::<Fmod>()?;
+                let event = fmod.borrow().get_event(path.as_bytes()).to_lua_err()?;
                 Ok(event)
             })?,
         ),

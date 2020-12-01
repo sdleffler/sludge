@@ -52,9 +52,9 @@ impl MainState {
             20,
             CharacterListType::AsciiSubset,
         ))?;
-        let atlas = space
-            .fetch_mut::<DefaultCache>()
-            .get::<FontAtlas>(&font_atlas_key)?;
+
+        let (cache, gfx) = space.fetch::<(DefaultCache, Graphics)>()?;
+        let atlas = cache.borrow().get::<FontAtlas>(&font_atlas_key)?;
 
         let mut text_layout = TextLayout::new(atlas.load().clone());
         text_layout.push_wrapping_str(
@@ -62,7 +62,7 @@ impl MainState {
             std::iter::repeat(Color::WHITE),
             400.,
         );
-        let text = text_layout.apply_layout(&mut *space.fetch_mut());
+        let text = text_layout.apply_layout(&mut *gfx.borrow_mut());
         Ok(MainState { space, text })
     }
 }
@@ -80,7 +80,8 @@ impl EventHandler for MainState {
 
     fn draw(&mut self) -> Result<()> {
         let Self { space, text } = self;
-        let gfx = &mut *space.fetch_mut::<Graphics>();
+        let graphics = space.fetch_one::<Graphics>()?;
+        let gfx = &mut *graphics.borrow_mut();
 
         gfx.set_projection(Orthographic3::new(0., 1280., 960., 0., -1., 1.));
         gfx.begin_default_pass(PassAction::default());
@@ -101,7 +102,7 @@ impl EventHandler for MainState {
 fn main() -> Result<()> {
     sloodge::event::run::<MainState>(
         Conf {
-            window_title: "Hello world!".to_string(),
+            window_title: "Wrapping text!".to_string(),
             window_width: 320 * 4,
             window_height: 240 * 4,
             ..Conf::default()

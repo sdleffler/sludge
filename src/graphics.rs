@@ -1849,10 +1849,9 @@ impl Asset for Texture {
         let path = key
             .to_path()
             .with_context(|| anyhow!("bad key for Texture"))?;
-        let mut filesystem = resources.fetch_mut::<Filesystem>();
-        let mut gfx = resources.fetch_mut::<Graphics>();
-        let mut file = filesystem.open(path)?;
-        let texture = Texture::from_reader(&mut *gfx, &mut file)
+        let (fs, gfx) = resources.fetch::<(Filesystem, Graphics)>()?;
+        let mut file = fs.borrow_mut().open(path)?;
+        let texture = Texture::from_reader(&mut gfx.borrow_mut(), &mut file)
             .with_context(|| anyhow!("failed to create a texture using {:?}", path))?;
         Ok(Loaded::new(texture))
     }

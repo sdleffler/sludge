@@ -1,6 +1,5 @@
 use {
     hashbrown::{HashMap, HashSet},
-    shrev::ReaderId,
     sludge::{ecs::*, math::*, prelude::*},
     smallvec::SmallVec,
     std::ops,
@@ -245,8 +244,8 @@ impl<T> HashGrid<T> {
 
 #[derive(Debug)]
 pub struct SpatialHasher {
-    position_events: ReaderId<ComponentEvent>,
-    shape_events: ReaderId<ComponentEvent>,
+    position_events: ComponentSubscriber<Position>,
+    shape_events: ComponentSubscriber<Shape>,
 
     grid: HashGrid<Entity>,
     current_ids: HashMap<Entity, SpatialIndex>,
@@ -278,13 +277,13 @@ impl SpatialHasher {
         &self.grid
     }
 
-    pub fn update<'a, R: Resources<'a>>(&mut self, resources: &R) {
+    pub fn update<'a, R: Resources<'a>>(&mut self, resources: &R) -> Result<()> {
         self.added.clear();
         self.modified.clear();
         self.removed.clear();
 
-        // TODO: command buffer queuing for asynchronous add/remove
-        let world = &*resources.fetch::<World>();
+        let tmp = resources.fetch_one::<World>()?;
+        let world = &*tmp.borrow();
 
         for &event in world.poll::<Position>(&mut self.position_events) {
             match event {
@@ -352,6 +351,8 @@ impl SpatialHasher {
         }
 
         world.queue_buffer(cmds);
+
+        Ok(())
     }
 }
 
@@ -364,15 +365,16 @@ impl System for SpatialHashingSystem {
         resources: &mut OwnedResources,
         _: Option<&SharedResources>,
     ) -> Result<()> {
+        let world = resources.fetch_one::<World>()?;
         if !resources.has_value::<SpatialHasher>() {
-            let spatial_hasher = SpatialHasher::new(64., &mut *resources.fetch_mut::<World>());
+            let spatial_hasher = SpatialHasher::new(64., &mut *world.borrow_mut());
             resources.insert(spatial_hasher);
         }
 
-        let mut spatial_hasher = resources.fetch_mut::<SpatialHasher>();
-        let mut world = resources.fetch_mut::<World>();
+        let tmp = resources.fetch_one::<SpatialHasher>()?;
+        let spatial_hasher = &mut *tmp.borrow_mut();
         let mut added_buf = Vec::new();
-        for (e, (pos, shape)) in world.query::<(&Position, &Shape)>().iter() {
+        for (e, (pos, shape)) in world.borrow().query::<(&Position, &Shape)>().iter() {
             let index = spatial_hasher.grid.insert(
                 nc::bounding_volume::aabb(&*shape.handle, &(**pos * shape.local)),
                 e,
@@ -381,17 +383,17 @@ impl System for SpatialHashingSystem {
         }
 
         for (entity, index) in added_buf {
-            let _ = world.insert(entity, (index,));
+            let _ = world.borrow_mut().insert(entity, (index,));
         }
 
         Ok(())
     }
 
     fn update(&self, _lua: LuaContext, resources: &UnifiedResources) -> Result<()> {
-        let mut spatial_hasher = resources.fetch_mut::<SpatialHasher>();
-        spatial_hasher.update(resources);
-
-        Ok(())
+        resources
+            .fetch_one::<SpatialHasher>()?
+            .borrow_mut()
+            .update(resources)
     }
 }
 

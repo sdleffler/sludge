@@ -34,9 +34,10 @@ pub struct Fish {
 #[test]
 fn persist_simple() -> Result<()> {
     let space = Space::new()?;
+    let world = space.world()?;
 
     {
-        let mut w = space.world_mut();
+        let mut w = world.borrow_mut();
         for i in 0..100 {
             for j in 0..100 {
                 let (x, y) = (i as f32, j as f32);
@@ -49,8 +50,9 @@ fn persist_simple() -> Result<()> {
     }
 
     let space = roundtrip(&space)?;
-    let count = space
-        .world()
+    let world = space.world()?;
+    let count = world
+        .borrow()
         .query::<()>()
         .with::<Name>()
         .with::<Persistent>()

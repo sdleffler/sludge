@@ -1,4 +1,5 @@
 use {
+    anyhow::*,
     hashbrown::{HashMap, HashSet},
     hecs::SmartComponent,
     hibitset::{BitSet, BitSetLike},
@@ -7,7 +8,7 @@ use {
 };
 
 use crate::{
-    ecs::{ComponentEvent, Entity, FlaggedComponent, ScContext, World},
+    ecs::{ComponentEvent, ComponentSubscriber, Entity, FlaggedComponent, ScContext, World},
     Resources,
 };
 
@@ -62,7 +63,7 @@ pub struct HierarchyManager<P: ParentComponent> {
 
     scratch_set: HashSet<Entity>,
 
-    events: ReaderId<ComponentEvent>,
+    events: ComponentSubscriber<P>,
     changed: EventChannel<HierarchyEvent>,
 
     _marker: PhantomData<P>,
@@ -147,12 +148,13 @@ impl<P: ParentComponent> HierarchyManager<P> {
         &self.changed
     }
 
-    pub fn update<'a, R: Resources<'a>>(&mut self, resources: &R) {
+    pub fn update<'a, R: Resources<'a>>(&mut self, resources: &R) -> Result<()> {
         self.inserted.clear();
         self.modified.clear();
         self.removed.clear();
 
-        let world = &mut *resources.fetch_mut::<World>();
+        let tmp = resources.fetch_one::<World>()?;
+        let world = &mut *tmp.borrow_mut();
 
         for event in world.poll::<P>(&mut self.events) {
             match event {
@@ -365,6 +367,8 @@ impl<P: ParentComponent> HierarchyManager<P> {
         for entity in &self.scratch_set {
             self.roots.remove(entity);
         }
+
+        Ok(())
     }
 }
 

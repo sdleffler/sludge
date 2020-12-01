@@ -1,19 +1,21 @@
 use {
+    anyhow::*,
     hashbrown::HashSet,
     serde::{Deserialize, Serialize},
     shrev::ReaderId,
-    std::{any::TypeId, marker::PhantomData},
+    sludge_macros::*,
+    std::marker::PhantomData,
 };
 
 use crate::{
     components::Parent,
-    ecs::{ComponentEvent, Entity, FlaggedComponent, ScContext, SmartComponent, World},
+    ecs::{ComponentEvent, ComponentSubscriber, Entity, World},
     hierarchy::{HierarchyEvent, HierarchyManager, ParentComponent},
     math::Transform3,
     Resources,
 };
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, TrackedComponent)]
 pub struct Transform {
     pub(crate) local: Transform3<f32>,
     pub(crate) global: Transform3<f32>,
@@ -40,19 +42,9 @@ impl Transform {
     }
 }
 
-impl<'a> SmartComponent<ScContext<'a>> for Transform {
-    fn on_borrow_mut(&mut self, entity: Entity, flags: ScContext<'a>) {
-        flags[&TypeId::of::<Self>()].emit_modified_atomic(entity);
-    }
-}
-
-inventory::submit! {
-    FlaggedComponent::of::<Transform>()
-}
-
 pub struct TransformManager<P: ParentComponent = Parent> {
     hierarchy_events: ReaderId<HierarchyEvent>,
-    transform_events: ReaderId<ComponentEvent>,
+    transform_events: ComponentSubscriber<Transform>,
 
     modified: HashSet<Entity>,
     removed: HashSet<Entity>,
@@ -76,12 +68,13 @@ impl<P: ParentComponent> TransformManager<P> {
         }
     }
 
-    pub fn update<'a, R: Resources<'a>>(&mut self, resources: &R) {
+    pub fn update<'a, R: Resources<'a>>(&mut self, resources: &R) -> Result<()> {
         self.modified.clear();
         self.removed.clear();
 
-        let world = &*resources.fetch::<World>();
-        let hierarchy = &*resources.fetch::<HierarchyManager<P>>();
+        let (shared_world, shared_hierarchy) = resources.fetch::<(World, HierarchyManager<P>)>()?;
+        let hierarchy = shared_hierarchy.borrow_mut();
+        let world = shared_world.borrow_mut();
 
         for event in hierarchy.changed().read(&mut self.hierarchy_events) {
             match event {
@@ -137,6 +130,8 @@ impl<P: ParentComponent> TransformManager<P> {
                 transform.global = transform.local;
             }
         }
+
+        Ok(())
     }
 }
 
@@ -147,7 +142,7 @@ mod tests {
     use approx::assert_relative_eq;
 
     #[test]
-    fn parent_update() {
+    fn parent_update() -> Result<()> {
         let resources = SharedResources::new();
 
         let mut world = World::new();
@@ -162,46 +157,76 @@ mod tests {
             let mut tx = Transform3::identity();
             tx *= &Translation3::new(-5., -7., 0.);
             tx *= &Rotation3::from_axis_angle(&Vector3::z_axis(), ::std::f32::consts::PI);
-            resources.fetch_mut::<World>().spawn((Transform::new(tx),))
+            resources
+                .fetch_one::<World>()?
+                .borrow_mut()
+                .spawn((Transform::new(tx),))
         };
 
         resources
-            .fetch_mut::<HierarchyManager<Parent>>()
-            .update(&resources);
-        resources.fetch_mut::<TransformManager>().update(&resources);
+            .fetch_one::<HierarchyManager<Parent>>()?
+            .borrow_mut()
+            .update(&resources)?;
+        resources
+            .fetch_one::<TransformManager>()?
+            .borrow_mut()
+            .update(&resources)?;
 
         let e2 = {
             let mut tx = Transform3::identity();
             tx *= &Translation3::new(5., 3., 0.);
             resources
-                .fetch_mut::<World>()
+                .fetch_one::<World>()?
+                .borrow_mut()
                 .spawn((Transform::new(tx), Parent::new(e1)))
         };
 
         resources
-            .fetch_mut::<HierarchyManager<Parent>>()
-            .update(&resources);
-        resources.fetch_mut::<TransformManager>().update(&resources);
+            .fetch_one::<HierarchyManager<Parent>>()?
+            .borrow_mut()
+            .update(&resources)?;
+        resources
+            .fetch_one::<TransformManager>()?
+            .borrow_mut()
+            .update(&resources)?;
 
-        let tx2 = *resources.fetch::<World>().get::<Transform>(e2).unwrap();
+        let tx2 = *resources
+            .fetch_one::<World>()?
+            .borrow()
+            .get::<Transform>(e2)
+            .unwrap();
 
         assert_relative_eq!(
             tx2.global.transform_point(&Point3::origin()),
             Point3::new(-10., -10., 0.)
         );
 
-        resources.fetch_mut::<World>().despawn(e1).unwrap();
+        resources
+            .fetch_one::<World>()?
+            .borrow_mut()
+            .despawn(e1)
+            .unwrap();
 
         resources
-            .fetch_mut::<HierarchyManager<Parent>>()
-            .update(&resources);
-        resources.fetch_mut::<TransformManager>().update(&resources);
+            .fetch_one::<HierarchyManager<Parent>>()?
+            .borrow_mut()
+            .update(&resources)?;
+        resources
+            .fetch_one::<TransformManager>()?
+            .borrow_mut()
+            .update(&resources)?;
 
-        let tx2 = *resources.fetch::<World>().get::<Transform>(e2).unwrap();
+        let tx2 = *resources
+            .fetch_one::<World>()?
+            .borrow()
+            .get::<Transform>(e2)
+            .unwrap();
 
         assert_relative_eq!(
             tx2.global.transform_point(&Point3::origin()),
             Point3::new(5., 3., 0.)
         );
+
+        Ok(())
     }
 }

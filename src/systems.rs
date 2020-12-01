@@ -26,7 +26,8 @@ impl crate::System for WorldEventSystem {
 
     fn update(&self, _lua: LuaContext, resources: &UnifiedResources) -> Result<()> {
         let _ = resources
-            .fetch_mut::<World>()
+            .fetch_one::<World>()?
+            .borrow_mut()
             .flush_queue()
             .log_error_err("sludge::ecs");
 
@@ -54,9 +55,8 @@ impl<C: ParentComponent> crate::System for HierarchySystem<C> {
     ) -> Result<()> {
         if !resources.has_value::<HierarchyManager<C>>() {
             let hierarchy = {
-                let world = resources
-                    .get_mut::<World>()
-                    .ok_or_else(|| anyhow!("no World resource yet"))?;
+                let tmp = resources.fetch_one::<World>()?;
+                let world = &mut *tmp.borrow_mut();
                 HierarchyManager::<C>::new(world)
             };
             resources.insert(hierarchy);
@@ -65,10 +65,10 @@ impl<C: ParentComponent> crate::System for HierarchySystem<C> {
     }
 
     fn update(&self, _lua: LuaContext, resources: &UnifiedResources) -> Result<()> {
-        let hierarchy = &mut *resources.fetch_mut::<HierarchyManager<C>>();
-        hierarchy.update(resources);
-
-        Ok(())
+        resources
+            .fetch_one::<HierarchyManager<C>>()?
+            .borrow_mut()
+            .update(resources)
     }
 }
 
@@ -90,24 +90,18 @@ impl<C: ParentComponent> crate::System for TransformSystem<C> {
         _: Option<&SharedResources>,
     ) -> Result<()> {
         if !resources.has_value::<TransformManager<C>>() {
-            let transform_graph = {
-                let world = &mut *resources
-                    .try_fetch_mut::<World>()
-                    .ok_or_else(|| anyhow!("no World resource yet"))?;
-                let hierarchy = &mut *resources
-                    .try_fetch_mut::<HierarchyManager<C>>()
-                    .ok_or_else(|| anyhow!("no HierarchyManager resource yet"))?;
-                TransformManager::<C>::new(world, hierarchy)
-            };
+            let (world, hierarchy) = resources.fetch::<(World, HierarchyManager<C>)>()?;
+            let transform_graph =
+                TransformManager::<C>::new(&mut world.borrow_mut(), &mut hierarchy.borrow_mut());
             resources.insert(transform_graph);
         }
         Ok(())
     }
 
     fn update(&self, _lua: LuaContext, resources: &UnifiedResources) -> Result<()> {
-        let transforms = &mut *resources.fetch_mut::<TransformManager<C>>();
-        transforms.update(resources);
-
-        Ok(())
+        resources
+            .fetch_one::<TransformManager<C>>()?
+            .borrow_mut()
+            .update(resources)
     }
 }

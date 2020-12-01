@@ -1,11 +1,35 @@
+#![deny(missing_docs)]
+
+//! An entity component system supporting mutation tracking and access from
+//! Lua scripting through the sludge Lua API.
+//!
+//! See [the `api` module](crate::api) for more information on integrating
+//! entities and components with Lua scripting.
+//!
+//! This module contains an ECS [`World`](World) type which is built on top
+//! of a custom fork of the `hecs` ECS. It uses the `Entity` type from `hecs`
+//! and supports tracking of component insertions and deletions for any component
+//! with a registered reader, and tracking of component insertions, mutations,
+//! and deletions for components which support mutation tracking. Whether or
+//! not a component supports mutation tracking depends on its implementation
+//! of [`SmartComponent`](SmartComponent).
+//!
+//! For implementing the `SmartComponent` trait, sludge provides two `#[derive]`
+//! macros, `SimpleComponent` and `TrackedComponent`. `#[derive(SimpleComponent)]`
+//! can be used to derive a `SmartComponent` implementation which is un-flagged,
+//! and `#[derive(TrackedComponent)]` will generate an implementation which flags
+//! changes on mutable borrow and registers the component type with the ECS.
+
 use {
     anyhow::*,
+    derivative::*,
     hashbrown::HashMap,
     hibitset::*,
     shrev::{EventChannel, EventIterator},
     std::{
         any::{Any, TypeId},
         fmt,
+        marker::PhantomData,
         pin::Pin,
         sync::{Mutex, RwLock, RwLockReadGuard},
     },
@@ -22,9 +46,11 @@ pub use shrev::ReaderId;
 #[doc(hidden)]
 pub type ScContext<'a> = &'a HashMap<TypeId, EventEmitter>;
 
+#[doc(hidden)]
 pub struct FlaggedComponent(TypeId);
 
 impl FlaggedComponent {
+    #[doc(hidden)]
     pub fn of<T: Any>() -> Self {
         Self(TypeId::of::<T>())
     }
@@ -65,6 +91,9 @@ impl fmt::Debug for Command {
     }
 }
 
+/// A buffer for deferred operations on the world such as entity insertions, removals,
+/// spawning, and despawning. Can be constructed with `new` or `Default`, or retrieved
+/// from the internal pool of a [`World`](World) with [`World::get_buffer`](World::get_buffer).
 #[derive(Default)]
 #[must_use = "CommandBuffers do nothing unless queued!"]
 pub struct CommandBuffer {
@@ -82,6 +111,7 @@ impl fmt::Debug for CommandBuffer {
 }
 
 impl CommandBuffer {
+    /// Construct a new empty command buffer.
     pub fn new() -> Self {
         Self {
             pool: Vec::new(),
@@ -94,6 +124,13 @@ impl CommandBuffer {
         self.pool.pop().unwrap_or_default()
     }
 
+    /// Queue spawning an entity (see [`World::spawn`](World::spawn).)
+    ///
+    /// Note that unlike its synchronous counterpart, `CommandBuffer::spawn` cannot return a fresh
+    /// entity ID. If you need an entity ID but you need to spawn the entity asynchronously, you
+    /// can use [`World::reserve_entity`](World::reserve_entity) to asynchronously reserve an entity
+    /// ID, and then use [`CommandBuffer::insert`](CommandBuffer::insert) to insert a bundle of
+    /// components onto it. When combined, this behavior is functionally identical to `CommandBuffer::spawn`.
     #[inline]
     pub fn spawn(&mut self, bundle: impl DynamicBundle) -> &mut Self {
         let mut eb = self.get_or_make_builder();
@@ -102,6 +139,7 @@ impl CommandBuffer {
         self
     }
 
+    /// Queue inserting a bundle of components onto an entity (see [`World::insert`](World::insert).)
     #[inline]
     pub fn insert(&mut self, entity: Entity, bundle: impl DynamicBundle) -> &mut Self {
         let mut eb = self.get_or_make_builder();
@@ -110,11 +148,16 @@ impl CommandBuffer {
         self
     }
 
+    /// Queue inserting a single component onto an entity (see [`World::insert_one`](World::insert_one).)
     #[inline]
     pub fn insert_one<T: Component>(&mut self, entity: Entity, component: T) -> &mut Self {
         self.insert(entity, (component,))
     }
 
+    /// Queue removing some components from an entity (see [`World::remove`](World::remove).)
+    ///
+    /// Note that when you use the command buffer version, you won't be able to retrieve
+    /// the removed component, unlike with the synchronous version.
     #[inline]
     pub fn remove<T: Bundle>(&mut self, entity: Entity) -> &mut Self {
         fn do_remove<T: Bundle>(
@@ -130,17 +173,20 @@ impl CommandBuffer {
         self
     }
 
+    /// Queue despawning an entity (see [`World::despawn`](World::despawn).)
     #[inline]
     pub fn despawn(&mut self, entity: Entity) -> &mut Self {
         self.cmds.push(Command::Despawn(entity));
         self
     }
 
+    /// Returns true if this command buffer has no commands queued in it.
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.cmds.is_empty()
     }
 
+    /// Immediately run all queued commands on the given `World`.
     #[inline]
     pub fn drain_into(&mut self, world: &mut World) -> Result<()> {
         let mut errs = Vec::new();
@@ -187,6 +233,8 @@ impl CommandBuffer {
     }
 }
 
+/// An iterator over emitted `ComponentEvent`s for some `ComponentSubscriber`,
+/// returned by [`World::poll`](World::poll).
 pub struct ComponentEventIterator<'a> {
     _outer: Pin<RwLockReadGuard<'a, EventChannel<ComponentEvent>>>,
     iter: EventIterator<'a, ComponentEvent>,
@@ -217,13 +265,44 @@ impl<'a> Iterator for ComponentEventIterator<'a> {
     }
 }
 
+/// `ComponentEvent`s are generated in three possible cases:
+/// 1. When a component is inserted onto an entity during spawning or an `insert` call,
+///    then if the component has a subscriber, a `ComponentEvent::Inserted` will be emitted.
+/// 2. If a component is tracked (uses `#[derive(TrackedComponent)]` rather than
+///    #[derive(SimpleComponent)]` for its `SmartComponent` implementation), then when it
+///    is *mutably dereferenced* (when the smart pointer returned from a query or `get_mut`
+///    call is mutably dereferenced), then a `ComponentEvent::Modified` event will be
+///    emitted.
+/// 3. When a component is removed from an entity during despawning or a `remove` call,
+///    then if the component has a subscriber, a `ComponentEvent::Removed` will be emitted.
 #[derive(Debug, Clone, Copy)]
 pub enum ComponentEvent {
+    /// An event indicating that the relevant component type was inserted onto the included
+    /// `Entity`.
     Inserted(Entity),
+    /// An event indicating that the relevant component type was mutably accessed on the
+    /// included `Entity`.
     Modified(Entity),
+    /// An event indicating that the relevant component type was recently removed from the
+    /// included `Entity`.
     Removed(Entity),
 }
 
+/// A `ComponentSubscriber<T>` represents a subscriber of tracking information for the component
+/// type `T`. See also [`World::track`], [`World::poll`], [`ComponentEvent`].
+///
+/// [`World::track`]: World::track
+/// [`World::poll`]: World::poll
+/// [`ComponentEvent`]: ComponentEvent
+#[derive(Derivative)]
+#[derivative(Debug(bound = ""))]
+pub struct ComponentSubscriber<T> {
+    #[derivative(Debug = "ignore")]
+    _marker: PhantomData<T>,
+    reader_id: ReaderId<ComponentEvent>,
+}
+
+#[doc(hidden)]
 #[derive(Default)]
 pub struct EventEmitter {
     inserted: BitSet,
@@ -232,6 +311,7 @@ pub struct EventEmitter {
     channel: RwLock<EventChannel<ComponentEvent>>,
 }
 
+#[doc(hidden)]
 impl EventEmitter {
     pub fn emit_inserted(&mut self, entity: Entity) {
         if !self.inserted.add(entity.id()) {
@@ -292,6 +372,16 @@ impl EventEmitter {
     }
 }
 
+/// An ECS world built on top of a modified fork of the hecs ECS crate.
+///
+/// It supports component insertion/mutation/removal tracking through
+/// [`World::track`] and [`World::poll`], and also supports asynchronous
+/// queueing of entity spawning/insertion/removal/despawning through the
+/// [`CommandBuffer`] type and [`World::get_buffer`] and [`World::queue_buffer`]
+/// methods. If you're using `World::queue_buffer`, make sure to allocate
+/// the buffer that you're passing into it using `World::get_buffer`, in
+/// order to take full advantage of the `World`'s internal `CommandBuffer`
+/// pool and minimize allocation of new `CommandBuffer`s.
 pub struct World {
     ecs: hecs::World,
     buffers: Mutex<Vec<CommandBuffer>>,
@@ -300,6 +390,7 @@ pub struct World {
 }
 
 impl World {
+    /// Create an empty world.
     pub fn new() -> Self {
         Self {
             ecs: hecs::World::new(),
@@ -312,14 +403,27 @@ impl World {
         }
     }
 
+    /// An [`Archetype`](Archetype) is a representation of a set of components for some
+    /// entity in the ECS world. This method returns an iterator over all archetypes; this
+    /// is useful for things like automatic parallel scheduling and generating entity tables
+    /// per possible `Archetype`, so that all entities have a corresponding value for their
+    /// `Archetype` (and there are no duplicates.)
     pub fn archetypes(&self) -> impl ExactSizeIterator<Item = &Archetype> + '_ {
         self.ecs.archetypes()
     }
 
+    /// The `ArchetypesGeneration` is a value which changes when the archetypes of the ECS
+    /// world are updated/have an archetype removed/added. You can use this to figure out
+    /// when you need to update a value calculated from the [`World::archetypes`](World::archetypes)
+    /// method.
     pub fn archetypes_generation(&self) -> ArchetypesGeneration {
         self.ecs.archetypes_generation()
     }
 
+    /// Spawn an entity with a bundle of components.
+    ///
+    /// If you're spawning lots of entities at once with the same component types, you probably
+    /// want to use [`World::spawn_batch`](World::spawn_batch) instead.
     pub fn spawn(&mut self, components: impl DynamicBundle) -> Entity {
         Self::do_spawn(&mut self.channels, &mut self.ecs, components)
     }
@@ -340,6 +444,9 @@ impl World {
         entity
     }
 
+    /// Spawn a number of entities with identical component types. This is much faster than
+    /// [`World::spawn`](World::spawn) when you have lots of entities, because it can
+    /// try to allocate memory for the whole batch all at once.
     pub fn spawn_batch<I>(&mut self, iter: I) -> Vec<Entity>
     where
         I: IntoIterator,
@@ -357,6 +464,7 @@ impl World {
         batched
     }
 
+    /// Despawn an entity, removing it from the world and dropping all its components.
     pub fn despawn(&mut self, entity: Entity) -> Result<(), NoSuchEntity> {
         Self::do_despawn(&mut self.channels, &mut self.ecs, entity)
     }
@@ -375,14 +483,27 @@ impl World {
         ecs.despawn(entity)
     }
 
+    /// Returns true if `entity` refers to a valid `Entity` in the world.
     pub fn contains(&self, entity: Entity) -> bool {
         self.ecs.contains(entity)
     }
 
+    /// Asynchronously reserve a fresh entity ID with no components on it. This
+    /// is kind of like `world.spawn(())`, but it only needs `&self`, is thread-safe,
+    /// and doesn't allocate. You can use this with the [`CommandBuffer`](CommandBuffer)
+    /// type to asynchronously queue up entity insertions where you immediately
+    /// need the ID of the newly created entity.
     pub fn reserve_entity(&self) -> Entity {
         self.ecs.reserve_entity()
     }
 
+    /// Efficiently query the world for all entities with the given components.
+    ///
+    /// This method is much faster than simply iterating over all entities in
+    /// the world; it also guarantees that entities will be accessed sequentially
+    /// in contiguous blocks of memory depending on their archetypes. In other
+    /// words, it's very cache-friendly, especially when you have lots of entities
+    /// with the same set of components... like projectiles, perhaps.
     pub fn query<'w, Q>(&'w self) -> QueryBorrow<'w, Q, ScContext<'w>>
     where
         Q: Query<'w, ScContext<'w>>,
@@ -390,6 +511,9 @@ impl World {
         self.ecs.query_with_context(&self.channels)
     }
 
+    /// Query the world for all the given components of a single entity. This
+    /// is more efficient than [`World::get`] when you want multiple components
+    /// of an entity.
     pub fn query_one<'w, Q>(
         &'w self,
         entity: Entity,
@@ -400,6 +524,7 @@ impl World {
         self.ecs.query_one_with_context(entity, &self.channels)
     }
 
+    /// Immutably borrow a single component from a single entity.
     pub fn get<'w, C: SmartComponent<ScContext<'w>>>(
         &'w self,
         entity: Entity,
@@ -407,6 +532,7 @@ impl World {
         self.ecs.get_with_context(entity, &self.channels)
     }
 
+    /// Mutably borrow a single component from a single entity.
     pub fn get_mut<'w, C: SmartComponent<ScContext<'w>>>(
         &'w self,
         entity: Entity,
@@ -414,14 +540,19 @@ impl World {
         self.ecs.get_mut_with_context(entity, &self.channels)
     }
 
-    pub fn query_raw<'w, Q: Query<'w>>(&'w self) -> QueryBorrow<'w, Q, ()> {
-        self.ecs.query_with_context(())
-    }
-
+    /// Access a specific entity's components and archetype information.
     pub fn entity(&self, entity: Entity) -> Result<EntityRef<ScContext>, NoSuchEntity> {
         self.ecs.entity_with_context(entity, &self.channels)
     }
 
+    /// Like [`World::query`](World::query), but will not emit mutation events for
+    /// tracked components.
+    pub fn query_raw<'w, Q: Query<'w>>(&'w self) -> QueryBorrow<'w, Q, ()> {
+        self.ecs.query_with_context(())
+    }
+
+    /// Like [`World::query_one`](World::query_one), but will not emit mutation events
+    /// for tracked components.
     pub fn query_one_raw<'w, Q: Query<'w>>(
         &'w self,
         entity: Entity,
@@ -429,22 +560,35 @@ impl World {
         self.ecs.query_one_with_context(entity, ())
     }
 
+    /// Like [`World::get`](World::get), but won't trigger access events for tracked components.
+    ///
+    /// This corresponds to not calling the `SmartComponent::on_borrowed` method. Currently
+    /// nothing sludge will do will cause `on_borrowed` to do anything useful or relevant at
+    /// all, but it might in the future.
     pub fn get_raw<C: Component>(&self, entity: Entity) -> Result<Ref<C>, ComponentError> {
         self.ecs.get_with_context(entity, ())
     }
 
+    /// Like [`World::get_mut`](World::get_mut), but won't emit mutation events for tracked components.
     pub fn get_mut_raw<C: Component>(&self, entity: Entity) -> Result<RefMut<C>, ComponentError> {
         self.ecs.get_mut_with_context(entity, ())
     }
 
+    /// Like [`World::entity`](World::entity), but won't emit mutation events for tracked components.
     pub fn entity_raw(&self, entity: Entity) -> Result<EntityRef<'_>, NoSuchEntity> {
         self.ecs.entity_with_context(entity, ())
     }
 
+    /// Returns an iterator over all live `Entity` IDs in the world.
+    ///
+    /// Prefer [`World::query`](World::query) over `iter` whenever possible! It is
+    /// orders of magnitude more efficient if you're accessing components on the
+    /// entities being iterated over!
     pub fn iter(&self) -> Iter<'_> {
         self.ecs.iter()
     }
 
+    /// Insert a bundle of components onto an entity.
     pub fn insert(
         &mut self,
         entity: Entity,
@@ -471,6 +615,7 @@ impl World {
         ecs.insert(entity, bundle)
     }
 
+    /// Insert a single component onto an entity.
     pub fn insert_one<C: Component>(
         &mut self,
         entity: Entity,
@@ -485,6 +630,8 @@ impl World {
         self.ecs.insert_one(entity, component)
     }
 
+    /// Remove multiple components from an entity. If the components are found on the entity
+    /// they will be returned; otherwise, a `ComponentError` will be returned.
     pub fn remove<T: Bundle>(&mut self, entity: Entity) -> Result<T, ComponentError> {
         Self::do_remove::<T>(&mut self.channels, &mut self.ecs, entity)
     }
@@ -505,6 +652,7 @@ impl World {
         ecs.remove(entity)
     }
 
+    /// Remove a single component from the entity, returning it if it's found.
     pub fn remove_one<T: Component>(&mut self, entity: Entity) -> Result<T, ComponentError> {
         if let Some(channel) = self.channels.get_mut(&TypeId::of::<T>()) {
             channel.emit_removed(entity);
@@ -513,6 +661,7 @@ impl World {
         self.ecs.remove_one(entity)
     }
 
+    /// Clear all entities from the world, dropping their components.
     pub fn clear(&mut self) {
         for (id, e) in self.ecs.iter() {
             for typeid in e.component_types() {
@@ -525,13 +674,19 @@ impl World {
         self.ecs.clear();
     }
 
+    /// Given an ID without a generation which corresponds to a live entity,
+    /// resolve the corresponding generation and produce a valid `Entity` ID
+    /// referring to that entity.
     pub unsafe fn find_entity_from_id(&self, id: u32) -> Entity {
         self.ecs.find_entity_from_id(id)
     }
 
+    /// Iterate over recently emitted events for a given `ComponentSubscriber`.
+    ///
+    /// See also [`ComponentEvent`](ComponentEvent), [`World::track`](World::track)
     pub fn poll<'a, T: Component>(
         &'a self,
-        reader_id: &'a mut ReaderId<ComponentEvent>,
+        subscriber: &'a mut ComponentSubscriber<T>,
     ) -> ComponentEventIterator<'a> {
         ComponentEventIterator::new(
             Pin::new(
@@ -542,28 +697,52 @@ impl World {
                     .read()
                     .unwrap(),
             ),
-            reader_id,
+            &mut subscriber.reader_id,
         )
     }
 
-    pub fn track<T: Component>(&mut self) -> ReaderId<ComponentEvent> {
-        self.channels
+    /// Subscribe to insertion/mutation/removal events for a specific component type.
+    ///
+    /// To read newly emitted events, you can use [`World::poll`](World::poll). Note
+    /// that for `track`, you need mutable access to the `World`, but `poll` only
+    /// needs immutable access.
+    pub fn track<T: Component>(&mut self) -> ComponentSubscriber<T> {
+        let reader_id = self
+            .channels
             .entry(TypeId::of::<T>())
             .or_default()
             .channel
             .get_mut()
             .unwrap()
-            .register_reader()
+            .register_reader();
+
+        ComponentSubscriber {
+            _marker: PhantomData,
+            reader_id,
+        }
     }
 
+    /// Retrieve a command buffer from the `World`'s internal pool. Buffers queued
+    /// through [`World::queue_buffer`](World::queue_buffer) will be returned to
+    /// this pool once flushed.
     pub fn get_buffer(&self) -> CommandBuffer {
         self.buffers.lock().unwrap().pop().unwrap_or_default()
     }
 
+    /// Asynchronously queue a command buffer to be run on the world the next time
+    /// [`World::flush_queue`](World::flush_queue) is called. When the queued buffer
+    /// is flushed, it will be returned to the `World`'s internal command buffer pool
+    /// and may be returned by subsequent calls to [`World::get_buffer`](World::get_buffer).
     pub fn queue_buffer(&self, buffer: CommandBuffer) {
         self.queued.lock().unwrap().push(buffer);
     }
 
+    /// Apply any queued command buffers to the `World` and return them to the pool
+    /// once drained.
+    ///
+    /// Queued command buffers will do nothing and will only accumulate and waste memory
+    /// if this is not called! It should be called in your main update function if you
+    /// use it.
     pub fn flush_queue(&mut self) -> Result<()> {
         let pool = self.buffers.get_mut().unwrap();
         let mut errors = Vec::new();

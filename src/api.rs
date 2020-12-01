@@ -62,8 +62,8 @@ impl EntityUserDataRegistry {
         lua: LuaContext<'lua>,
         entity: Entity,
     ) -> LuaResult<LuaTable<'lua>> {
-        let resources = lua.resources();
-        let world = resources.fetch::<World>();
+        let tmp = lua.fetch_one::<World>()?;
+        let world = tmp.borrow();
         let entity_ref = world.entity(entity).unwrap();
         let archetype = entity_ref.component_types();
 
@@ -149,18 +149,20 @@ impl LuaUserData for LuaEntityUserData {
         methods.add_meta_method(
             LuaMetaMethod::NewIndex,
             |lua, this, (k, v): (LuaString, _)| {
-                let resources = lua.resources();
-                let registry = resources.fetch::<EntityUserDataRegistry>();
-                let mut world = resources.fetch_mut::<World>();
+                let (registry, world) = lua.fetch::<(EntityUserDataRegistry, World)>()?;
                 let mut builder = EntityBuilder::new();
 
                 let s = k.to_str()?;
-                let bundler = match registry.named.get(s) {
-                    Some(comp) => &comp.bundler,
-                    None => return Err(format_err!("unknown component {}", s)).to_lua_err(),
-                };
+                let bundler = registry
+                    .borrow()
+                    .named
+                    .get(s)
+                    .map(|comp| comp.bundler.clone())
+                    .ok_or_else(|| anyhow!("unknown component {}", s))
+                    .to_lua_err()?;
                 bundler(lua, v, &mut builder)?;
                 world
+                    .borrow_mut()
                     .insert(Entity::from_bits(this.0), builder.build())
                     .to_lua_err()?;
 
@@ -169,8 +171,8 @@ impl LuaUserData for LuaEntityUserData {
         );
 
         methods.add_method("despawn", |lua, this, ()| {
-            lua.resources()
-                .fetch_mut::<World>()
+            lua.fetch_one::<World>()?
+                .borrow_mut()
                 .despawn(Entity::from(*this))
                 .to_lua_err()?;
             Ok(())
@@ -182,8 +184,8 @@ impl LuaUserData for LuaEntityUserData {
 
         methods.add_method("is_alive", |lua, this, ()| {
             Ok(lua
-                .resources()
-                .fetch::<World>()
+                .fetch_one::<World>()?
+                .borrow()
                 .contains(Entity::from(*this)))
         });
 
@@ -300,12 +302,11 @@ impl From<LuaEntity> for Entity {
 
 impl<'lua> ToLua<'lua> for LuaEntity {
     fn to_lua(self, lua: LuaContext<'lua>) -> LuaResult<LuaValue<'lua>> {
-        let resources = lua.resources();
-        let registry = resources.fetch::<EntityUserDataRegistry>();
+        let registry = lua.fetch_one::<EntityUserDataRegistry>()?;
 
         let ud = lua.create_userdata(LuaEntityUserData(self.0))?;
         let entity = Entity::from_bits(self.0);
-        let fields = registry.get_archetype(lua, entity)?;
+        let fields = registry.borrow().get_archetype(lua, entity)?;
 
         ud.set_user_value(fields)?;
         ud.to_lua(lua)
@@ -386,15 +387,15 @@ pub struct EntityTableAccessor(Entity);
 impl LuaUserData for EntityTableAccessor {
     fn add_methods<'lua, T: LuaUserDataMethods<'lua, Self>>(methods: &mut T) {
         methods.add_method("get", |lua, this, ()| {
-            let resources = lua.resources();
-            let world = resources.fetch::<World>();
+            let tmp = lua.fetch_one::<World>()?;
+            let world = tmp.borrow();
             let et = world.get::<EntityTable>(this.0).to_lua_err()?;
             lua.registry_value::<LuaValue>(&et.key)
         });
 
         methods.add_method("to_table", |lua, this, ()| {
-            let resources = lua.resources();
-            let world = resources.fetch::<World>();
+            let tmp = lua.fetch_one::<World>()?;
+            let world = tmp.borrow();
             let et = world.get::<EntityTable>(this.0).to_lua_err()?;
             lua.registry_value::<LuaTable>(&et.key)
         });
@@ -423,59 +424,65 @@ inventory::submit! {
 }
 
 pub fn spawn<'lua>(lua: LuaContext<'lua>, table: LuaTable<'lua>) -> LuaResult<LuaEntity> {
-    let resources = lua.resources();
-    let registry = resources.fetch::<EntityUserDataRegistry>();
-    let mut world = resources.fetch_mut::<World>();
+    let (registry, world) = lua.fetch::<(EntityUserDataRegistry, World)>()?;
     let mut builder = EntityBuilder::new();
 
     for pair in table.pairs::<LuaString, LuaValue<'lua>>() {
         let (k, v) = pair?;
         let s = k.to_str()?;
-        let bundler = match registry.named.get(s) {
-            Some(comp) => &comp.bundler,
-            None => return Err(format_err!("unknown component {}", s)).to_lua_err(),
-        };
+        let bundler = registry
+            .borrow()
+            .named
+            .get(s)
+            .map(|comp| comp.bundler.clone())
+            .ok_or_else(|| anyhow!("unknown component {}", s))
+            .to_lua_err()?;
         bundler(lua, v, &mut builder)?;
     }
 
-    Ok(LuaEntity::from(world.spawn(builder.build())))
+    let spawned = world.borrow_mut().spawn(builder.build());
+    Ok(LuaEntity::from(spawned))
 }
 
 pub fn insert<'lua>(
     lua: LuaContext<'lua>,
     (entity, table): (LuaEntity, LuaTable<'lua>),
 ) -> LuaResult<()> {
-    let resources = lua.resources();
-    let registry = resources.fetch::<EntityUserDataRegistry>();
-    let mut world = resources.fetch_mut::<World>();
+    let (registry, world) = lua.fetch::<(EntityUserDataRegistry, World)>()?;
     let mut builder = EntityBuilder::new();
 
     for pair in table.pairs::<LuaString, LuaValue<'lua>>() {
         let (k, v) = pair?;
         let s = k.to_str()?;
-        let bundler = match registry.named.get(s) {
-            Some(comp) => &comp.bundler,
-            None => return Err(format_err!("unknown component {}", s)).to_lua_err(),
-        };
+        let bundler = registry
+            .borrow()
+            .named
+            .get(s)
+            .map(|comp| comp.bundler.clone())
+            .ok_or_else(|| format_err!("unknown component {}", s))
+            .to_lua_err()?;
         bundler(lua, v, &mut builder)?;
     }
 
-    world.insert(entity.into(), builder.build()).to_lua_err()?;
+    world
+        .borrow_mut()
+        .insert(entity.into(), builder.build())
+        .to_lua_err()?;
 
     Ok(())
 }
 
 pub fn despawn<'lua>(lua: LuaContext<'lua>, entity: LuaEntity) -> LuaResult<Result<bool, String>> {
     Ok(lua
-        .resources()
-        .fetch_mut::<World>()
+        .fetch_one::<World>()?
+        .borrow_mut()
         .despawn(entity.into())
         .map(|_| true)
         .map_err(|err| err.to_string()))
 }
 
 pub fn clear<'lua>(lua: LuaContext<'lua>, _: ()) -> LuaResult<()> {
-    lua.resources().fetch_mut::<World>().clear();
+    lua.resources().fetch_one::<World>()?.borrow_mut().clear();
     Ok(())
 }
 
@@ -508,14 +515,13 @@ pub fn require<'lua>(lua: LuaContext<'lua>, module: String) -> LuaResult<LuaValu
     if let Some(module) = loaded_modules.get::<_, Option<LuaValue>>(module.as_str())? {
         Ok(module)
     } else {
-        let resources = lua.resources();
-        let mut fs = resources.fetch_mut::<Filesystem>();
+        let fs = lua.fetch_one::<Filesystem>()?;
         let package_path = package.get::<_, LuaString>("path")?;
         let segments = package_path.to_str()?.split(":");
 
         for segment in segments {
             let path = segment.replace('?', &module);
-            let mut file = match fs.open(&path) {
+            let mut file = match fs.borrow_mut().open(&path) {
                 Ok(file) => file,
                 Err(_) => continue,
             };
