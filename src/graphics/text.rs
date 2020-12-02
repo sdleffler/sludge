@@ -423,6 +423,12 @@ impl TextLayout {
         }
     }
 
+    pub fn clear(&mut self) {
+        self.chars.clear();
+        self.words.clear();
+        self.cursor = Point2::new(0., 0.);
+    }
+
     pub fn push_str<T>(&mut self, text: &str, colors: T)
     where
         T: IntoIterator<Item = Color>,
