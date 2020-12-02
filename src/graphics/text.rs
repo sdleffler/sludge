@@ -335,7 +335,7 @@ impl Text {
         text
     }
 
-    fn apply_layout(&mut self, layout: &TextLayout) {
+    pub fn apply_layout(&mut self, layout: &TextLayout) {
         let font_atlas = layout.font_atlas.load();
         let question_mark = &font_atlas.font_map[&'?'];
         self.batch.clear();
