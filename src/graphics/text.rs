@@ -306,17 +306,13 @@ pub struct Text {
 }
 
 impl Text {
-    pub fn new(ctx: &mut Graphics, texture: impl Into<Cached<Texture>>) -> Self {
-        Self::with_capacity(ctx, DEFAULT_TEXT_BUFFER_SIZE, texture)
+    pub fn new(ctx: &mut Graphics) -> Self {
+        Self::with_capacity(ctx, DEFAULT_TEXT_BUFFER_SIZE)
     }
 
-    pub fn with_capacity(
-        ctx: &mut Graphics,
-        capacity: usize,
-        texture: impl Into<Cached<Texture>>,
-    ) -> Self {
+    pub fn with_capacity(ctx: &mut Graphics, capacity: usize) -> Self {
         Text {
-            batch: SpriteBatch::with_capacity(ctx, texture, capacity),
+            batch: SpriteBatch::with_capacity(ctx, ctx.null_texture.clone(), capacity),
         }
     }
 
@@ -326,11 +322,7 @@ impl Text {
             Some(w) => w.end,
             None => 0,
         };
-        let mut text = Text::with_capacity(
-            gfx,
-            sprite_batch_size,
-            layout.font_atlas.load().font_texture.clone(),
-        );
+        let mut text = Text::with_capacity(gfx, sprite_batch_size);
         text.apply_layout(layout);
         text
     }
