@@ -62,6 +62,12 @@ impl MainState {
             std::iter::repeat(Color::WHITE),
             400.,
         );
+
+        text_layout.push_wrapping_str(
+            "Now I'm going to push another string but this one will only have half the width of the last text box",
+            std::iter::repeat(Color::GREEN),
+            200.,
+        );
         let text = Text::from_layout(&text_layout, &mut *gfx.borrow_mut());
         Ok(MainState { space, text })
     }

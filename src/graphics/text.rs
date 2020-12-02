@@ -307,13 +307,13 @@ pub struct Text {
 
 impl Text {
     pub fn new(ctx: &mut Graphics, texture: impl Into<Cached<Texture>>) -> Self {
-        Self::new_with_capacity(ctx, DEFAULT_TEXT_BUFFER_SIZE, texture)
+        Self::with_capacity(ctx, DEFAULT_TEXT_BUFFER_SIZE, texture)
     }
 
-    pub fn new_with_capacity<T: Into<Cached<Texture>>>(
+    pub fn with_capacity(
         ctx: &mut Graphics,
         capacity: usize,
-        texture: T,
+        texture: impl Into<Cached<Texture>>,
     ) -> Self {
         Text {
             batch: SpriteBatch::with_capacity(ctx, texture, capacity),
@@ -321,7 +321,16 @@ impl Text {
     }
 
     pub fn from_layout(layout: &TextLayout, gfx: &mut Graphics) -> Text {
-        let mut text = Text::new(gfx, layout.font_atlas.load().font_texture.clone());
+        // The last word's end should be pointing to the last char
+        let sprite_batch_size = match layout.words.last() {
+            Some(w) => w.end,
+            None => 0,
+        };
+        let mut text = Text::with_capacity(
+            gfx,
+            sprite_batch_size,
+            layout.font_atlas.load().font_texture.clone(),
+        );
         text.apply_layout(layout);
         text
     }
@@ -330,8 +339,7 @@ impl Text {
         let font_atlas = layout.font_atlas.load();
         let question_mark = &font_atlas.font_map[&'?'];
         self.batch.clear();
-        self.batch
-            .set_texture(font_atlas.font_texture.clone());
+        self.batch.set_texture(font_atlas.font_texture.clone());
         for layout_c in layout.chars.iter() {
             let c_info = font_atlas
                 .font_map
@@ -416,7 +424,9 @@ impl TextLayout {
     }
 
     pub fn push_str<T>(&mut self, text: &str, colors: T)
-    where T: IntoIterator<Item = Color>, T::IntoIter: Clone,
+    where
+        T: IntoIterator<Item = Color>,
+        T::IntoIter: Clone,
     {
         let color_iter = colors.into_iter();
         if let Some(upper_bound) = color_iter.size_hint().1 {
@@ -438,10 +448,7 @@ impl TextLayout {
                 self.cursor.x += self.space_width;
                 continue;
             }
-            let c_info = font_atlas
-                .font_map
-                .get(&c)
-                .unwrap_or(question_mark);
+            let c_info = font_atlas.font_map.get(&c).unwrap_or(question_mark);
             self.chars.push(LayoutCharInfo {
                 coords: Box2::new(
                     self.cursor.x + c_info.horizontal_offset,
@@ -454,16 +461,17 @@ impl TextLayout {
             });
             self.cursor.x += c_info.advance_width;
         }
-        assert_eq!(chars.next(), None, "Ended up with less colors than chars! Did not push entire new string");
+        assert_eq!(
+            chars.next(),
+            None,
+            "Ended up with less colors than chars! Did not push entire new string"
+        );
     }
 
-    pub fn push_wrapping_str<T>(
-        &mut self,
-        text: &str,
-        colors: T,
-        line_width: f32,
-    )
-    where T: IntoIterator<Item = Color>, T::IntoIter: Clone,
+    pub fn push_wrapping_str<T>(&mut self, text: &str, colors: T, line_width: f32)
+    where
+        T: IntoIterator<Item = Color>,
+        T::IntoIter: Clone,
     {
         let font_atlas = self.font_atlas.load();
         let question_mark = font_atlas.font_map[&'?'];
@@ -488,12 +496,13 @@ impl TextLayout {
             }
 
             for _ in 0..(word.end - start) {
-                let c = char_iter.next().expect("Somehow got more words than chars that existed!");
-                let color = colors_iter.next().expect("Should've gotten more colors, but didn't! Did you pass in enough colors?");
-                let c_info = font_atlas
-                    .font_map
-                    .get(&c)
-                    .unwrap_or(&question_mark);
+                let c = char_iter
+                    .next()
+                    .expect("Somehow got more words than chars that existed!");
+                let color = colors_iter.next().expect(
+                    "Should've gotten more colors, but didn't! Did you pass in enough colors?",
+                );
+                let c_info = font_atlas.font_map.get(&c).unwrap_or(&question_mark);
                 self.chars.push(LayoutCharInfo {
                     coords: Box2::new(
                         self.cursor.x + c_info.horizontal_offset,
@@ -514,7 +523,6 @@ impl TextLayout {
             self.cursor.x += self.space_width;
         }
     }
-
 }
 
 impl Asset for Font {
