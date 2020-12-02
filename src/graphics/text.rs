@@ -389,9 +389,9 @@ impl Word {
 
 #[derive(Debug)]
 pub struct LayoutCharInfo {
-    coords: Box2<f32>,
-    color: Color,
-    c: char,
+    pub coords: Box2<f32>,
+    pub color: Color,
+    pub c: char,
 }
 
 pub struct TextLayout {
@@ -413,6 +413,10 @@ impl TextLayout {
             cursor: Point2::new(0., 0.),
             space_width: space_width,
         }
+    }
+
+    pub fn chars(&self) -> &[LayoutCharInfo] {
+        &self.chars
     }
 
     pub fn clear(&mut self) {
