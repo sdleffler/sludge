@@ -9,7 +9,6 @@ use ::{
         assets::DefaultCache, conf::Conf, dispatcher::Dispatcher, event::EventHandler,
         filesystem::Filesystem, graphics::*, prelude::*,
     },
-    sludge_2d::math::*,
     sludge_danmaku::*,
     std::{env, path::PathBuf},
 };
@@ -35,14 +34,10 @@ impl Bullet for EasedBullet {
     type Bundled = Self;
 
     fn to_bundled(&self, parameters: &Parameters) -> Self::Bundled {
-        let position = parameters.apply_to_position(&self.projectile.position);
+        let position = parameters.apply_to_position(self.projectile.position());
 
         Self {
-            projectile: Projectile {
-                position,
-                velocity: Velocity2::zero(),
-                acceleration: Velocity2::zero(),
-            },
+            projectile: Projectile::origin(),
             motion: ParametricMotion::lerp_expo_out(
                 false,
                 parameters.duration,
@@ -66,16 +61,13 @@ impl Bullet for TestBullet {
     type Bundled = Self;
 
     fn to_bundled(&self, parameters: &Parameters) -> Self::Bundled {
-        let position = parameters.apply_to_position(&self.projectile.position);
-        let velocity = parameters.apply_to_velocity(&self.projectile.velocity);
-        let acceleration = parameters.apply_to_acceleration(&self.projectile.acceleration);
+        let position = parameters.apply_to_position(self.projectile.position());
+        let velocity = parameters.apply_to_velocity(&self.motion.velocity);
+        let acceleration = parameters.apply_to_acceleration(&self.motion.acceleration);
 
         Self {
-            projectile: Projectile {
-                position,
-                velocity,
-                acceleration,
-            },
+            projectile: Projectile::new(position),
+            motion: QuadraticMotion::new(velocity, acceleration),
             ..*self
         }
     }
@@ -83,12 +75,8 @@ impl Bullet for TestBullet {
 
 inventory::submit! {
     BulletType::new::<TestBullet>("TestBullet", TestBullet {
-        projectile: Projectile {
-            position: Isometry2::identity(),
-            velocity: Velocity2::zero(),
-            acceleration: Velocity2::zero(),
-        },
-        motion: QuadraticMotion,
+        projectile: Projectile::origin(),
+        motion: QuadraticMotion::zero(),
         sprite_idx: SpriteIndex { idx: None },
         collision: Collision::Circle { radius: 1.0 },
     })
@@ -96,11 +84,7 @@ inventory::submit! {
 
 inventory::submit! {
     BulletType::new::<EasedBullet>("EasedBullet", EasedBullet {
-        projectile: Projectile {
-            position: Isometry2::identity(),
-            velocity: Velocity2::zero(),
-            acceleration: Velocity2::zero(),
-        },
+        projectile: Projectile::origin(),
         motion: ParametricMotion::lerp_expo_out(
             false,
             5.,
@@ -205,7 +189,7 @@ impl EventHandler for MainState {
             .query::<(&Projectile, &mut SpriteIndex)>()
             .iter()
         {
-            let param = InstanceParam::default().translate2(proj.position.translation.vector);
+            let param = InstanceParam::default().translate2(proj.position().translation.vector);
             match sprite_index.idx {
                 Some(idx) => {
                     batch[idx] = param;

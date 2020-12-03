@@ -56,9 +56,41 @@ impl<R: RngCore> RngCore for SharedRng<R> {
 
 #[derive(Debug, Clone, Copy, SimpleComponent)]
 pub struct Projectile {
-    pub position: Isometry2<f32>,
-    pub velocity: Velocity2<f32>,
-    pub acceleration: Velocity2<f32>,
+    position: Isometry2<f32>,
+    next_position: Isometry2<f32>,
+    origin: Isometry2<f32>,
+}
+
+impl Default for Projectile {
+    fn default() -> Self {
+        Self::origin()
+    }
+}
+
+impl Projectile {
+    pub fn origin() -> Self {
+        Self::new(Isometry2::identity())
+    }
+
+    pub fn new(origin: Isometry2<f32>) -> Self {
+        Self {
+            position: origin,
+            next_position: origin,
+            origin,
+        }
+    }
+
+    pub fn position(&self) -> &Isometry2<f32> {
+        &self.position
+    }
+
+    pub fn next_position(&self) -> &Isometry2<f32> {
+        &self.next_position
+    }
+
+    pub fn next_position_mut(&mut self) -> &mut Isometry2<f32> {
+        &mut self.next_position
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -72,22 +104,6 @@ impl LuaUserData for ProjectileAccessor {
             let projectile = world.get::<Projectile>(this.0).to_lua_err()?;
             let v = projectile.position.translation.vector;
             Ok((v.x, v.y, projectile.position.rotation.angle()))
-        });
-
-        methods.add_method("velocity", |lua, this, ()| {
-            let tmp = lua.fetch_one::<World>()?;
-            let world = tmp.borrow();
-            let projectile = world.get::<Projectile>(this.0).to_lua_err()?;
-            let v = projectile.velocity.linear;
-            Ok((v.x, v.y, projectile.velocity.angular))
-        });
-
-        methods.add_method("acceleration", |lua, this, ()| {
-            let tmp = lua.fetch_one::<World>()?;
-            let world = tmp.borrow();
-            let projectile = world.get::<Projectile>(this.0).to_lua_err()?;
-            let v = projectile.acceleration.linear;
-            Ok((v.x, v.y, projectile.acceleration.angular))
         });
     }
 }
@@ -111,15 +127,90 @@ inventory::submit! {
 }
 
 #[derive(Debug, Clone, Copy, SimpleComponent)]
-pub struct QuadraticMotion;
+pub struct QuadraticMotion {
+    pub integrated: Isometry2<f32>,
+    pub velocity: Velocity2<f32>,
+    pub acceleration: Velocity2<f32>,
+}
+
+impl QuadraticMotion {
+    pub fn zero() -> Self {
+        Self::new(Velocity2::zero(), Velocity2::zero())
+    }
+
+    pub fn with_velocity(velocity: Velocity2<f32>) -> Self {
+        Self::new(velocity, Velocity2::zero())
+    }
+
+    pub fn new(velocity: Velocity2<f32>, acceleration: Velocity2<f32>) -> Self {
+        Self {
+            integrated: Isometry2::identity(),
+            velocity,
+            acceleration,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct QuadraticMotionAccessor(Entity);
+
+impl LuaUserData for QuadraticMotionAccessor {
+    fn add_methods<'lua, T: LuaUserDataMethods<'lua, Self>>(methods: &mut T) {
+        methods.add_method("integrateed", |lua, this, ()| {
+            let tmp = lua.fetch_one::<World>()?;
+            let world = tmp.borrow();
+            let projectile = world.get::<QuadraticMotion>(this.0).to_lua_err()?;
+            let v = projectile.integrated.translation.vector;
+            Ok((v.x, v.y, projectile.integrated.rotation.angle()))
+        });
+
+        methods.add_method("velocity", |lua, this, ()| {
+            let tmp = lua.fetch_one::<World>()?;
+            let world = tmp.borrow();
+            let projectile = world.get::<QuadraticMotion>(this.0).to_lua_err()?;
+            let v = projectile.velocity.linear;
+            Ok((v.x, v.y, projectile.velocity.angular))
+        });
+
+        methods.add_method("acceleration", |lua, this, ()| {
+            let tmp = lua.fetch_one::<World>()?;
+            let world = tmp.borrow();
+            let projectile = world.get::<QuadraticMotion>(this.0).to_lua_err()?;
+            let v = projectile.acceleration.linear;
+            Ok((v.x, v.y, projectile.acceleration.angular))
+        });
+    }
+}
+
+impl LuaComponentInterface for QuadraticMotion {
+    fn accessor<'lua>(lua: LuaContext<'lua>, entity: Entity) -> LuaResult<LuaValue<'lua>> {
+        QuadraticMotionAccessor(entity).to_lua(lua)
+    }
+
+    fn bundler<'lua>(
+        _lua: LuaContext<'lua>,
+        _args: LuaValue<'lua>,
+        _builder: &mut EntityBuilder,
+    ) -> LuaResult<()> {
+        todo!()
+    }
+}
+
+inventory::submit! {
+    LuaComponent::new::<QuadraticMotion>("Quadratic")
+}
 
 #[derive(Debug, Clone, Copy, SimpleComponent)]
-pub struct DirectionalMotion;
+pub struct DirectionalMotion {
+    pub integrated: Isometry2<f32>,
+    pub velocity: Velocity2<f32>,
+    pub acceleration: Velocity2<f32>,
+}
 
 pub trait ParametricMotionFunction: Send + Sync {
     fn set_endpoints(&mut self, start: &Isometry2<f32>, end: &Isometry2<f32>);
     fn transform_by(&mut self, tx: &Isometry2<f32>);
-    fn calculate(&self, t: f32) -> Option<Isometry2<f32>>;
+    fn calculate(&self, t: f32) -> Isometry2<f32>;
 }
 
 trait PmfClone: ParametricMotionFunction {
@@ -174,17 +265,13 @@ impl ParametricMotionFunction for ParametricEased {
         self.displacement = self.displacement.transformed(tx);
     }
 
-    fn calculate(&self, t: f32) -> Option<Isometry2<f32>> {
-        if t < self.duration {
-            let eased = (self.easer)(t, 0., 1., self.duration);
-            let mut interpolated = self.origin;
-            let integrated = self.displacement.integrate(eased);
-            interpolated.translation *= integrated.translation;
-            interpolated.rotation *= integrated.rotation;
-            Some(interpolated)
-        } else {
-            None
-        }
+    fn calculate(&self, t: f32) -> Isometry2<f32> {
+        let eased = (self.easer)(t, 0., 1., self.duration);
+        let mut interpolated = self.origin;
+        let integrated = self.displacement.integrate(eased);
+        interpolated.translation *= integrated.translation;
+        interpolated.rotation *= integrated.rotation;
+        interpolated
     }
 }
 
@@ -256,7 +343,7 @@ impl ParametricMotion {
         }
     }
 
-    pub fn update(&mut self, dt: f32) -> Option<Isometry2<f32>> {
+    pub fn update(&mut self, dt: f32) -> Isometry2<f32> {
         let calculated = self.function.calculate(self.time);
         self.time += dt;
         calculated
@@ -338,12 +425,12 @@ impl QuadraticShot {
 
     pub fn new(at: Isometry2<f32>, vel: Velocity2<f32>, acc: Velocity2<f32>) -> Self {
         QuadraticShot {
-            projectile: Projectile {
-                position: at,
+            projectile: Projectile::new(at),
+            motion: QuadraticMotion {
+                integrated: Isometry2::identity(),
                 velocity: vel,
                 acceleration: acc,
             },
-            motion: QuadraticMotion,
         }
     }
 }
@@ -367,12 +454,12 @@ impl Shot {
 
     pub fn quadratic(at: Isometry2<f32>, vel: Velocity2<f32>, acc: Velocity2<f32>) -> Self {
         Self::Quadratic(QuadraticShot {
-            projectile: Projectile {
-                position: at,
+            projectile: Projectile::new(at),
+            motion: QuadraticMotion {
+                integrated: Isometry2::identity(),
                 velocity: vel,
                 acceleration: acc,
             },
-            motion: QuadraticMotion,
         })
     }
 }
@@ -1327,52 +1414,66 @@ impl Danmaku {
     }
 
     pub fn update(&mut self, world: &mut World, dt: f32) {
-        for (_e, (mut proj, maximum)) in world
-            .query::<(&mut Projectile, Option<&MaximumVelocity>)>()
-            .with::<QuadraticMotion>()
+        for (_e, (mut proj, mut quadratic, maximum)) in world
+            .query::<(
+                &mut Projectile,
+                &mut QuadraticMotion,
+                Option<&MaximumVelocity>,
+            )>()
             .iter()
         {
-            let proj = &mut *proj;
-            proj.velocity += proj.acceleration * dt;
+            let quadratic = &mut *quadratic;
+            quadratic.velocity += quadratic.acceleration * dt;
 
             if let Some(max_vel) = maximum {
-                let cur_vel = proj.velocity.linear.norm();
+                let cur_vel = quadratic.velocity.linear.norm();
                 if cur_vel > max_vel.linear {
-                    proj.velocity.linear *= max_vel.linear / cur_vel;
+                    quadratic.velocity.linear *= max_vel.linear / cur_vel;
                 }
 
-                let cur_ang = proj.velocity.angular.abs();
+                let cur_ang = quadratic.velocity.angular.abs();
                 if cur_ang > max_vel.angular {
-                    proj.velocity.angular *= max_vel.angular / cur_ang;
+                    quadratic.velocity.angular *= max_vel.angular / cur_ang;
                 }
             }
 
-            let integrated = proj.velocity.integrate(dt);
-            proj.position.translation.vector += integrated.translation.vector;
-            proj.position.rotation *= integrated.rotation;
+            let delta = quadratic.velocity.integrate(dt);
+            quadratic.integrated.translation *= delta.translation;
+            quadratic.integrated.rotation *= delta.rotation;
+
+            let proj = &mut *proj;
+            proj.next_position.translation *= quadratic.integrated.translation;
+            proj.next_position.rotation *= quadratic.integrated.rotation;
         }
 
-        for (_e, (mut proj, maximum)) in world
-            .query::<(&mut Projectile, Option<&MaximumVelocity>)>()
-            .with::<DirectionalMotion>()
+        for (_e, (mut proj, mut directional, maximum)) in world
+            .query::<(
+                &mut Projectile,
+                &mut DirectionalMotion,
+                Option<&MaximumVelocity>,
+            )>()
             .iter()
         {
-            let proj = &mut *proj;
-            proj.velocity += proj.acceleration * dt;
+            let directional = &mut *directional;
+            directional.velocity += directional.acceleration * dt;
 
             if let Some(max_vel) = maximum {
-                let cur_vel = proj.velocity.linear.norm();
+                let cur_vel = directional.velocity.linear.norm();
                 if cur_vel > max_vel.linear {
-                    proj.velocity.linear *= max_vel.linear / cur_vel;
+                    directional.velocity.linear *= max_vel.linear / cur_vel;
                 }
 
-                let cur_ang = proj.velocity.angular.abs();
+                let cur_ang = directional.velocity.angular.abs();
                 if cur_ang > max_vel.angular {
-                    proj.velocity.angular *= max_vel.angular / cur_ang;
+                    directional.velocity.angular *= max_vel.angular / cur_ang;
                 }
             }
 
-            proj.position *= proj.velocity.integrate(dt);
+            directional.integrated *= directional.velocity.integrate(dt);
+
+            let proj = &mut *proj;
+            proj.next_position.translation *= directional.integrated.translation;
+            proj.next_position.rotation *= directional.integrated.rotation;
         }
 
         for (e, (mut proj, mut motion)) in world
@@ -1380,11 +1481,19 @@ impl Danmaku {
             .iter()
         {
             let (proj, motion) = (&mut *proj, &mut *motion);
-            if let Some(iso) = motion.update(dt) {
-                proj.position = iso;
-            } else if motion.despawn_after_duration {
+            let iso = motion.update(dt);
+            proj.next_position.translation *= iso.translation;
+            proj.next_position.rotation *= iso.rotation;
+
+            if motion.despawn_after_duration {
                 self.to_despawn.add(e.id());
             }
+        }
+
+        for (_e, (mut proj,)) in world.query::<(&mut Projectile,)>().iter() {
+            let proj = &mut *proj;
+            proj.position = proj.next_position;
+            proj.next_position = proj.origin;
         }
 
         if let Some(bounds) = self.bounds {
@@ -1438,16 +1547,12 @@ impl Bullet for QuadraticShot {
 
     fn to_bundled(&self, parameters: &Parameters) -> Self::Bundled {
         let position = parameters.apply_to_position(&self.projectile.position);
-        let velocity = parameters.apply_to_velocity(&self.projectile.velocity);
-        let acceleration = parameters.apply_to_acceleration(&self.projectile.acceleration);
+        let velocity = parameters.apply_to_velocity(&self.motion.velocity);
+        let acceleration = parameters.apply_to_acceleration(&self.motion.acceleration);
 
         Self {
-            projectile: Projectile {
-                position,
-                velocity,
-                acceleration,
-            },
-            motion: QuadraticMotion,
+            projectile: Projectile::new(position),
+            motion: QuadraticMotion::new(velocity, acceleration),
         }
     }
 }
@@ -1457,16 +1562,16 @@ impl Bullet for DirectionalShot {
 
     fn to_bundled(&self, parameters: &Parameters) -> Self::Bundled {
         let position = parameters.apply_to_position(&self.projectile.position);
-        let velocity = parameters.apply_to_velocity(&self.projectile.velocity);
-        let acceleration = parameters.apply_to_acceleration(&self.projectile.acceleration);
+        let velocity = parameters.apply_to_velocity(&self.motion.velocity);
+        let acceleration = parameters.apply_to_acceleration(&self.motion.acceleration);
 
         Self {
-            projectile: Projectile {
-                position,
+            projectile: Projectile::new(position),
+            motion: DirectionalMotion {
+                integrated: Isometry2::identity(),
                 velocity,
                 acceleration,
             },
-            motion: DirectionalMotion,
         }
     }
 }
