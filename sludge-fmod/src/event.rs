@@ -129,12 +129,22 @@ impl From<StopMode> for FMOD_STUDIO_STOP_MODE {
 impl<'lua> FromLua<'lua> for StopMode {
     fn from_lua(lua_value: LuaValue<'lua>, lua: LuaContext<'lua>) -> LuaResult<Self> {
         let lua_str = <LuaString>::from_lua(lua_value, lua)
-            .with_context(|| anyhow!("error while parsing StopMode from Lua"))
+            .with_context(|| {
+                anyhow!(
+                    "error while parsing StopMode from Lua \
+                    (expected \"immediate\" or \"allow_fadeout\")"
+                )
+            })
             .to_lua_err()?;
         match lua_str.to_str()? {
             "immediate" => Ok(StopMode::Immediate),
             "allow_fadeout" => Ok(StopMode::AllowFadeout),
-            s => Err(anyhow!("bad stop mode {}", s)).to_lua_err(),
+            s => Err(anyhow!(
+                "bad StopMode {} \
+                (expected \"immediate\" or \"allow_fadeout\")",
+                s
+            ))
+            .to_lua_err(),
         }
     }
 }

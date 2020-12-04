@@ -7,11 +7,25 @@ use {
 
 pub const DEFAULT_CHUNK_SIZE: u16 = 64;
 
-fn to_grid_indices(grid_size: f32, aabb: &Box2<f32>) -> impl Iterator<Item = (i32, i32)> {
+fn to_grid_indices(grid_size: f32, aabb: &Box2<f32>) -> impl Iterator<Item = (i32, i32)> + Clone {
     let x_start = (aabb.mins.x / grid_size).floor() as i32;
     let x_end = (aabb.maxs.x / grid_size).ceil() as i32;
     let y_start = (aabb.mins.y / grid_size).floor() as i32;
     let y_end = (aabb.maxs.y / grid_size).ceil() as i32;
+
+    (x_start..x_end).flat_map(move |i| (y_start..y_end).map(move |j| (i, j)))
+}
+
+fn to_grid_chunks(
+    grid_size: f32,
+    chunk_size: u16,
+    aabb: &Box2<f32>,
+) -> impl Iterator<Item = (i32, i32)> + Clone {
+    let chunk_size = chunk_size as i32;
+    let x_start = ((aabb.mins.x / grid_size).floor() as i32).div_euclid(chunk_size);
+    let x_end = ((aabb.maxs.x / grid_size).ceil() as i32).div_euclid(chunk_size);
+    let y_start = ((aabb.mins.y / grid_size).floor() as i32).div_euclid(chunk_size);
+    let y_end = ((aabb.maxs.y / grid_size).ceil() as i32).div_euclid(chunk_size);
 
     (x_start..x_end).flat_map(move |i| (y_start..y_end).map(move |j| (i, j)))
 }
@@ -183,6 +197,28 @@ impl ChunkedBitGrid {
                 .iter()
                 .map(move |subindex| from_chunk_and_subindices(chunk_size, chunk_coords, subindex))
         })
+    }
+
+    pub fn union_region<'a>(
+        &mut self,
+        others: impl IntoIterator<Item = &'a ChunkedBitGrid>,
+        aabb: &Box2<f32>,
+    ) {
+        let affected_chunks = to_grid_chunks(self.scale, self.chunk_size, aabb);
+        for other_grid in others {
+            for coord in affected_chunks.clone() {
+                if let Some(other_chunk) = other_grid.chunks.get(&coord) {
+                    match self.chunks.entry(coord) {
+                        Entry::Occupied(mut chunk) => {
+                            *chunk.get_mut() |= other_chunk;
+                        }
+                        Entry::Vacant(empty) => {
+                            empty.insert(other_chunk.clone());
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

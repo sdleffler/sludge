@@ -1,7 +1,7 @@
 use crate::{
     ecs::{Component, Entity, EntityBuilder, World},
     filesystem::Filesystem,
-    Resources, SimpleComponent, SludgeLuaContextExt, SludgeResultExt,
+    Resources, Scheduler, SimpleComponent, SludgeLuaContextExt, SludgeResultExt,
 };
 use {
     anyhow::*,
@@ -487,6 +487,10 @@ pub fn clear<'lua>(lua: LuaContext<'lua>, _: ()) -> LuaResult<()> {
     Ok(())
 }
 
+pub fn new_scheduler<'lua>(lua: LuaContext<'lua>, _: ()) -> LuaResult<Scheduler> {
+    Scheduler::new(lua).to_lua_err()
+}
+
 inventory::submit! {
     Module::parse("sludge", |lua| {
         let table = lua.create_table_from(vec![
@@ -494,6 +498,7 @@ inventory::submit! {
             ("insert", lua.create_function(insert)?),
             ("despawn", lua.create_function(despawn)?),
             ("clear", lua.create_function(clear)?),
+            ("new_scheduler", lua.create_function(new_scheduler)?),
         ])?;
 
         Ok(LuaValue::Table(table))

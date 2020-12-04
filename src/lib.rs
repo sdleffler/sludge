@@ -1013,3 +1013,52 @@ impl Scheduler {
         Ok(())
     }
 }
+
+impl LuaUserData for Scheduler {
+    fn add_methods<'lua, T: LuaUserDataMethods<'lua, Self>>(methods: &mut T) {
+        methods.add_method("spawn", |lua, this, task: LuaValue| {
+            this.queue().spawn(lua, task).to_lua_err()
+        });
+
+        methods.add_method(
+            "broadcast",
+            |lua, this, (event_name, args): (LuaString, LuaMultiValue)| {
+                this.queue()
+                    .broadcast(lua, event_name.to_str()?, args)
+                    .to_lua_err()
+            },
+        );
+
+        methods.add_method(
+            "notify",
+            |lua, this, (thread, args): (LuaThread, LuaMultiValue)| {
+                this.queue().notify(lua, thread, args).to_lua_err()
+            },
+        );
+
+        methods.add_method_mut("update", |lua, this, ()| this.update(lua, 1.).to_lua_err());
+        methods.add_method("queue", |_lua, this, ()| Ok(this.queue().clone()));
+    }
+}
+
+impl LuaUserData for SchedulerQueue {
+    fn add_methods<'lua, T: LuaUserDataMethods<'lua, Self>>(methods: &mut T) {
+        methods.add_method("spawn", |lua, this, task: LuaValue| {
+            this.spawn(lua, task).to_lua_err()
+        });
+
+        methods.add_method(
+            "broadcast",
+            |lua, this, (event_name, args): (LuaString, LuaMultiValue)| {
+                this.broadcast(lua, event_name.to_str()?, args).to_lua_err()
+            },
+        );
+
+        methods.add_method(
+            "notify",
+            |lua, this, (thread, args): (LuaThread, LuaMultiValue)| {
+                this.notify(lua, thread, args).to_lua_err()
+            },
+        );
+    }
+}
