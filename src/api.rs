@@ -696,5 +696,9 @@ pub fn load<'lua>(lua: LuaContext<'lua>) -> Result<()> {
             .eval::<LuaFunction>()?,
     )?;
 
+    lua.load(include_str!("api/lua/prelude.lua"))
+        .set_name("prelude")?
+        .exec()?;
+
     Ok(())
 }

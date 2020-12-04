@@ -113,6 +113,24 @@ impl LuaUserData for PositionAccessor {
             }
         });
 
+        methods.add_meta_method(
+            LuaMetaMethod::NewIndex,
+            |lua, this, (key, value): (LuaString, f32)| {
+                let tmp = lua.fetch_one::<World>()?;
+                let world = tmp.borrow();
+                let pos = &mut *world.get_mut::<Position>(this.0).to_lua_err()?;
+                match key.to_str()? {
+                    "x" => pos.translation.vector.x = value,
+                    "y" => pos.translation.vector.y = value,
+                    "angle" => pos.rotation = UnitComplex::new(value),
+                    other => {
+                        return Err(anyhow!("no such field {} for Position", other).to_lua_err())
+                    }
+                }
+                Ok(())
+            },
+        );
+
         // Separate method from index because index cannot return multiple
         // values.
         methods.add_method("coords", |lua, this, ()| {
@@ -238,6 +256,24 @@ impl LuaUserData for VelocityAccessor {
                 _ => LuaValue::Nil.to_lua(lua),
             }
         });
+
+        methods.add_meta_method(
+            LuaMetaMethod::Index,
+            |lua, this, (key, value): (LuaString, f32)| {
+                let tmp = lua.fetch_one::<World>()?;
+                let world = tmp.borrow();
+                let velocity = &mut *world.get_mut::<Velocity>(this.0).to_lua_err()?;
+                match key.to_str()? {
+                    "x" => velocity.linear.x = value,
+                    "y" => velocity.linear.y = value,
+                    "angular" => velocity.angular = value,
+                    other => {
+                        return Err(anyhow!("no such field {} for Velocity", other).to_lua_err())
+                    }
+                }
+                Ok(())
+            },
+        );
 
         methods.add_method("linear", |lua, this, ()| {
             let world = lua.fetch_one::<World>()?;

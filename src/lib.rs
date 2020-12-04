@@ -123,7 +123,7 @@ impl<T, E: fmt::Debug> SludgeResultExt for Result<T, E> {
         E: fmt::Display,
     {
         if let Err(ref e) = &self {
-            log::log!(target: target, level, "{:#?}", e);
+            log::log!(target: target, level, "{:?}", e);
         }
 
         self
@@ -870,9 +870,7 @@ impl Scheduler {
                         args_unpacked.and_then(|xs| thread.resume::<_, LuaMultiValue>(xs))
                     }
                     Wakeup::Notify { args: None, .. } => thread.resume::<_, LuaMultiValue>(()),
-                    Wakeup::Timed { scheduled_for, .. } => {
-                        thread.resume::<_, LuaMultiValue>(*scheduled_for)
-                    }
+                    Wakeup::Timed { .. } => thread.resume::<_, LuaMultiValue>(()),
                     Wakeup::Broadcast {
                         name,
                         args: Some(args),
