@@ -96,8 +96,32 @@ pub fn record_scheduler_table<'lua>(
     for wakeup in scheduler.queue.iter() {
         let wakeup_table = lua.create_table()?;
         match wakeup {
+            Wakeup::Call { thread: i, args } => {
+                wakeup_table.set("type", "call")?;
+                wakeup_table.set("thread", threads[i].clone())?;
+
+                if let Some(args_i) = *args {
+                    let tmp = scheduler.event_args[args_i]
+                        .iter()
+                        .map(|k| lua.registry_value::<LuaValue>(k))
+                        .collect::<LuaResult<Vec<_>>>()?;
+                    wakeup_table.set("args", tmp)?;
+                }
+            }
             Wakeup::Notify { thread: i, args } => {
-                wakeup_table.set("type", "immediate")?;
+                wakeup_table.set("type", "notify")?;
+                wakeup_table.set("thread", threads[i].clone())?;
+
+                if let Some(args_i) = *args {
+                    let tmp = scheduler.event_args[args_i]
+                        .iter()
+                        .map(|k| lua.registry_value::<LuaValue>(k))
+                        .collect::<LuaResult<Vec<_>>>()?;
+                    wakeup_table.set("args", tmp)?;
+                }
+            }
+            Wakeup::Kill { thread: i, args } => {
+                wakeup_table.set("type", "kill")?;
                 wakeup_table.set("thread", threads[i].clone())?;
 
                 if let Some(args_i) = *args {
@@ -164,7 +188,24 @@ pub fn playback_scheduler_table<'lua>(
         let key = lua.create_registry_value(thread.clone())?;
         let i = scheduler.threads.insert(key);
         match table.get::<_, LuaString>("type")?.to_str()? {
-            "immediate" => {
+            "call" => {
+                let event_args =
+                    if let Some(args) = table.get::<_, Option<Vec<LuaValue>>>("args")? {
+                        let args_registered = args
+                            .into_iter()
+                            .map(|v| lua.create_registry_value(v))
+                            .collect::<LuaResult<EventArgs>>()?;
+                        let i = scheduler.event_args.insert(args_registered);
+                        Some(i)
+                    } else {
+                        None
+                    };
+                scheduler.queue.push(Wakeup::Call {
+                    thread: i,
+                    args: event_args,
+                });
+            }
+            "notify" => {
                 let event_args =
                     if let Some(args) = table.get::<_, Option<Vec<LuaValue>>>("args")? {
                         let args_registered = args
@@ -177,6 +218,23 @@ pub fn playback_scheduler_table<'lua>(
                         None
                     };
                 scheduler.queue.push(Wakeup::Notify {
+                    thread: i,
+                    args: event_args,
+                });
+            }
+            "kill" => {
+                let event_args =
+                    if let Some(args) = table.get::<_, Option<Vec<LuaValue>>>("args")? {
+                        let args_registered = args
+                            .into_iter()
+                            .map(|v| lua.create_registry_value(v))
+                            .collect::<LuaResult<EventArgs>>()?;
+                        let i = scheduler.event_args.insert(args_registered);
+                        Some(i)
+                    } else {
+                        None
+                    };
+                scheduler.queue.push(Wakeup::Kill {
                     thread: i,
                     args: event_args,
                 });

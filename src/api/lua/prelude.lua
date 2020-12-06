@@ -1,3 +1,18 @@
+local rawyield = sludge.thread.rawyield
+local graceful_exit = sludge.thread.graceful_exit
+
+local function intercept(...)
+    if select(1, ...) == nil then
+        graceful_exit()
+    else
+        return ...
+    end
+end
+
+function sludge.thread.yield(...)
+    return intercept(rawyield(...))
+end
+
 local yield = sludge.thread.yield
 local status = sludge.thread.status
 

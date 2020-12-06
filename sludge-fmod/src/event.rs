@@ -128,14 +128,7 @@ impl From<StopMode> for FMOD_STUDIO_STOP_MODE {
 
 impl<'lua> FromLua<'lua> for StopMode {
     fn from_lua(lua_value: LuaValue<'lua>, lua: LuaContext<'lua>) -> LuaResult<Self> {
-        let lua_str = <LuaString>::from_lua(lua_value, lua)
-            .with_context(|| {
-                anyhow!(
-                    "error while parsing StopMode from Lua \
-                    (expected \"immediate\" or \"allow_fadeout\")"
-                )
-            })
-            .to_lua_err()?;
+        let lua_str = <LuaString>::from_lua(lua_value, lua).to_lua_err()?;
         match lua_str.to_str()? {
             "immediate" => Ok(StopMode::Immediate),
             "allow_fadeout" => Ok(StopMode::AllowFadeout),
@@ -633,6 +626,30 @@ impl LuaUserData for EventInstance {
         });
         methods.add_method("trigger_cue", |_lua, this, ()| {
             this.trigger_cue().to_lua_err()
+        });
+
+        methods.add_method("get_playback_state", |_lua, this, ()| {
+            match this.get_playback_state().to_lua_err()? {
+                PlaybackState::Playing => Ok("playing"),
+                PlaybackState::Starting => Ok("starting"),
+                PlaybackState::Stopped => Ok("stopped"),
+                PlaybackState::Stopping => Ok("stopping"),
+                PlaybackState::Sustaining => Ok("sustaining"),
+            }
+        });
+
+        methods.add_method("is_paused", |_lua, this, ()| this.is_paused().to_lua_err());
+        methods.add_method("set_paused", |_lua, this, paused| {
+            this.set_paused(paused).to_lua_err()
+        });
+
+        methods.add_method("set_pitch", |_lua, this, pitch_multiplier| {
+            this.set_pitch(pitch_multiplier).to_lua_err()
+        });
+
+        methods.add_method("get_pitch", |_lua, this, ()| {
+            let param_value = this.get_pitch().to_lua_err()?;
+            Ok((param_value.value, param_value.final_value))
         });
 
         methods.add_method(
