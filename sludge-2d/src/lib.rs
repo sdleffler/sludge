@@ -344,6 +344,10 @@ pub enum ShapeTable {
         width: f32,
         height: f32,
     },
+    Circle {
+        position: Position,
+        radius: f32,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -364,6 +368,15 @@ impl LuaUserData for ShapeAccessor {
                         position: Position(shape.local),
                         width: extents.x,
                         height: extents.y,
+                    },
+                )
+            } else if let Some(ball) = shape.handle.as_shape::<Ball<f32>>() {
+                let radius = ball.radius;
+                rlua_serde::to_value(
+                    lua,
+                    ShapeTable::Circle {
+                        position: Position(shape.local),
+                        radius,
                     },
                 )
             } else {
@@ -395,6 +408,14 @@ impl LuaComponentInterface for Shape {
                 builder.add(Shape {
                     local,
                     handle: ShapeHandle::new(cuboid),
+                });
+            }
+            ShapeTable::Circle { position, radius } => {
+                let local = *position;
+                let ball = Ball::new(radius);
+                builder.add(Shape {
+                    local,
+                    handle: ShapeHandle::new(ball),
                 });
             }
         }
