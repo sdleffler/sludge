@@ -395,7 +395,47 @@ impl<'a> SmartComponent<ScContext<'a>> for SpriteAnimation {}
 pub struct SpriteAnimationAccessor(Entity);
 
 impl LuaUserData for SpriteAnimationAccessor {
-    fn add_methods<'lua, T: LuaUserDataMethods<'lua, Self>>(_methods: &mut T) {}
+    fn add_methods<'lua, T: LuaUserDataMethods<'lua, Self>>(methods: &mut T) {
+        methods.add_method("goto_frame", |lua, this, frame: u32| {
+            let tmp = lua.fetch_one::<World>()?;
+            let world = tmp.borrow();
+            let animation = &mut *world
+                .get_mut::<SpriteAnimation>(this.0.into())
+                .to_lua_err()?;
+            animation.frame.0 = FrameId(frame);
+            Ok(())
+        });
+
+        methods.add_method(
+            "goto_tag",
+            |lua, this, (tag_name, should_loop): (LuaString, Option<bool>)| {
+                let tmp = lua.fetch_one::<World>()?;
+                let world = tmp.borrow();
+                let animation = &mut *world
+                    .get_mut::<SpriteAnimation>(this.0.into())
+                    .to_lua_err()?;
+                let sheet = animation.sheet.load_cached();
+                let tag_id = sheet
+                    .get_tag(tag_name.to_str()?)
+                    .ok_or_else(|| anyhow!("no such tag"))
+                    .to_lua_err()?;
+                let (new_frame, new_tag) = sheet.at_tag(tag_id, should_loop.unwrap_or(true));
+                animation.frame = new_frame;
+                animation.tag = new_tag;
+                Ok(())
+            },
+        );
+
+        methods.add_method("set_paused", |lua, this, paused: bool| {
+            let tmp = lua.fetch_one::<World>()?;
+            let world = tmp.borrow();
+            let animation = &mut *world
+                .get_mut::<SpriteAnimation>(this.0.into())
+                .to_lua_err()?;
+            animation.tag.is_paused = paused;
+            Ok(())
+        });
+    }
 }
 
 impl LuaComponentInterface for SpriteAnimation {
