@@ -1,14 +1,15 @@
-use crate::{
-    assets::{Asset, Cache, Cached, Key, Loaded},
-    filesystem::Filesystem,
-    graphics::*,
-    Resources,
-};
-
+use crate::graphics::Drawable2;
 use {
     hashbrown::HashMap,
     image::{Rgba, RgbaImage},
-    std::{borrow::Cow, ffi::OsStr, path::Path},
+    serde::*,
+    sludge::{
+        assets::{Asset, Cache, Cached, Key, Loaded},
+        filesystem::Filesystem,
+        graphics::*,
+        prelude::*,
+    },
+    std::{borrow::Cow, ffi::OsStr, io::Read, path::Path},
 };
 
 #[derive(Debug, Clone)]
@@ -286,15 +287,15 @@ impl FontAtlas {
             })
             .collect::<Result<Vec<char>>>()
     }
+
+    pub fn font_texture(&self) -> &Cached<Texture> {
+        &self.font_texture
+    }
 }
 
 impl Drawable for FontAtlas {
     fn draw(&self, ctx: &mut Graphics, instance: InstanceParam) {
         self.font_texture.load().draw(ctx, instance);
-    }
-
-    fn aabb2(&self) -> Box2<f32> {
-        self.font_texture.load().aabb2()
     }
 }
 
@@ -350,9 +351,11 @@ impl Drawable for Text {
     fn draw(&self, ctx: &mut Graphics, instance: InstanceParam) {
         self.batch.draw(ctx, instance);
     }
+}
 
-    fn aabb2(&self) -> Box2<f32> {
-        self.batch.aabb2()
+impl Drawable2 for Text {
+    fn aabb(&self) -> Box2<f32> {
+        self.batch.aabb()
     }
 }
 

@@ -1,11 +1,15 @@
-use crate::{
-    graphics::{AnyDrawable, Drawable, DrawableId, ErasedDrawableId, Graphics, InstanceParam},
-    math::*,
-};
 use {
     hashbrown::HashMap,
     ordered_float::OrderedFloat,
+    sludge::{
+        graphics::{Drawable, Graphics, InstanceParam},
+        math::*,
+    },
     std::{
+        any::{self},
+        cmp::Ordering,
+        fmt,
+        hash::{Hash, Hasher},
         marker::PhantomData,
         mem, ops,
         sync::{
@@ -16,13 +20,89 @@ use {
     thunderdome::{Arena, Index},
 };
 
+use crate::graphics::{AnyDrawable2, Drawable2};
+
+pub struct Drawable2Id<T: AnyDrawable2 + ?Sized>(
+    pub(crate) Index,
+    pub(crate) PhantomData<&'static T>,
+);
+
+impl<T: AnyDrawable2 + ?Sized> fmt::Debug for Drawable2Id<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple(&format!("Drawable2Id<{}>", any::type_name::<T>(),))
+            .field(&self.0)
+            .finish()
+    }
+}
+
+impl<T: AnyDrawable2 + ?Sized> Copy for Drawable2Id<T> {}
+impl<T: AnyDrawable2 + ?Sized> Clone for Drawable2Id<T> {
+    #[inline]
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T: AnyDrawable2 + ?Sized> PartialEq for Drawable2Id<T> {
+    fn eq(&self, rhs: &Self) -> bool {
+        self.0 == rhs.0
+    }
+}
+
+impl<T: AnyDrawable2 + ?Sized> Eq for Drawable2Id<T> {}
+
+impl<T: AnyDrawable2 + ?Sized> PartialOrd for Drawable2Id<T> {
+    fn partial_cmp(&self, rhs: &Self) -> Option<Ordering> {
+        Some(self.0.cmp(&rhs.0))
+    }
+}
+
+impl<T: AnyDrawable2 + ?Sized> Ord for Drawable2Id<T> {
+    fn cmp(&self, rhs: &Self) -> Ordering {
+        self.0.cmp(&rhs.0)
+    }
+}
+
+impl<T: AnyDrawable2 + ?Sized> Hash for Drawable2Id<T> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.hash(state);
+    }
+}
+
+impl<T: AnyDrawable2 + ?Sized> Drawable2Id<T> {
+    pub(crate) fn new(index: Index) -> Self {
+        Self(index, PhantomData)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ErasedDrawable2Id(pub(crate) Index);
+
+impl ErasedDrawable2Id {
+    pub(crate) fn new(index: Index) -> Self {
+        Self(index)
+    }
+}
+
+impl<T: AnyDrawable2 + ?Sized> From<Drawable2Id<T>> for ErasedDrawable2Id {
+    fn from(id: Drawable2Id<T>) -> ErasedDrawable2Id {
+        Self::new(id.0)
+    }
+}
+
+impl<T: AnyDrawable2 + ?Sized> From<Drawable2Id<T>> for Option<ErasedDrawable2Id> {
+    fn from(id: Drawable2Id<T>) -> Option<ErasedDrawable2Id> {
+        Some(ErasedDrawable2Id::new(id.0))
+    }
+}
+
 #[derive(Debug)]
-pub struct Entry<T: AnyDrawable + ?Sized> {
+pub struct Entry<T: AnyDrawable2 + ?Sized> {
     pub tx: Transform3<f32>,
     pub value: T,
 }
 
-impl<T: AnyDrawable + ?Sized> ops::Deref for Entry<T> {
+impl<T: AnyDrawable2 + ?Sized> ops::Deref for Entry<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -30,43 +110,40 @@ impl<T: AnyDrawable + ?Sized> ops::Deref for Entry<T> {
     }
 }
 
-impl<T: AnyDrawable + ?Sized> ops::DerefMut for Entry<T> {
+impl<T: AnyDrawable2 + ?Sized> ops::DerefMut for Entry<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.value
     }
 }
 
-impl Entry<dyn AnyDrawable> {
-    pub fn downcast<T: AnyDrawable>(self: Box<Self>) -> Option<Entry<T>> {
+impl Entry<dyn AnyDrawable2> {
+    pub fn downcast<T: AnyDrawable2>(self: Box<Self>) -> Option<Entry<T>> {
         if self.value.as_any().is::<T>() {
             let raw = Box::into_raw(self);
             let boxed =
-                unsafe { Box::from_raw(raw as *mut Entry<dyn AnyDrawable> as *mut Entry<T>) };
+                unsafe { Box::from_raw(raw as *mut Entry<dyn AnyDrawable2> as *mut Entry<T>) };
             Some(*boxed)
         } else {
             None
         }
     }
 
-    pub fn downcast_ref<T: AnyDrawable>(&self) -> Option<&Entry<T>> {
+    pub fn downcast_ref<T: AnyDrawable2>(&self) -> Option<&Entry<T>> {
         if self.value.as_any().is::<T>() {
-            unsafe { Some(&*(self as *const Entry<dyn AnyDrawable> as *const Entry<T>)) }
+            unsafe { Some(&*(self as *const Entry<dyn AnyDrawable2> as *const Entry<T>)) }
         } else {
             None
         }
     }
 
-    pub fn downcast_mut<T: AnyDrawable>(&mut self) -> Option<&mut Entry<T>> {
+    pub fn downcast_mut<T: AnyDrawable2>(&mut self) -> Option<&mut Entry<T>> {
         if self.value.as_any().is::<T>() {
-            unsafe { Some(&mut *(self as *mut Entry<dyn AnyDrawable> as *mut Entry<T>)) }
+            unsafe { Some(&mut *(self as *mut Entry<dyn AnyDrawable2> as *mut Entry<T>)) }
         } else {
             None
         }
     }
 }
-
-pub type DrawableNodeId<T> = DrawableId<T, DrawableGraph>;
-pub type ErasedDrawableNodeId = ErasedDrawableId<DrawableGraph>;
 
 pub struct DrawableGraphIter<'a> {
     _outer: RwLockReadGuard<'a, DrawableGraphInner>,
@@ -75,7 +152,7 @@ pub struct DrawableGraphIter<'a> {
 }
 
 impl<'a> Iterator for DrawableGraphIter<'a> {
-    type Item = (&'a dyn AnyDrawable, &'a Transform3<f32>);
+    type Item = (&'a dyn AnyDrawable2, &'a Transform3<f32>);
 
     fn next(&mut self) -> Option<Self::Item> {
         self.inner
@@ -84,19 +161,19 @@ impl<'a> Iterator for DrawableGraphIter<'a> {
     }
 }
 
-pub struct DrawableNodeBuilder<'a, T: AnyDrawable> {
+pub struct DrawableNodeBuilder<'a, T: AnyDrawable2> {
     index: Index,
     graph: &'a mut DrawableGraph,
     marker: PhantomData<&'a mut T>,
 }
 
-impl<'a, T: AnyDrawable> DrawableNodeBuilder<'a, T> {
+impl<'a, T: AnyDrawable2> DrawableNodeBuilder<'a, T> {
     pub fn layer(&mut self, layer: i32) -> &mut Self {
         self.graph.objects[self.index].layer = layer;
         self
     }
 
-    pub fn parent(&mut self, index: impl Into<Option<ErasedDrawableNodeId>>) -> &mut Self {
+    pub fn parent(&mut self, index: impl Into<Option<ErasedDrawable2Id>>) -> &mut Self {
         let index = index.into();
         if let Some(parent_idx) = index {
             let parent_node = &mut self.graph.objects[parent_idx.0];
@@ -140,13 +217,13 @@ impl<'a, T: AnyDrawable> DrawableNodeBuilder<'a, T> {
         self
     }
 
-    pub fn get(&self) -> DrawableNodeId<T> {
-        DrawableId::new(self.index)
+    pub fn get(&self) -> Drawable2Id<T> {
+        Drawable2Id::new(self.index)
     }
 }
 
 struct Node {
-    entry: Box<Entry<dyn AnyDrawable>>,
+    entry: Box<Entry<dyn AnyDrawable2>>,
     layer: i32,
     y_sorted: bool,
     hidden: bool,
@@ -169,38 +246,38 @@ pub struct DrawableGraph {
     dirty: AtomicBool,
 }
 
-impl<T: AnyDrawable> ops::Index<DrawableNodeId<T>> for DrawableGraph {
+impl<T: AnyDrawable2> ops::Index<Drawable2Id<T>> for DrawableGraph {
     type Output = Entry<T>;
 
     #[inline]
-    fn index(&self, i: DrawableNodeId<T>) -> &Self::Output {
-        self[ErasedDrawableNodeId::from(i)]
+    fn index(&self, i: Drawable2Id<T>) -> &Self::Output {
+        self[ErasedDrawable2Id::from(i)]
             .downcast_ref()
             .expect(std::any::type_name::<T>())
     }
 }
 
-impl<T: AnyDrawable> ops::IndexMut<DrawableNodeId<T>> for DrawableGraph {
+impl<T: AnyDrawable2> ops::IndexMut<Drawable2Id<T>> for DrawableGraph {
     #[inline]
-    fn index_mut(&mut self, i: DrawableNodeId<T>) -> &mut Self::Output {
-        self[ErasedDrawableNodeId::from(i)]
+    fn index_mut(&mut self, i: Drawable2Id<T>) -> &mut Self::Output {
+        self[ErasedDrawable2Id::from(i)]
             .downcast_mut()
             .expect(std::any::type_name::<T>())
     }
 }
 
-impl ops::Index<ErasedDrawableNodeId> for DrawableGraph {
-    type Output = Entry<dyn AnyDrawable>;
+impl ops::Index<ErasedDrawable2Id> for DrawableGraph {
+    type Output = Entry<dyn AnyDrawable2>;
 
     #[inline]
-    fn index(&self, i: ErasedDrawableNodeId) -> &Self::Output {
+    fn index(&self, i: ErasedDrawable2Id) -> &Self::Output {
         &*self.objects[i.0].entry
     }
 }
 
-impl ops::IndexMut<ErasedDrawableNodeId> for DrawableGraph {
+impl ops::IndexMut<ErasedDrawable2Id> for DrawableGraph {
     #[inline]
-    fn index_mut(&mut self, i: ErasedDrawableNodeId) -> &mut Self::Output {
+    fn index_mut(&mut self, i: ErasedDrawable2Id) -> &mut Self::Output {
         // FIXME(sleffy): two-kinded dirtiness (transform change of child only vs. full?)
         // if matches!(self.objects[i.0].parent, Some(j) if self.objects[j].y_sorted) {
         *self.dirty.get_mut() = true;
@@ -226,7 +303,7 @@ impl DrawableGraph {
         }
     }
 
-    pub fn insert<T: AnyDrawable>(&mut self, value: T) -> DrawableNodeBuilder<T> {
+    pub fn insert<T: AnyDrawable2>(&mut self, value: T) -> DrawableNodeBuilder<T> {
         let index = self.objects.insert(Node {
             entry: Box::new(Entry {
                 tx: Transform3::identity(),
@@ -250,11 +327,11 @@ impl DrawableGraph {
 
     pub fn insert_entry(
         &mut self,
-        entry: Box<Entry<dyn AnyDrawable>>,
+        entry: Box<Entry<dyn AnyDrawable2>>,
         layer: i32,
         y_sorted: bool,
-        parent: Option<impl Into<ErasedDrawableNodeId>>,
-    ) -> ErasedDrawableNodeId {
+        parent: Option<impl Into<ErasedDrawable2Id>>,
+    ) -> ErasedDrawable2Id {
         let index = self.objects.insert(Node {
             entry,
             layer,
@@ -266,13 +343,13 @@ impl DrawableGraph {
 
         *self.dirty.get_mut() = true;
 
-        ErasedDrawableNodeId::new(index)
+        ErasedDrawable2Id::new(index)
     }
 
     pub fn set_parent(
         &mut self,
-        object: impl Into<ErasedDrawableNodeId>,
-        new_parent: Option<impl Into<ErasedDrawableNodeId>>,
+        object: impl Into<ErasedDrawable2Id>,
+        new_parent: Option<impl Into<ErasedDrawable2Id>>,
     ) {
         let object = object.into();
         let new_parent = new_parent.map(Into::into);
@@ -300,27 +377,27 @@ impl DrawableGraph {
         *self.dirty.get_mut() = true;
     }
 
-    pub fn set_layer(&mut self, object: impl Into<ErasedDrawableNodeId>, layer: i32) {
+    pub fn set_layer(&mut self, object: impl Into<ErasedDrawable2Id>, layer: i32) {
         let object = &mut self.objects[object.into().0];
         *self.dirty.get_mut() |= object.layer != layer;
         object.layer = layer;
     }
 
-    pub fn set_hidden(&mut self, object: impl Into<ErasedDrawableNodeId>, hidden: bool) {
+    pub fn set_hidden(&mut self, object: impl Into<ErasedDrawable2Id>, hidden: bool) {
         let object = &mut self.objects[object.into().0];
         *self.dirty.get_mut() |= object.hidden != hidden;
         object.hidden = hidden;
     }
 
-    pub fn remove<T: AnyDrawable>(&mut self, object: DrawableNodeId<T>) -> Option<T> {
+    pub fn remove<T: AnyDrawable2>(&mut self, object: Drawable2Id<T>) -> Option<T> {
         self.remove_any(object.into())
             .map(|boxed| boxed.downcast().unwrap().value)
     }
 
     pub fn remove_any(
         &mut self,
-        object: ErasedDrawableNodeId,
-    ) -> Option<Box<Entry<dyn AnyDrawable>>> {
+        object: ErasedDrawable2Id,
+    ) -> Option<Box<Entry<dyn AnyDrawable2>>> {
         let node = self.objects.remove(object.0)?;
 
         for child in node.children {
@@ -343,12 +420,12 @@ impl DrawableGraph {
 
     pub fn children(
         &self,
-        object: impl Into<ErasedDrawableNodeId>,
-    ) -> impl Iterator<Item = (DrawableNodeId<dyn AnyDrawable>, &dyn AnyDrawable)> + '_ {
+        object: impl Into<ErasedDrawable2Id>,
+    ) -> impl Iterator<Item = (Drawable2Id<dyn AnyDrawable2>, &dyn AnyDrawable2)> + '_ {
         self.objects[object.into().0]
             .children
             .iter()
-            .map(move |&index| (DrawableId::new(index), &self.objects[index].entry.value))
+            .map(move |&index| (Drawable2Id::new(index), &self.objects[index].entry.value))
     }
 
     pub fn is_dirty(&self) -> bool {
@@ -410,12 +487,12 @@ impl DrawableGraph {
                     let (obj_a, obj_b) = (&objects[a], &objects[b]);
                     obj_a.layer.cmp(&obj_b.layer).then_with(|| {
                         let a_y = *y_cache.entry(a).or_insert_with(|| {
-                            let aabb = obj_a.entry.value.as_drawable().aabb2();
+                            let aabb = obj_a.entry.value.as_drawable2().aabb();
                             OrderedFloat(aabb.transformed_by(tx_a.matrix()).maxs.y)
                         });
 
                         let b_y = *y_cache.entry(b).or_insert_with(|| {
-                            let aabb = obj_b.entry.value.as_drawable().aabb2();
+                            let aabb = obj_b.entry.value.as_drawable2().aabb();
                             OrderedFloat(aabb.transformed_by(tx_b.matrix()).maxs.y)
                         });
 
@@ -462,11 +539,13 @@ impl Drawable for DrawableGraph {
             ctx.draw(drawable.as_drawable(), instance.prepend_transform(tx));
         }
     }
+}
 
-    fn aabb2(&self) -> Box2<f32> {
+impl Drawable2 for DrawableGraph {
+    fn aabb(&self) -> Box2<f32> {
         let mut aabb = Box2::invalid();
         for (drawable, tx) in self.sorted() {
-            aabb.merge(&drawable.aabb2().transformed_by(&tx.matrix()));
+            aabb.merge(&drawable.aabb().transformed_by(&tx.matrix()));
         }
         aabb
     }

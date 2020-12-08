@@ -1,3 +1,5 @@
+#![feature(clamp)]
+
 use {
     serde::{Deserialize, Serialize},
     sludge::{
@@ -16,6 +18,7 @@ pub use ncollide2d::{
     shape::{Ball, Cuboid, ShapeHandle},
 };
 
+pub mod graphics;
 pub mod math;
 pub mod spatial_hash;
 

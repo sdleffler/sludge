@@ -1,21 +1,15 @@
-extern crate sludge as sloodge;
-
 use {
-    sloodge::{
+    sludge::{
         assets::{DefaultCache, Key},
         conf::Conf,
         event::EventHandler,
         filesystem::Filesystem,
-        graphics::text::*,
         graphics::*,
         prelude::*,
     },
+    sludge_2d::graphics::text::*,
     std::{env, path::PathBuf},
 };
-
-mod sludge {
-    pub use sludge::sludge::*;
-}
 
 struct MainState {
     space: Space,
@@ -52,10 +46,22 @@ impl MainState {
             20,
             CharacterListType::AsciiSubset,
         ))?;
+
         let (cache, gfx) = space.fetch::<(DefaultCache, Graphics)>()?;
         let atlas = cache.borrow().get::<FontAtlas>(&font_atlas_key)?;
+
         let mut text_layout = TextLayout::new(atlas.load().clone());
-        text_layout.push_str("Hello World!", std::iter::repeat(Color::GREEN));
+        text_layout.push_wrapping_str(
+            "Hello! Here we have an example of some SUPER cool wrapping text! It works nicely.",
+            std::iter::repeat(Color::WHITE),
+            400.,
+        );
+
+        text_layout.push_wrapping_str(
+            "Now I'm going to push another string but this one will only have half the width of the last text box",
+            std::iter::repeat(Color::GREEN),
+            200.,
+        );
         let text = Text::from_layout(&text_layout, &mut *gfx.borrow_mut());
         Ok(MainState { space, text })
     }
@@ -84,7 +90,7 @@ impl EventHandler for MainState {
         gfx.draw(
             text,
             InstanceParam::new()
-                .translate2(Vector2::new(540., 480.))
+                .translate2(Vector2::new(300., 400.))
                 .scale2(Vector2::repeat(2.)),
         );
         gfx.end_pass();
@@ -94,9 +100,9 @@ impl EventHandler for MainState {
 }
 
 fn main() -> Result<()> {
-    sloodge::event::run::<MainState>(
+    sludge::event::run::<MainState>(
         Conf {
-            window_title: "Hello world!".to_string(),
+            window_title: "Wrapping text!".to_string(),
             window_width: 320 * 4,
             window_height: 240 * 4,
             ..Conf::default()

@@ -1,7 +1,7 @@
 use crate::{
     ecs::{Component, Entity, EntityBuilder, World},
     filesystem::Filesystem,
-    Resources, Scheduler, SimpleComponent, SludgeLuaContextExt, SludgeResultExt,
+    Resources, SimpleComponent, SludgeLuaContextExt, SludgeResultExt,
 };
 use {
     anyhow::*,
@@ -19,6 +19,7 @@ mod log;
 mod math;
 mod thread;
 
+pub const SCHEDULER_QUEUE_REGISTRY_KEY: &'static str = "sludge.queue";
 pub const SERIALIZER_THUNK_REGISTRY_KEY: &'static str = "sludge.serialize";
 pub const LOOKUP_THUNK_REGISTRY_KEY: &'static str = "sludge.lookup";
 pub const WORLD_TABLE_REGISTRY_KEY: &'static str = "sludge.world_table";
@@ -378,7 +379,20 @@ pub struct EntityTable {
 
 impl EntityTable {
     pub fn load<'lua>(&self, lua: LuaContext<'lua>) -> Result<LuaTable<'lua>> {
-        lua.registry_value(&self.key).map_err(Error::from)
+        Ok(lua.registry_value(&self.key)?)
+    }
+
+    pub fn callback<'lua, K, T>(&self, lua: LuaContext<'lua>, key: K, args: T) -> Result<()>
+    where
+        K: ToLua<'lua>,
+        T: ToLuaMulti<'lua>,
+    {
+        let t = self.load(lua)?;
+        if let Some(cb) = t.get::<_, Option<LuaFunction>>(key)? {
+            lua.spawn(cb, (t, args))?;
+        }
+
+        Ok(())
     }
 }
 
@@ -487,10 +501,6 @@ pub fn clear<'lua>(lua: LuaContext<'lua>, _: ()) -> LuaResult<()> {
     Ok(())
 }
 
-pub fn new_scheduler<'lua>(lua: LuaContext<'lua>, _: ()) -> LuaResult<Scheduler> {
-    Scheduler::new(lua).to_lua_err()
-}
-
 inventory::submit! {
     Module::parse("sludge", |lua| {
         let table = lua.create_table_from(vec![
@@ -498,7 +508,6 @@ inventory::submit! {
             ("insert", lua.create_function(insert)?),
             ("despawn", lua.create_function(despawn)?),
             ("clear", lua.create_function(clear)?),
-            ("new_scheduler", lua.create_function(new_scheduler)?),
         ])?;
 
         Ok(LuaValue::Table(table))

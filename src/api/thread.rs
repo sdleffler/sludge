@@ -1,4 +1,4 @@
-use crate::SludgeLuaContextExt;
+use crate::{api::SCHEDULER_QUEUE_REGISTRY_KEY, Scheduler, SchedulerQueue, SludgeLuaContextExt};
 use {anyhow::*, rlua::prelude::*, thiserror::*};
 
 #[derive(Debug, Error)]
@@ -29,6 +29,16 @@ pub fn load<'lua>(lua: LuaContext<'lua>) -> Result<LuaValue<'lua>> {
     let graceful_exit =
         lua.create_function(|_, _: ()| -> LuaResult<()> { Err(LuaError::external(GracefulExit)) })?;
 
+    let new_scheduler = lua.create_function(|lua, _: ()| Scheduler::new(lua).to_lua_err())?;
+
+    let current_scheduler = lua.create_function(|lua, _: ()| {
+        lua.named_registry_value::<_, LuaValue>(SCHEDULER_QUEUE_REGISTRY_KEY)
+    })?;
+
+    let global_scheduler = lua.create_function(|lua, _: ()| -> LuaResult<SchedulerQueue> {
+        Ok((*lua.fetch_one::<SchedulerQueue>()?.borrow()).clone())
+    })?;
+
     let yield_ = coroutine.get::<_, LuaFunction>("yield")?;
     let create = coroutine.get::<_, LuaFunction>("create")?;
     let wrap = coroutine.get::<_, LuaFunction>("wrap")?;
@@ -48,6 +58,9 @@ pub fn load<'lua>(lua: LuaContext<'lua>) -> Result<LuaValue<'lua>> {
         ("running", running),
         ("status", status),
         ("resume", resume),
+        ("new_scheduler", new_scheduler),
+        ("current_scheduler", current_scheduler),
+        ("global_scheduler", global_scheduler),
     ])?))
 }
 

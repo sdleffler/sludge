@@ -1162,38 +1162,48 @@ impl Scheduler {
     /// ensure there's nothing infinitely spawning/waking itself. The loop cap is
     /// currently hardcoded to 8, but may be made parameterizable in the future.
     pub fn update(&mut self, lua: LuaContext, dt: f32) -> Result<()> {
-        self.continuous += dt;
-        let slots = lua.registry_value(&self.slots)?;
-        while self.continuous > 0. {
-            // Our core update step consists of two steps:
-            // 1. Run all threads scheduled to run on or before the current tick.
-            // 2. Check for threads spawned/woken by newly run threads. If there are new
-            //    threads to be run immediately, go to step 1.
-            //
-            // `LOOP_CAP` is our limit on how many times we go to step 1 in a given
-            // tick. This stops us from hitting an infinitely spawning loop.
-            const LOOP_CAP: usize = 8;
+        let old_queue =
+            lua.named_registry_value::<_, Option<LuaValue>>(api::SCHEDULER_QUEUE_REGISTRY_KEY)?;
+        lua.set_named_registry_value(api::SCHEDULER_QUEUE_REGISTRY_KEY, self.senders.clone())?;
 
-            for i in 0..LOOP_CAP {
-                self.run_all_queued(lua, &slots)?;
-                self.event_args.clear();
-                self.queue_all_spawned(lua, &slots)?;
-                self.poll_events_and_queue_all_notified(lua, &slots)?;
+        let mut block = move || -> Result<()> {
+            self.continuous += dt;
+            let slots = lua.registry_value(&self.slots)?;
+            while self.continuous > 0. {
+                // Our core update step consists of two steps:
+                // 1. Run all threads scheduled to run on or before the current tick.
+                // 2. Check for threads spawned/woken by newly run threads. If there are new
+                //    threads to be run immediately, go to step 1.
+                //
+                // `LOOP_CAP` is our limit on how many times we go to step 1 in a given
+                // tick. This stops us from hitting an infinitely spawning loop.
+                const LOOP_CAP: usize = 8;
 
-                if self.is_idle() {
-                    break;
-                } else if i == LOOP_CAP - 1 {
-                    log::warn!("trampoline loop cap exceeded");
+                for i in 0..LOOP_CAP {
+                    self.run_all_queued(lua, &slots)?;
+                    self.event_args.clear();
+                    self.queue_all_spawned(lua, &slots)?;
+                    self.poll_events_and_queue_all_notified(lua, &slots)?;
+
+                    if self.is_idle() {
+                        break;
+                    } else if i == LOOP_CAP - 1 {
+                        log::warn!("trampoline loop cap exceeded");
+                    }
                 }
+
+                self.continuous -= 1.;
+                self.discrete += 1;
             }
 
-            self.continuous -= 1.;
-            self.discrete += 1;
-        }
+            Ok(())
+        };
 
+        let result = block();
         lua.expire_registry_values();
+        lua.set_named_registry_value(api::SCHEDULER_QUEUE_REGISTRY_KEY, old_queue)?;
 
-        Ok(())
+        result
     }
 }
 

@@ -28,12 +28,8 @@ use {
             Arc, RwLock,
         },
     },
-    thunderdome::{Arena, Index},
+    thunderdome::{self, Arena, Index},
 };
-
-pub mod drawable_graph;
-pub mod sorted_layer;
-pub mod text;
 
 pub mod shader {
     use super::*;
@@ -72,11 +68,7 @@ pub mod shader {
     }
 }
 
-pub use {
-    drawable_graph::{DrawableGraph, DrawableNodeBuilder, DrawableNodeId, ErasedDrawableNodeId},
-    shader::{InstanceProperties, Uniforms, Vertex},
-    sorted_layer::{SortedLayer, SortedLayerId},
-};
+pub use shader::{InstanceProperties, Uniforms, Vertex};
 
 // FIXME(sleffy): we aren't actually using `OwnedBuffer` and `Buffer` anywhere
 /// An `OwnedBuffer` represents either a VertexBuffer or an IndexBuffer, and
@@ -121,55 +113,6 @@ impl From<mq::Buffer> for Buffer {
     }
 }
 
-/// An `OwnedTexture` contains one or more images used to apply detail to an
-/// object (typically it contains a 2D image)
-#[derive(Debug)]
-pub struct OwnedTexture {
-    pub texture: mq::Texture,
-}
-
-impl OwnedTexture {
-    pub fn from_inner(texture: mq::Texture) -> Self {
-        Self { texture }
-    }
-
-    pub fn width(&self) -> u32 {
-        self.texture.width
-    }
-
-    pub fn height(&self) -> u32 {
-        self.texture.height
-    }
-}
-
-impl Drawable for OwnedTexture {
-    fn draw(&self, ctx: &mut Graphics, param: InstanceParam) {
-        ctx.quad_bindings.vertex_buffers[1].update(
-            &mut ctx.mq,
-            &[param
-                .scale2(Vector2::new(self.width() as f32, self.height() as f32))
-                .scale2(param.src.extents())
-                .to_instance_properties()],
-        );
-        ctx.quad_bindings.images[0] = self.texture;
-        ctx.mq.apply_bindings(&ctx.quad_bindings);
-        ctx.mq.draw(0, 6, 1);
-    }
-
-    fn aabb2(&self) -> Box2<f32> {
-        Box2::from_corners(
-            Point2::origin(),
-            Point2::new(self.width() as f32, self.height() as f32),
-        )
-    }
-}
-
-impl Drop for OwnedTexture {
-    fn drop(&mut self) {
-        self.texture.delete();
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum FilterMode {
     Nearest,
@@ -178,25 +121,9 @@ pub enum FilterMode {
 
 /// A `Texture` is a safe type used to obtain asynchronous references to an
 /// `OwnedTexture`
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Texture {
-    pub shared: Arc<OwnedTexture>,
-}
-
-impl From<OwnedTexture> for Texture {
-    fn from(owned: OwnedTexture) -> Self {
-        Self {
-            shared: Arc::new(owned),
-        }
-    }
-}
-
-impl ops::Deref for Texture {
-    type Target = OwnedTexture;
-
-    fn deref(&self) -> &Self::Target {
-        &*self.shared
-    }
+    pub handle: mq::Texture,
 }
 
 impl Texture {
@@ -225,12 +152,12 @@ impl Texture {
         Self::from_memory(ctx, &buf)
     }
 
-    pub fn from_inner(texture: mq::Texture) -> Self {
-        Self::from(OwnedTexture::from_inner(texture))
+    pub fn from_inner(handle: mq::Texture) -> Self {
+        Self { handle }
     }
 
     pub fn set_filter_mode(&self, ctx: &mut Graphics, filter_mode: FilterMode) {
-        self.texture.set_filter(
+        self.handle.set_filter(
             &mut ctx.mq,
             match filter_mode {
                 FilterMode::Nearest => mq::FilterMode::Nearest,
@@ -238,15 +165,34 @@ impl Texture {
             },
         );
     }
+
+    pub fn width(&self) -> u32 {
+        self.handle.width
+    }
+
+    pub fn height(&self) -> u32 {
+        self.handle.height
+    }
+}
+
+impl Drop for Texture {
+    fn drop(&mut self) {
+        self.handle.delete();
+    }
 }
 
 impl Drawable for Texture {
     fn draw(&self, ctx: &mut Graphics, param: InstanceParam) {
-        self.shared.draw(ctx, param);
-    }
-
-    fn aabb2(&self) -> Box2<f32> {
-        self.shared.aabb2()
+        ctx.quad_bindings.vertex_buffers[1].update(
+            &mut ctx.mq,
+            &[param
+                .scale2(Vector2::new(self.width() as f32, self.height() as f32))
+                .scale2(param.src.extents())
+                .to_instance_properties()],
+        );
+        ctx.quad_bindings.images[0] = self.handle;
+        ctx.mq.apply_bindings(&ctx.quad_bindings);
+        ctx.mq.draw(0, 6, 1);
     }
 }
 
@@ -256,7 +202,6 @@ pub struct Pipeline {
     pub mq: mq::Pipeline,
 }
 
-/// I'm not sure why this is wrapped as an Arc
 #[derive(Debug, Clone)]
 pub struct RenderPass {
     pub shared: Arc<mq::RenderPass>,
@@ -282,14 +227,17 @@ impl RenderPass {
         color_img: Texture,
         depth_img: impl Into<Option<Texture>>,
     ) -> Self {
-        let render_pass = mq::RenderPass::new(
-            &mut ctx.mq,
-            color_img.texture,
-            depth_img.into().map(|di| di.texture),
-        );
-        let this = Self {
-            shared: Arc::new(render_pass),
-        };
+        Self::from_parts(ctx, color_img.handle, depth_img.into().map(|di| di.handle))
+    }
+
+    pub fn from_parts(
+        ctx: &mut Graphics,
+        color_img: mq::Texture,
+        depth_img: Option<mq::Texture>,
+    ) -> Self {
+        let render_pass = mq::RenderPass::new(&mut ctx.mq, color_img, depth_img);
+        let shared = Arc::new(render_pass);
+        let this = Self { shared };
         ctx.register_render_pass(this.clone());
         this
     }
@@ -799,7 +747,7 @@ pub struct Graphics {
     #[derivative(Debug = "ignore")]
     pub mq: mq::Context,
     pub pipeline: mq::Pipeline,
-    pub null_texture: Texture,
+    pub null_texture: Cached<Texture>,
     pub projection: Matrix4<f32>,
     pub modelview: TransformStack,
     pub quad_bindings: mq::Bindings,
@@ -862,13 +810,13 @@ impl Graphics {
         let quad_bindings = mq::Bindings {
             vertex_buffers: vec![quad_vertices, instances],
             index_buffer: quad_indices,
-            images: vec![null_texture.texture],
+            images: vec![null_texture.handle],
         };
 
         Ok(Self {
             mq,
             pipeline,
-            null_texture,
+            null_texture: null_texture.into(),
             projection: Matrix4::identity(),
             modelview: TransformStack::new(),
             quad_bindings,
@@ -988,7 +936,7 @@ pub struct Mesh {
     /// The shared reference to the texture, so that it doesn't get dropped and deleted.
     /// The inner data is already in `bindings` so this is really just to keep it from
     /// being dropped.
-    pub texture: Texture,
+    pub texture: Cached<Texture>,
     pub bindings: mq::Bindings,
     pub len: i32,
     pub aabb: Box2<f32>,
@@ -1000,22 +948,18 @@ impl Drawable for Mesh {
         ctx.mq.apply_bindings(&self.bindings);
         ctx.mq.draw(0, self.len, 1);
     }
-
-    fn aabb2(&self) -> Box2<f32> {
-        self.aabb
-    }
 }
 
 #[derive(Debug)]
 pub struct MeshBuilder {
     pub buffer: t::geometry_builder::VertexBuffers<Vertex, u16>,
-    pub texture: Texture,
+    pub texture: Cached<Texture>,
 }
 
 impl MeshBuilder {
     pub fn new<T>(texture: T) -> Self
     where
-        T: Into<Texture>,
+        T: Into<Cached<Texture>>,
     {
         Self {
             buffer: t::VertexBuffers::new(),
@@ -1172,7 +1116,7 @@ impl MeshBuilder {
     pub fn raw<V, T>(&mut self, verts: &[V], indices: &[u16], texture: T) -> &mut Self
     where
         V: Into<Vertex> + Clone,
-        T: Into<Option<Texture>>,
+        T: Into<Option<Cached<Texture>>>,
     {
         assert!(self.buffer.vertices.len() + verts.len() < (std::u16::MAX as usize));
         assert!(self.buffer.indices.len() + indices.len() < (std::u16::MAX as usize));
@@ -1225,7 +1169,7 @@ impl MeshBuilder {
             bindings: mq::Bindings {
                 vertex_buffers: vec![vertex_buffer, instance],
                 index_buffer,
-                images: vec![self.texture.texture],
+                images: vec![self.texture.load().handle],
             },
             len: self.buffer.indices.len() as i32,
             aabb,
@@ -1363,6 +1307,30 @@ pub struct SpriteId(Index);
 
 impl<'a> SmartComponent<ScContext<'a>> for SpriteId {}
 
+pub struct SpriteBatchIter<'a> {
+    iter: thunderdome::Iter<'a, InstanceParam>,
+}
+
+impl<'a> Iterator for SpriteBatchIter<'a> {
+    type Item = (SpriteId, &'a InstanceParam);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next().map(|(i, v)| (SpriteId(i), v))
+    }
+}
+
+pub struct SpriteBatchIterMut<'a> {
+    iter: thunderdome::IterMut<'a, InstanceParam>,
+}
+
+impl<'a> Iterator for SpriteBatchIterMut<'a> {
+    type Item = (SpriteId, &'a mut InstanceParam);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next().map(|(i, v)| (SpriteId(i), v))
+    }
+}
+
 #[derive(Debug)]
 struct SpriteBatchInner {
     // Used to store the result of converting InstanceParams to InstanceProperties
@@ -1370,10 +1338,6 @@ struct SpriteBatchInner {
     /// Capacity is used to store the length of the buffers inside of mq::Bindings
     capacity: usize,
     bindings: mq::Bindings,
-    /// A cached bounding box that encaspulates all of the sprites within the
-    /// batch. The bounding box is recalculated if any of the instance params
-    /// of any of the sprites within the batch are changed
-    aabb: Option<Box2<f32>>,
 }
 
 #[derive(Debug)]
@@ -1397,12 +1361,19 @@ impl ops::IndexMut<SpriteId> for SpriteBatch {
     #[inline]
     fn index_mut(&mut self, index: SpriteId) -> &mut Self::Output {
         self.dirty = AtomicBool::new(true);
-        self.inner.get_mut().unwrap().aabb = None;
         &mut self.sprites[index.0]
     }
 }
 
 impl SpriteBatch {
+    pub fn new<T>(ctx: &mut Graphics, texture: T) -> Self
+    where
+        T: Into<Cached<Texture>>,
+    {
+        const DEFAULT_SPRITEBATCH_CAPACITY: usize = 64;
+        Self::with_capacity(ctx, texture, DEFAULT_SPRITEBATCH_CAPACITY)
+    }
+
     pub fn with_capacity<T>(ctx: &mut Graphics, texture: T, capacity: usize) -> Self
     where
         T: Into<Cached<Texture>>,
@@ -1418,7 +1389,7 @@ impl SpriteBatch {
         let bindings = mq::Bindings {
             vertex_buffers: vec![ctx.quad_bindings.vertex_buffers[0], instances],
             index_buffer: ctx.quad_bindings.index_buffer,
-            images: vec![texture.load_cached().texture],
+            images: vec![texture.load_cached().handle],
         };
 
         Self {
@@ -1427,7 +1398,6 @@ impl SpriteBatch {
                 instances: Vec::new(),
                 capacity,
                 bindings,
-                aabb: Some(Box2::invalid()),
             }
             .into(),
             dirty: AtomicBool::new(true),
@@ -1438,27 +1408,18 @@ impl SpriteBatch {
     #[inline]
     pub fn insert(&mut self, param: InstanceParam) -> SpriteId {
         *self.dirty.get_mut() = true;
-        let inner = self.inner.get_mut().unwrap();
-        if let Some(aabb) = inner.aabb.as_mut() {
-            let texture = self.texture.load_cached();
-            let scaled = param.scale2(param.src.extents());
-            let mat = scaled.tx.matrix();
-            aabb.merge(&texture.aabb2().transformed_by(mat));
-        }
         SpriteId(self.sprites.insert(param))
     }
 
     #[inline]
     pub fn remove(&mut self, index: SpriteId) {
         *self.dirty.get_mut() = true;
-        self.inner.get_mut().unwrap().aabb = None;
         self.sprites.remove(index.0);
     }
 
     #[inline]
     pub fn clear(&mut self) {
         *self.dirty.get_mut() = true;
-        self.inner.get_mut().unwrap().aabb = None;
         self.sprites.clear();
     }
 
@@ -1509,9 +1470,21 @@ impl SpriteBatch {
         }
 
         inner.bindings.vertex_buffers[1].update(&mut ctx.mq, &inner.instances);
-        inner.bindings.images[0] = texture.texture;
+        inner.bindings.images[0] = texture.handle;
 
         self.dirty.store(false, atomic::Ordering::Relaxed);
+    }
+
+    pub fn iter(&self) -> SpriteBatchIter<'_> {
+        SpriteBatchIter {
+            iter: self.sprites.iter(),
+        }
+    }
+
+    pub fn iter_mut(&mut self) -> SpriteBatchIterMut<'_> {
+        SpriteBatchIterMut {
+            iter: self.sprites.iter_mut(),
+        }
     }
 }
 
@@ -1530,27 +1503,6 @@ impl Drawable for SpriteBatch {
         ctx.mq.draw(0, 6, inner.instances.len() as i32);
         ctx.pop_transform();
         ctx.apply_transforms();
-    }
-
-    fn aabb2(&self) -> Box2<f32> {
-        if let Some(aabb) = self.inner.read().unwrap().aabb {
-            return aabb;
-        }
-
-        let mut inner = self.inner.write().unwrap();
-        let mut initial = Box2::invalid();
-        let texture = self.texture.load();
-        let image_aabb = texture.aabb2();
-        for (_, param) in self.sprites.iter() {
-            initial.merge(
-                &param
-                    .scale2(param.src.extents())
-                    .transform_aabb(&image_aabb),
-            );
-        }
-        inner.aabb = Some(initial);
-
-        initial
     }
 }
 
@@ -1591,7 +1543,7 @@ impl Canvas {
             },
         ));
 
-        let render_pass = RenderPass::new(ctx, color_img.clone(), depth_img.clone());
+        let render_pass = RenderPass::from_parts(ctx, color_img.handle, Some(depth_img.handle));
 
         Self {
             render_pass,
@@ -1604,16 +1556,6 @@ impl Canvas {
 impl Drawable for Canvas {
     fn draw(&self, ctx: &mut Graphics, instance: InstanceParam) {
         self.color_buffer.draw(ctx, instance);
-    }
-
-    fn aabb2(&self) -> Box2<f32> {
-        Box2::from_corners(
-            Point2::new(0., 0.),
-            Point2::new(
-                self.color_buffer.width() as f32,
-                self.color_buffer.height() as f32,
-            ),
-        )
     }
 }
 
@@ -1646,34 +1588,14 @@ impl Drawable for Sprite {
         };
         self.texture.load().draw(ctx, params);
     }
-
-    fn aabb2(&self) -> Box2<f32> {
-        let texture_aabb = self.texture.load().aabb2();
-        let extents = self.params.src.extents();
-        self.params.transform_aabb(&Box2::from_corners(
-            texture_aabb.mins,
-            Point2::new(
-                texture_aabb.maxs.x * extents.x,
-                texture_aabb.maxs.y * extents.y,
-            ),
-        ))
-    }
 }
 
-pub trait Drawable: 'static {
+pub trait Drawable {
     fn draw(&self, ctx: &mut Graphics, instance: InstanceParam);
-
-    fn aabb2(&self) -> Box2<f32> {
-        Box2::huge()
-    }
 }
 
 impl Drawable for () {
     fn draw(&self, _ctx: &mut Graphics, _instance: InstanceParam) {}
-
-    fn aabb2(&self) -> Box2<f32> {
-        Box2::invalid()
-    }
 }
 
 /// Shorthand trait for types that are `Drawable` and `Any`, as well as
@@ -1713,7 +1635,7 @@ impl<T: Drawable + Any + Send + Sync> AnyDrawable for T {
 
 impl dyn AnyDrawable {
     #[doc(hidden)]
-    fn downcast<T: Any>(self: Box<Self>) -> Option<T> {
+    pub fn downcast<T: Any>(self: Box<Self>) -> Option<T> {
         Box::<dyn Any>::downcast(self.to_box_any())
             .map(|boxed| *boxed)
             .ok()

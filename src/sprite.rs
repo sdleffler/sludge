@@ -435,6 +435,16 @@ impl LuaUserData for SpriteAnimationAccessor {
             animation.tag.is_paused = paused;
             Ok(())
         });
+
+        methods.add_method("add_time_to_current_frame", |lua, this, duration: f32| {
+            let tmp = lua.fetch_one::<World>()?;
+            let world = tmp.borrow();
+            let animation = &mut *world
+                .get_mut::<SpriteAnimation>(this.0.into())
+                .to_lua_err()?;
+            animation.tag.remaining += duration;
+            Ok(())
+        });
     }
 }
 
