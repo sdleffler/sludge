@@ -18,6 +18,7 @@ smallvec = "1.4.2"
 thunderdome = { git = "https://github.com/sdleffler/thunderdome", branch = "main" }
 rlua_serde = { git = "https://github.com/sdleffler/rlua_serde" }
 ordered-float = "2.0.1"
-image = "0.23.12"
+image = { version = "0.22", default-features = false, features = ["gif_codec", "jpeg", "ico", "png_codec", "pnm",
+"tga", "tiff", "webp", "bmp", "dxt", ] }
 rusttype = "0.9.2"
 log = "0.4.11"
