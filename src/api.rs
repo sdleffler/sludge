@@ -109,6 +109,8 @@ pub type BundlerConstructor = Arc<
         + Sync,
 >;
 
+pub type RemoverConstructor = fn(&mut World, Entity) -> LuaResult<()>;
+
 #[derive(Derivative, Clone)]
 #[derivative(Debug)]
 pub struct LuaComponent {
@@ -120,6 +122,9 @@ pub struct LuaComponent {
 
     #[derivative(Debug = "ignore")]
     bundler: BundlerConstructor,
+
+    #[derivative(Debug = "ignore")]
+    remover: RemoverConstructor,
 }
 
 impl LuaComponent {
@@ -129,7 +134,13 @@ impl LuaComponent {
             type_id: TypeId::of::<T>(),
             accessor: Arc::new(|lua, entity| T::accessor(lua, entity)?.to_lua(lua)),
             bundler: Arc::new(T::bundler),
+            remover: Self::do_remove::<T>,
         }
+    }
+
+    fn do_remove<T: Component>(world: &mut World, entity: Entity) -> LuaResult<()> {
+        world.remove_one::<T>(entity).to_lua_err()?;
+        Ok(())
     }
 }
 
@@ -150,23 +161,34 @@ impl LuaUserData for LuaEntityUserData {
 
         methods.add_meta_method(
             LuaMetaMethod::NewIndex,
-            |lua, this, (k, v): (LuaString, _)| {
+            |lua, this, (k, v): (LuaString, LuaValue)| {
                 let (registry, world) = lua.fetch::<(EntityUserDataRegistry, World)>()?;
-                let mut builder = EntityBuilder::new();
-
                 let s = k.to_str()?;
-                let bundler = registry
-                    .borrow()
-                    .named
-                    .get(s)
-                    .map(|comp| comp.bundler.clone())
-                    .ok_or_else(|| anyhow!("unknown component {}", s))
-                    .to_lua_err()?;
-                bundler(lua, v, &mut builder)?;
-                world
-                    .borrow_mut()
-                    .insert(Entity::from_bits(this.0), builder.build())
-                    .to_lua_err()?;
+
+                if matches!(v, LuaValue::Nil) {
+                    let remover = registry
+                        .borrow()
+                        .named
+                        .get(s)
+                        .map(|comp| comp.remover)
+                        .ok_or_else(|| anyhow!("unknown component {}", s))
+                        .to_lua_err()?;
+                    remover(&mut world.borrow_mut(), Entity::from_bits(this.0))?;
+                } else {
+                    let mut builder = EntityBuilder::new();
+                    let bundler = registry
+                        .borrow()
+                        .named
+                        .get(s)
+                        .map(|comp| comp.bundler.clone())
+                        .ok_or_else(|| anyhow!("unknown component {}", s))
+                        .to_lua_err()?;
+                    bundler(lua, v, &mut builder)?;
+                    world
+                        .borrow_mut()
+                        .insert(Entity::from_bits(this.0), builder.build())
+                        .to_lua_err()?;
+                }
 
                 Ok(())
             },
