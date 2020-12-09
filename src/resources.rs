@@ -573,6 +573,7 @@ impl<T> Fetchable for T where T: Any + Send + Sync {}
 pub trait Resources<'a> {
     /// Borrow the underlying "most-local" `OwnedResources`. This method will likely
     /// be removed soon, as there's little use for it.
+    // #[deprecated = "dubious usage"]
     fn borrow(&self) -> AtomicRef<OwnedResources<'a>>;
 
     /// Borrow the underlying "most-local" `OwnedResources`. This method is useful for
@@ -585,6 +586,7 @@ pub trait Resources<'a> {
     /// `UnifiedResources`, it will return the corresponding `OwnedResources` of its
     /// `local` field. This is another reason the method is dubious; we don't give a
     /// way to access the global resources...
+    // #[deprecated = "dubious usage"]
     fn borrow_mut(&self) -> AtomicRefMut<OwnedResources<'a>>;
 
     /// Fetch a single resource from the container.

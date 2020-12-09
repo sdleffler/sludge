@@ -13,7 +13,7 @@ function sludge.thread.yield(...)
     return intercept(rawyield(...))
 end
 
-local yield = sludge.thread.yield
+yield = sludge.thread.yield
 local status = sludge.thread.status
 
 function sludge.thread.wait_until(predicate)

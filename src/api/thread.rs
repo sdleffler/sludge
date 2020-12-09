@@ -1,4 +1,7 @@
-use crate::{api::SCHEDULER_QUEUE_REGISTRY_KEY, Scheduler, SchedulerQueue, SludgeLuaContextExt};
+use crate::{
+    api::SCHEDULER_QUEUE_REGISTRY_KEY, resources::Resources, Scheduler, SchedulerQueue,
+    SludgeLuaContextExt,
+};
 use {anyhow::*, rlua::prelude::*, thiserror::*};
 
 #[derive(Debug, Error)]

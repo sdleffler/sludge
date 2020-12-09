@@ -450,6 +450,18 @@ impl From<Color> for [f32; 4] {
     }
 }
 
+impl<'lua> ToLua<'lua> for Color {
+    fn to_lua(self, lua: LuaContext<'lua>) -> LuaResult<LuaValue<'lua>> {
+        rlua_serde::to_value(lua, self)
+    }
+}
+
+impl<'lua> FromLua<'lua> for Color {
+    fn from_lua(value: LuaValue<'lua>, _lua: LuaContext<'lua>) -> LuaResult<Self> {
+        rlua_serde::from_value(value)
+    }
+}
+
 /// A RGBA color in the *linear* color space,
 /// suitable for shoving into a shader.
 #[derive(Copy, Clone, PartialEq, Debug, Serialize, Deserialize)]

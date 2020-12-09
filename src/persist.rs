@@ -6,7 +6,7 @@ use {
 };
 
 use crate::{
-    api::*, components::Persistent, ecs::*, EventArgs, EventName, Scheduler, SludgeLuaContextExt,
+    api::*, components::Persistent, ecs::*, resources::Resources, EventArgs, EventName, Scheduler,
     Space, Wakeup,
 };
 

@@ -464,6 +464,25 @@ impl World {
         batched
     }
 
+    /// This method is very similar to `spawn_batch`, but under the hood, `spawn_batch`
+    /// performs an allocation of a `Vec<Entity>` for various reasons needed internally.
+    /// This allows you to move that allocation outside if you already have one available.
+    pub fn spawn_batch_into_buf<I>(&mut self, iter: I, buf: &mut Vec<Entity>)
+    where
+        I: IntoIterator,
+        I::Item: Bundle,
+    {
+        let start = buf.len();
+        buf.extend(self.ecs.spawn_batch(iter));
+        I::Item::with_static_ids(|ids| {
+            for typeid in ids {
+                if let Some(channel) = self.channels.get_mut(&typeid) {
+                    channel.emit_batch_inserted(buf[start..].iter().copied());
+                }
+            }
+        });
+    }
+
     /// Despawn an entity, removing it from the world and dropping all its components.
     pub fn despawn(&mut self, entity: Entity) -> Result<(), NoSuchEntity> {
         Self::do_despawn(&mut self.channels, &mut self.ecs, entity)

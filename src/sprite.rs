@@ -13,7 +13,7 @@ use crate::{
     ecs::*,
     filesystem::Filesystem,
     math::*,
-    Resources, SludgeLuaContextExt, SludgeResultExt,
+    Resources, SludgeResultExt,
 };
 
 #[derive(

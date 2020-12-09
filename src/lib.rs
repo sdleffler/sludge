@@ -152,14 +152,6 @@ pub trait SludgeLuaContextExt<'lua>: Sized {
     fn kill<T>(self, thread: LuaThread<'lua>, args: T) -> LuaResult<()>
     where
         T: ToLuaMulti<'lua>;
-
-    fn fetch_one<T: Fetchable>(self) -> LuaResult<Shared<'static, T>> {
-        self.resources().fetch_one().to_lua_err()
-    }
-
-    fn fetch<T: FetchAll<'static>>(self) -> LuaResult<T::Fetched> {
-        self.resources().fetch::<T>().to_lua_err()
-    }
 }
 
 impl<'lua> SludgeLuaContextExt<'lua> for LuaContext<'lua> {
@@ -199,6 +191,24 @@ impl<'lua> SludgeLuaContextExt<'lua> for LuaContext<'lua> {
         self.fetch_one::<SchedulerQueue>()?
             .borrow()
             .kill(self, thread, args)
+    }
+}
+
+impl<'lua> Resources<'static> for LuaContext<'lua> {
+    fn borrow(&self) -> atomic_refcell::AtomicRef<OwnedResources<'static>> {
+        unimplemented!("unimplementable for LuaContext");
+    }
+
+    fn borrow_mut(&self) -> atomic_refcell::AtomicRefMut<OwnedResources<'static>> {
+        unimplemented!("unimplementable for LuaContext");
+    }
+
+    fn fetch_one<T: Fetchable>(&self) -> Result<Shared<'static, T>, resources::NotFound> {
+        self.resources().fetch_one()
+    }
+
+    fn fetch<T: FetchAll<'static>>(&self) -> Result<T::Fetched, resources::NotFound> {
+        self.resources().fetch::<T>()
     }
 }
 
@@ -1078,6 +1088,17 @@ impl Scheduler {
                             match value {
                                 // If we see an integer, then treat it as ticks-until-next-wake.
                                 LuaValue::Integer(i) => {
+                                    self.queue.push(Wakeup::Timed {
+                                        thread: new_index,
+                                        // Threads aren't allowed to yield and resume on the same tick
+                                        // forever.
+                                        scheduled_for: self.discrete + na::max(i, 1) as u64,
+                                    });
+                                }
+
+                                // If we see a float, then round it and treat it as ticks-until-next-wake.
+                                LuaValue::Number(f) => {
+                                    let i = f as i64;
                                     self.queue.push(Wakeup::Timed {
                                         thread: new_index,
                                         // Threads aren't allowed to yield and resume on the same tick
