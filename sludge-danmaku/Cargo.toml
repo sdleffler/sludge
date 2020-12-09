@@ -24,6 +24,12 @@ stack_dst = { version = "0.6.0", features = ["unsize"] }
 nalgebra = { version = "0.22.0", features = ["mint", "serde-serialize"] }
 ncollide2d = "0.24.0"
 sludge-2d = { git = "https://github.com/sdleffler/sludge", branch = "main" }
+thunderdome = "0.4.0"
+rand_xoshiro = "0.4.0"
+dynamic-pool = "0.2.2"
+rlua_serde = { git = "https://github.com/sdleffler/rlua_serde" }
+serde-hashkey = { git = "https://github.com/sdleffler/serde-hashkey", branch = "main", features = ["ordered-float"] }
+serde-transcode = "1.1.0"
 
 [dev-dependencies]
 shrev = "1.1.1"
