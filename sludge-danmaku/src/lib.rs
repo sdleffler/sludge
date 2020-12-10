@@ -101,6 +101,7 @@ pub struct Danmaku {
     bullet_metatypes: HashMap<String, BulletMetatype>,
     bullet_types: Arc<RwLock<BulletTypes>>,
     bundler_pool: DynamicPool<Bundler>,
+    clear_delay: f32,
 }
 
 impl Danmaku {
@@ -120,6 +121,7 @@ impl Danmaku {
             bullet_metatypes,
             bullet_types,
             bundler_pool,
+            clear_delay: 0.,
         }
     }
 
@@ -161,7 +163,17 @@ impl Danmaku {
         self.bundler_pool.take()
     }
 
+    pub fn set_clear_delay(&mut self, dly: f32) {
+        self.clear_delay = self.clear_delay.max(dly);
+    }
+
+    pub fn is_clear_delay_active(&self) -> bool {
+        self.clear_delay > 0.
+    }
+
     pub fn update(&mut self, world: &mut World, dt: f32) {
+        self.clear_delay = (self.clear_delay - dt).max(0.);
+
         for (_e, (mut proj, mut quadratic, maximum)) in world
             .query::<(
                 &mut Projectile,
@@ -296,6 +308,7 @@ pub trait DanmakuResourceExt {
     fn get_bullet_type<S>(&self, name: &S) -> Result<BulletTypeId>
     where
         S: AsRef<str> + ?Sized;
+    fn set_clear_delay(&self, delay: f32) -> Result<()>;
 }
 
 impl<'a, R: Resources<'a>> DanmakuResourceExt for R {
@@ -337,6 +350,14 @@ impl<'a, R: Resources<'a>> DanmakuResourceExt for R {
             .get(name.as_ref())
             .copied()
             .ok_or_else(|| anyhow!("no such bullet type `{}`", name.as_ref()))
+    }
+
+    fn set_clear_delay(&self, delay: f32) -> Result<()> {
+        self.fetch_one::<Danmaku>()?
+            .borrow_mut()
+            .set_clear_delay(delay);
+
+        Ok(())
     }
 }
 
@@ -493,6 +514,10 @@ pub mod api {
         lua: LuaContext<'lua>,
         (closure, maybe_lua_group): (LuaFunction<'lua>, Option<LuaAnyUserData<'lua>>),
     ) -> LuaResult<()> {
+        if lua.fetch_one::<Danmaku>()?.borrow().is_clear_delay_active() {
+            return Ok(());
+        }
+
         let mut maybe_group = maybe_lua_group
             .as_ref()
             .map(LuaAnyUserData::borrow_mut::<Group>)
@@ -514,6 +539,33 @@ pub mod api {
             group.entities.extend(entities);
         }
 
+        Ok(())
+    }
+
+    pub fn clear_screen<'lua>(lua: LuaContext<'lua>, delay: Option<f32>) -> LuaResult<()> {
+        let (world, danmaku) = lua.fetch::<(World, Danmaku)>()?;
+        let world = world.borrow();
+        let mut buf = world.get_buffer();
+        world
+            .query::<()>()
+            .with::<Projectile>()
+            .iter()
+            .for_each(|(e, ())| {
+                buf.despawn(e);
+            });
+        world.queue_buffer(buf);
+
+        if let Some(delay) = delay {
+            danmaku.borrow_mut().set_clear_delay(delay);
+        }
+
+        Ok(())
+    }
+
+    pub fn set_clear_delay<'lua>(lua: LuaContext<'lua>, delay: f32) -> LuaResult<()> {
+        lua.fetch_one::<Danmaku>()?
+            .borrow_mut()
+            .set_clear_delay(delay);
         Ok(())
     }
 
@@ -626,6 +678,8 @@ pub mod api {
             ("bullet", bullet::load(lua)?),
             ("new_group", wrap(lua, new_group)?),
             ("spawn", wrap(lua, spawn)?),
+            ("clear_screen", wrap(lua, clear_screen)?),
+            ("set_clear_delay", wrap(lua, set_clear_delay)?),
         ])?;
         Ok(LuaValue::Table(t))
     }

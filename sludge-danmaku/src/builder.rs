@@ -735,6 +735,14 @@ impl LuaUserData for LuaPatternBuilderUserData {
         });
 
         methods.add_function(
+            "add_velocity",
+            |_lua, (this, x, y, a): (LuaAnyUserData, f32, f32, f32)| {
+                this.get_user_value::<LuaFunction>()?
+                    .call::<_, ()>(("add_velocity", x, y, a))
+            },
+        );
+
+        methods.add_function(
             "add_linear_velocity",
             |_lua, (this, x, y): (LuaAnyUserData, f32, f32)| {
                 this.get_user_value::<LuaFunction>()?
@@ -743,10 +751,34 @@ impl LuaUserData for LuaPatternBuilderUserData {
         );
 
         methods.add_function(
+            "add_angular_velocity",
+            |_lua, (this, a): (LuaAnyUserData, f32)| {
+                this.get_user_value::<LuaFunction>()?
+                    .call::<_, ()>(("add_velocity", 0., 0., a))
+            },
+        );
+
+        methods.add_function(
+            "add_acceleration",
+            |_lua, (this, x, y, a): (LuaAnyUserData, f32, f32, f32)| {
+                this.get_user_value::<LuaFunction>()?
+                    .call::<_, ()>(("add_acceleration", x, y, a))
+            },
+        );
+
+        methods.add_function(
             "add_linear_acceleration",
             |_lua, (this, x, y): (LuaAnyUserData, f32, f32)| {
                 this.get_user_value::<LuaFunction>()?
                     .call::<_, ()>(("add_acceleration", x, y, 0.))
+            },
+        );
+
+        methods.add_function(
+            "add_angular_acceleration",
+            |_lua, (this, a): (LuaAnyUserData, f32)| {
+                this.get_user_value::<LuaFunction>()?
+                    .call::<_, ()>(("add_acceleration", 0., 0., a))
             },
         );
 
